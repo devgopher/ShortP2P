@@ -1,0 +1,35 @@
+# Build output
+bin/
+obj/
+
+# User-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.sln.ide
+*.vscode/
+
+# Rider/Visual Studio Code/JetBrains
+.idea/
+.vscode/
+
+# .NET tooling
+.ionide/
+.resharper/
+
+# NuGet
+packages/
+*.nupkg
+
+# Test / coverage
+coverage/
+TestResults/
+*.coverage
+*.coveragexml
+*.opencover.xml
+
+# OS
+Thumbs.db
+ehthumbs.db
+
