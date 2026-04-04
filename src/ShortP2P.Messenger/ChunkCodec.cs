@@ -7,7 +7,7 @@ namespace ShortP2P.Messenger;
 internal static class ChunkCodec
 {
     /// <summary>16 байт Guid + 4 индекс + 4 всего.</summary>
-    public const int HeaderBytes = 24;
+    private const int HeaderBytes = 24;
 
     public static int MaxPayloadPerChunk(P2PSession session)
     {
@@ -16,9 +16,9 @@ internal static class ChunkCodec
 
     public static byte[] BuildChunk(Guid messageId, int chunkIndex, int totalChunks, ReadOnlySpan<byte> payloadSlice)
     {
-        if (chunkIndex < 0) throw new ArgumentOutOfRangeException(nameof(chunkIndex));
-        if (totalChunks <= 0) throw new ArgumentOutOfRangeException(nameof(totalChunks));
-        if (chunkIndex >= totalChunks) throw new ArgumentOutOfRangeException(nameof(chunkIndex));
+        ArgumentOutOfRangeException.ThrowIfNegative(chunkIndex);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(totalChunks);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(chunkIndex, totalChunks);
 
         var plain = new byte[HeaderBytes + payloadSlice.Length];
         if (!messageId.TryWriteBytes(plain.AsSpan(0, 16)))
@@ -33,10 +33,10 @@ internal static class ChunkCodec
         out int totalChunks, out ReadOnlySpan<byte> payload)
     {
         if (plaintext.Length < HeaderBytes) throw new CryptographicException("Chunk plaintext is too short.");
-        messageId = new Guid(plaintext.Slice(0, 16));
+        messageId = new Guid(plaintext[..16]);
         chunkIndex = BinaryPrimitives.ReadInt32BigEndian(plaintext.Slice(16, 4));
         totalChunks = BinaryPrimitives.ReadInt32BigEndian(plaintext.Slice(20, 4));
-        payload = plaintext.Slice(HeaderBytes);
+        payload = plaintext[HeaderBytes..];
         if (totalChunks <= 0 || chunkIndex < 0 || chunkIndex >= totalChunks)
             throw new CryptographicException("Invalid chunk header.");
     }

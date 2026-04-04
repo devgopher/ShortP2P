@@ -17,7 +17,9 @@ public sealed class UdpPeerDiscoveryService : IPeerDiscoveryService
     private readonly ConcurrentDictionary<Guid, DiscoveredPeer> _peers = new();
     private readonly UdpClient _udp;
     private Task? _announceTask;
-
+    private const int AnnouncePauseMs = 1000;
+    private const int ReceivePauseMs = 10;
+    
     private CancellationTokenSource? _cts;
     private Task? _receiveTask;
     private Task? _staleTask;
@@ -66,10 +68,10 @@ public sealed class UdpPeerDiscoveryService : IPeerDiscoveryService
 
         _udp.Close();
 
-        var tasks = new[] { _receiveTask, _announceTask, _staleTask }.Where(t => t != null).Cast<Task>().ToArray();
+        var tasks = new[] { _receiveTask, _announceTask, _staleTask }.Where(t => t != null).ToArray();
         try
         {
-            await Task.WhenAll(tasks).ConfigureAwait(false);
+            await Task.WhenAll(tasks!).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -119,6 +121,8 @@ public sealed class UdpPeerDiscoveryService : IPeerDiscoveryService
             {
                 break;
             }
+        
+        await Task.Delay(ReceivePauseMs, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task AnnounceLoopAsync(CancellationToken cancellationToken)
@@ -149,6 +153,8 @@ public sealed class UdpPeerDiscoveryService : IPeerDiscoveryService
             {
                 break;
             }
+
+            await Task.Delay(AnnouncePauseMs, cancellationToken);
         }
     }
 
