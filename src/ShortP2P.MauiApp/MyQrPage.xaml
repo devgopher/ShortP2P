@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="ShortP2P.MauiApp.MyQrPage"
+             Title="My QR code">
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="12">
+            <Label
+                Text="Show this code to a peer so they can add you. The IP is guessed from this device; if you use VPN or multiple NICs, they may need to correct the host after scanning."
+                FontSize="12"
+                TextColor="Gray" />
+            <Image x:Name="QrImage"
+                   HeightRequest="280"
+                   WidthRequest="280"
+                   Aspect="AspectFit"
+                   HorizontalOptions="Center"
+                   BackgroundColor="#F5F5F5" />
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

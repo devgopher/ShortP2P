@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<!-- .NET 8 MAUI: add net8.0-android;net8.0-ios;net8.0-maccatalyst to TargetFrameworks after `dotnet workload restore` -->
+		<TargetFrameworks>net8.0-windows10.0.19041.0</TargetFrameworks>
+
+		<OutputType>Exe</OutputType>
+		<RootNamespace>ShortP2P.MauiApp</RootNamespace>
+		<UseMaui>true</UseMaui>
+		<SingleProject>true</SingleProject>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+
+		<ApplicationTitle>ShortP2P</ApplicationTitle>
+		<ApplicationId>com.shortp2p.mauiapp</ApplicationId>
+		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+		<ApplicationVersion>1</ApplicationVersion>
+
+		<WindowsPackageType>None</WindowsPackageType>
+
+		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
+		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
+		<MauiImage Include="Resources\Images\*" />
+		<MauiImage Update="Resources\Images\dotnet_bot.png" Resize="True" BaseSize="300,185" />
+		<MauiFont Include="Resources\Fonts\*" />
+		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Maui.Controls" Version="8.0.100" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.1" />
+	</ItemGroup>
+
+	<!--
+	  Windows target uses Windows App SDK / Windows App Runtime 1.5.
+	  If the app fails to start with a missing-runtime error, install the matching runtime from:
+	  https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads
+	  (e.g. "Windows App Runtime 1.5" x64 installer for unpackaged apps.)
+
+	  Optional: ship runtime with the app (larger output) when publishing unpackaged:
+	  dotnet publish -f net8.0-windows10.0.19041.0 -c Release -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:RuntimeIdentifier=win10-x64
+	-->
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+		<PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240802000" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\ShortP2P.Client\ShortP2P.Client.csproj" />
+	</ItemGroup>
+
+</Project>

@@ -11,7 +11,7 @@ internal static class ChunkCodec
 
     public static int MaxPayloadPerChunk(P2PSession session)
     {
-        return P2PSession.MaxPlainTextBytes - HeaderBytes;
+        return session.MaxPlaintextBytes - HeaderBytes;
     }
 
     public static byte[] BuildChunk(Guid messageId, int chunkIndex, int totalChunks, ReadOnlySpan<byte> payloadSlice)

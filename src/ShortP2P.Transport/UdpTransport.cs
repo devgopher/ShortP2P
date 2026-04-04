@@ -30,14 +30,7 @@ public sealed class UdpTransport(int listenPort) : ITransport
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
         if (_cts == null) return;
-        try
-        {
-            await _cts.CancelAsync().ConfigureAwait(false);
-        }
-        catch
-        {
-            _cts.Cancel();
-        }
+        _cts.Cancel();
 
         _udp.Close();
 

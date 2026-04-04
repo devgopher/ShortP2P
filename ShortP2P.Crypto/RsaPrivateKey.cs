@@ -8,7 +8,7 @@ namespace ShortP2P.Crypto
     /// </summary>
     public sealed class RsaPrivateKey
     {
-        internal RsaPrivateKey(RSAParameters parameters)
+        public RsaPrivateKey(RSAParameters parameters)
         {
             if (parameters.Modulus == null || parameters.Modulus.Length == 0)
                 throw new ArgumentException("Invalid Modulus.", nameof(parameters));
