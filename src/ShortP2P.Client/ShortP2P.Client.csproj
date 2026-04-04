@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
+    <PackageReference Include="sqlite-net-pcl" Version="1.9.172" />
+    <PackageReference Include="SQLitePCLRaw.bundle_green" Version="2.1.10" />
+    <PackageReference Include="ZXing.Net" Version="0.16.10" />
+    <PackageReference Include="ZXing.Net.Bindings.ImageSharp.V3" Version="0.16.17" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\ShortP2P.Crypto\ShortP2P.Crypto.csproj" />
+    <ProjectReference Include="..\ShortP2P.Transport\ShortP2P.Transport.csproj" />
+    <ProjectReference Include="..\ShortP2P.Messenger\ShortP2P.Messenger.csproj" />
+    <ProjectReference Include="..\ShortP2P.Discovery\ShortP2P.Discovery.csproj" />
+  </ItemGroup>
+
+</Project>

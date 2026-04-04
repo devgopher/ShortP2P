@@ -42,7 +42,7 @@ public class P2PCryptoTests
         Assert.NotNull(aliceSession);
         Assert.NotNull(bobSession);
 
-        var sizes = new List<int> { 0, 1, 15, P2PSession.MaxPlainTextBytes };
+        var sizes = new List<int> { 0, 1, 15, aliceSession.MaxPlaintextBytes };
         foreach (var size in sizes)
         {
             var plaintext = RandomBytes(size);

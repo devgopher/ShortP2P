@@ -15,17 +15,6 @@ namespace ShortP2P.Crypto
         private const int TagBytes = 16; // truncated HMAC
         private const int AesBlockBytes = 16;
 
-        /// <summary>
-        ///     Maximum plaintext length that guarantees encrypted packet size <= 128 bytes.
-        ///     packet = IV(16) + ciphertext(padded to 16) + tag(16) <= 128
-        ///     => paddedLen <= 96 (since IV+tag = 32)
-        ///     With PKCS7, AES always adds at least one padding block.
-        ///     paddedLen = (floor(plaintextLen/16) + 1) * 16
-        ///     => (floor(plaintextLen/16) + 1) <= 6 => floor(plaintextLen/16) <= 5
-        ///     => plaintextLen <= 5*16 + 15 = 95
-        /// </summary>
-        public const int MaxPlainTextBytes = 95;
-
         private readonly byte[] _aesKey; // 16 bytes (AES-128)
         private readonly byte[] _macKey; // 32 bytes (for HMAC-SHA256)
 
@@ -40,15 +29,25 @@ namespace ShortP2P.Crypto
             _macKey = (byte[])macKey.Clone();
         }
 
-        public int MaxPlaintextBytes { get; set; }
-
+        /// <summary>
+        ///     Maximum plaintext length that guarantees encrypted packet size &lt;= 128 bytes.
+        /// </summary>
+        public int MaxPlaintextBytes
+        {
+            get
+            {
+                // packet = IV(16) + ciphertext(padded to 16) + tag(16) <= 128
+                // => paddedLen <= 96; PKCS7 adds at least one block => plaintextLen <= 95
+                return 95;
+            }
+        }
 
         public byte[] Encrypt(byte[] plaintext)
         {
             if (plaintext == null) throw new ArgumentNullException(nameof(plaintext));
-            if (plaintext.Length > MaxPlainTextBytes)
+            if (plaintext.Length > MaxPlaintextBytes)
                 throw new ArgumentException(
-                    $"Plaintext is too large. Max is {MaxPlainTextBytes} bytes for <= {MaxEncryptedPacketBytes}-byte packets.",
+                    $"Plaintext is too large. Max is {MaxPlaintextBytes} bytes for <= {MaxEncryptedPacketBytes}-byte packets.",
                     nameof(plaintext));
 
             var iv = new byte[IvBytes];

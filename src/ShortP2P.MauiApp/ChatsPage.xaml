@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="ShortP2P.MauiApp.ChatsPage"
+             Title="Chats">
+    <ContentPage.ToolbarItems>
+        <ToolbarItem Text="Add" Order="Primary" Priority="0" Clicked="OnAddChatClicked" />
+        <ToolbarItem Text="My QR" Order="Primary" Priority="1" Clicked="OnMyQrClicked" />
+        <ToolbarItem Text="Copy keys" Order="Secondary" Clicked="OnCopyKeysClicked" />
+        <ToolbarItem Text="Logout" Order="Secondary" Clicked="OnLogoutClicked" />
+    </ContentPage.ToolbarItems>
+
+    <Grid RowDefinitions="Auto,*" Padding="12" RowSpacing="8">
+        <VerticalStackLayout Grid.Row="0" Spacing="4">
+            <Label x:Name="ProfileLabel" FontSize="12" TextColor="Gray" />
+            <Label Text="P2P chats (UDP). Add a peer manually, or use My QR / scan a peer QR image when adding a chat." FontSize="12" TextColor="Gray" />
+        </VerticalStackLayout>
+        <CollectionView x:Name="ChatsCollection" Grid.Row="1" SelectionMode="Single" SelectionChanged="OnChatSelected">
+            <CollectionView.ItemTemplate>
+                <DataTemplate>
+                    <Grid Padding="12,8" ColumnDefinitions="*,Auto">
+                        <VerticalStackLayout Grid.Column="0" Spacing="2">
+                            <Label Text="{Binding PeerNickname}" FontSize="18" />
+                            <Label Text="{Binding PeerNetworkIdShort}" FontSize="12" TextColor="Gray" />
+                        </VerticalStackLayout>
+                        <Label Grid.Column="1" Text="›" VerticalOptions="Center" FontSize="20" TextColor="Gray" />
+                    </Grid>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+    </Grid>
+</ContentPage>

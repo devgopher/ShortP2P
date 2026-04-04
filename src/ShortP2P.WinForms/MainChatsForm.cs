@@ -1,0 +1,157 @@
+using ShortP2P.Client.Data;
+using ShortP2P.Client.Services;
+
+namespace ShortP2P.WinForms;
+
+public sealed class MainChatsForm : Form
+{
+    private readonly AuthService _auth;
+    private readonly ChatRepository _chats;
+    private readonly Label _profile = new() { AutoSize = true };
+    private readonly ListBox _list = new() { IntegralHeight = false, Height = 280, Width = 480 };
+
+    public MainChatsForm(AuthService auth, ChatRepository chats)
+    {
+        _auth = auth;
+        _chats = chats;
+        Text = "ShortP2P — Chats";
+        StartPosition = FormStartPosition.CenterScreen;
+        Width = 560;
+        Height = 480;
+
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 4,
+            Padding = new Padding(12),
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        var hint = new Label
+        {
+            Text = "P2P chats (UDP). Add a peer manually, or use My QR / QR from file or clipboard in Add chat.",
+            AutoSize = true,
+            ForeColor = SystemColors.GrayText,
+        };
+
+        var toolbar = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+        var btnAdd = new Button { Text = "Add chat", AutoSize = true };
+        var btnMyQr = new Button { Text = "My QR", AutoSize = true };
+        var btnCopy = new Button { Text = "Copy keys", AutoSize = true };
+        var btnLogout = new Button { Text = "Logout", AutoSize = true };
+        toolbar.Controls.Add(btnAdd);
+        toolbar.Controls.Add(btnMyQr);
+        toolbar.Controls.Add(btnCopy);
+        toolbar.Controls.Add(btnLogout);
+
+        btnAdd.Click += async (_, _) => await OnAddChatAsync().ConfigureAwait(true);
+        btnMyQr.Click += OnMyQr;
+        btnCopy.Click += OnCopyKeys;
+        btnLogout.Click += OnLogout;
+
+        _list.DisplayMember = nameof(ChatEntity.PeerNickname);
+        _list.ValueMember = nameof(ChatEntity.Id);
+        _list.DoubleClick += async (_, _) => await OpenSelectedChatAsync().ConfigureAwait(true);
+
+        root.Controls.Add(_profile, 0, 0);
+        root.Controls.Add(hint, 0, 1);
+        root.Controls.Add(_list, 0, 2);
+        root.Controls.Add(toolbar, 0, 3);
+        _list.Dock = DockStyle.Fill;
+        Controls.Add(root);
+
+        Shown += async (_, _) => await RefreshAsync().ConfigureAwait(true);
+        Activated += async (_, _) => await RefreshAsync().ConfigureAwait(true);
+    }
+
+    private async Task RefreshAsync()
+    {
+        var u = _auth.CurrentUser;
+        if (u == null)
+        {
+            DialogResult = DialogResult.Abort;
+            Close();
+            return;
+        }
+
+        _profile.Text = $"You: {u.Nickname} · id {u.NetworkIdShort} · local UDP {u.DataUdpPort}";
+        var list = await _chats.ListChatsAsync(u.Id).ConfigureAwait(true);
+        _list.BeginUpdate();
+        _list.Items.Clear();
+        foreach (var c in list)
+            _list.Items.Add(c);
+        _list.EndUpdate();
+    }
+
+    private void OnMyQr(object? sender, EventArgs e)
+    {
+        using var f = new MyQrForm(_auth);
+        f.ShowDialog(this);
+    }
+
+    private async Task OnAddChatAsync()
+    {
+        using var dlg = new AddChatForm();
+        if (dlg.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        var u = _auth.CurrentUser;
+        if (u == null) return;
+
+        try
+        {
+            RsaKeySerializer.DeserializePublic(dlg.PeerPublicKeyJson);
+        }
+        catch
+        {
+            MessageBox.Show(this, "Invalid public key JSON.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        await _chats.AddChatAsync(u.Id, dlg.PeerNickname, dlg.PeerNetworkIdShort, dlg.PeerPublicKeyJson.Trim(),
+            dlg.PeerHost, dlg.PeerPort).ConfigureAwait(true);
+        await RefreshAsync().ConfigureAwait(true);
+    }
+
+    private void OnCopyKeys(object? sender, EventArgs e)
+    {
+        var u = _auth.CurrentUser;
+        if (u == null) return;
+        var pub = RsaKeySerializer.SerializePublic(_auth.GetCurrentPublicKey());
+        var text = $"Network id: {u.NetworkIdShort}\r\nPublic key JSON:\r\n{pub}";
+        try
+        {
+            Clipboard.SetText(text);
+            MessageBox.Show(this, "Network id and public key JSON copied to clipboard.", "Copied",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Clipboard", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private async void OnLogout(object? sender, EventArgs e)
+    {
+        await _auth.LogoutAsync().ConfigureAwait(true);
+        DialogResult = DialogResult.Retry;
+        Close();
+    }
+
+    private async Task OpenSelectedChatAsync()
+    {
+        if (_list.SelectedItem is not ChatEntity chat)
+            return;
+
+        var u = _auth.CurrentUser;
+        if (u == null) return;
+
+        using var win = new ChatForm(chat, u, _auth, _chats);
+        win.ShowDialog(this);
+        await RefreshAsync().ConfigureAwait(true);
+    }
+}

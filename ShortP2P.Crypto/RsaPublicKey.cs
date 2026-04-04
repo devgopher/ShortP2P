@@ -8,7 +8,7 @@ namespace ShortP2P.Crypto
     /// </summary>
     public sealed class RsaPublicKey
     {
-        internal RsaPublicKey(byte[] modulus, byte[] exponent)
+        public RsaPublicKey(byte[] modulus, byte[] exponent)
         {
             if (modulus == null) throw new ArgumentNullException(nameof(modulus));
             if (exponent == null) throw new ArgumentNullException(nameof(exponent));
