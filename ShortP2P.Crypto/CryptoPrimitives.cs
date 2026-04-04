@@ -8,20 +8,21 @@ namespace ShortP2P.Crypto
         {
             if (arrays == null) throw new ArgumentNullException(nameof(arrays));
 
-            int total = 0;
-            for (int i = 0; i < arrays.Length; i++)
+            var total = 0;
+            for (var i = 0; i < arrays.Length; i++)
             {
                 if (arrays[i] == null) throw new ArgumentNullException(nameof(arrays), "Null array is not allowed.");
                 total += arrays[i].Length;
             }
 
-            byte[] result = new byte[total];
-            int offset = 0;
-            for (int i = 0; i < arrays.Length; i++)
+            var result = new byte[total];
+            var offset = 0;
+            for (var i = 0; i < arrays.Length; i++)
             {
                 Buffer.BlockCopy(arrays[i], 0, result, offset, arrays[i].Length);
                 offset += arrays[i].Length;
             }
+
             return result;
         }
 
@@ -31,11 +32,10 @@ namespace ShortP2P.Crypto
             if (b == null) throw new ArgumentNullException(nameof(b));
             if (a.Length != b.Length) return false;
 
-            int diff = 0;
-            for (int i = 0; i < a.Length; i++)
+            var diff = 0;
+            for (var i = 0; i < a.Length; i++)
                 diff |= a[i] ^ b[i];
             return diff == 0;
         }
     }
 }
-

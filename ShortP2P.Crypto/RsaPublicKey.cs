@@ -4,13 +4,10 @@ using System.Security.Cryptography;
 namespace ShortP2P.Crypto
 {
     /// <summary>
-    /// RSA public key parameters (Modulus + Exponent).
+    ///     RSA public key parameters (Modulus + Exponent).
     /// </summary>
     public sealed class RsaPublicKey
     {
-        public byte[] Modulus { get; }
-        public byte[] Exponent { get; }
-
         internal RsaPublicKey(byte[] modulus, byte[] exponent)
         {
             if (modulus == null) throw new ArgumentNullException(nameof(modulus));
@@ -22,14 +19,16 @@ namespace ShortP2P.Crypto
             Exponent = (byte[])exponent.Clone();
         }
 
+        public byte[] Modulus { get; }
+        public byte[] Exponent { get; }
+
         internal RSAParameters ToParameters()
         {
             return new RSAParameters
             {
                 Modulus = (byte[])Modulus.Clone(),
-                Exponent = (byte[])Exponent.Clone(),
+                Exponent = (byte[])Exponent.Clone()
             };
         }
     }
 }
-

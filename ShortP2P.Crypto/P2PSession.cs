@@ -4,9 +4,9 @@ using System.Security.Cryptography;
 namespace ShortP2P.Crypto
 {
     /// <summary>
-    /// Established session keys derived from ECDH.
-    /// Provides packet encryption/decryption (AES-CBC + HMAC-SHA256 truncated).
-    /// Encrypted packet size is limited to <= 128 bytes.
+    ///     Established session keys derived from ECDH.
+    ///     Provides packet encryption/decryption (AES-CBC + HMAC-SHA256 truncated).
+    ///     Encrypted packet size is limited to <= 128 bytes.
     /// </summary>
     public sealed class P2PSession
     {
@@ -14,6 +14,17 @@ namespace ShortP2P.Crypto
         private const int IvBytes = 16;
         private const int TagBytes = 16; // truncated HMAC
         private const int AesBlockBytes = 16;
+
+        /// <summary>
+        ///     Maximum plaintext length that guarantees encrypted packet size <= 128 bytes.
+        ///     packet = IV(16) + ciphertext(padded to 16) + tag(16) <= 128
+        ///     => paddedLen <= 96 (since IV+tag = 32)
+        ///     With PKCS7, AES always adds at least one padding block.
+        ///     paddedLen = (floor(plaintextLen/16) + 1) * 16
+        ///     => (floor(plaintextLen/16) + 1) <= 6 => floor(plaintextLen/16) <= 5
+        ///     => plaintextLen <= 5*16 + 15 = 95
+        /// </summary>
+        public const int MaxPlainTextBytes = 95;
 
         private readonly byte[] _aesKey; // 16 bytes (AES-128)
         private readonly byte[] _macKey; // 32 bytes (for HMAC-SHA256)
@@ -29,30 +40,18 @@ namespace ShortP2P.Crypto
             _macKey = (byte[])macKey.Clone();
         }
 
-        /// <summary>
-        /// Maximum plaintext length that guarantees encrypted packet size <= 128 bytes.
-        /// </summary>
-        public int MaxPlaintextBytes
-        {
-            get
-            {
-                // packet = IV(16) + ciphertext(padded to 16) + tag(16) <= 128
-                // => paddedLen <= 96 (since IV+tag = 32)
-                // With PKCS7, AES always adds at least one padding block.
-                // paddedLen = (floor(plaintextLen/16) + 1) * 16
-                // => (floor(plaintextLen/16) + 1) <= 6 => floor(plaintextLen/16) <= 5
-                // => plaintextLen <= 5*16 + 15 = 95
-                return 95;
-            }
-        }
+        public int MaxPlaintextBytes { get; set; }
+
 
         public byte[] Encrypt(byte[] plaintext)
         {
             if (plaintext == null) throw new ArgumentNullException(nameof(plaintext));
-            if (plaintext.Length > MaxPlaintextBytes)
-                throw new ArgumentException($"Plaintext is too large. Max is {MaxPlaintextBytes} bytes for <= {MaxEncryptedPacketBytes}-byte packets.", nameof(plaintext));
+            if (plaintext.Length > MaxPlainTextBytes)
+                throw new ArgumentException(
+                    $"Plaintext is too large. Max is {MaxPlainTextBytes} bytes for <= {MaxEncryptedPacketBytes}-byte packets.",
+                    nameof(plaintext));
 
-            byte[] iv = new byte[IvBytes];
+            var iv = new byte[IvBytes];
             using (var rng = RandomNumberGenerator.Create())
             {
                 rng.GetBytes(iv);
@@ -73,16 +72,18 @@ namespace ShortP2P.Crypto
                 }
             }
 
-            int packetLen = IvBytes + ciphertext.Length + TagBytes;
+            var packetLen = IvBytes + ciphertext.Length + TagBytes;
             if (packetLen > MaxEncryptedPacketBytes)
-                throw new CryptographicException($"Encrypted packet would be {packetLen} bytes, which exceeds the limit of {MaxEncryptedPacketBytes} bytes.");
+                throw new CryptographicException(
+                    $"Encrypted packet would be {packetLen} bytes, which exceeds the limit of {MaxEncryptedPacketBytes} bytes.");
 
-            byte[] tag = ComputeTag(iv, ciphertext);
+            var tag = ComputeTag(iv, ciphertext);
 
             var packet = new byte[packetLen];
             Buffer.BlockCopy(iv, 0, packet, 0, IvBytes);
             Buffer.BlockCopy(ciphertext, 0, packet, IvBytes, ciphertext.Length);
             Buffer.BlockCopy(tag, 0, packet, IvBytes + ciphertext.Length, TagBytes);
+
             return packet;
         }
 
@@ -90,26 +91,29 @@ namespace ShortP2P.Crypto
         {
             if (packet == null) throw new ArgumentNullException(nameof(packet));
             if (packet.Length > MaxEncryptedPacketBytes)
-                throw new ArgumentException($"Packet length exceeds limit {MaxEncryptedPacketBytes} bytes.", nameof(packet));
+                throw new ArgumentException($"Packet length exceeds limit {MaxEncryptedPacketBytes} bytes.",
+                    nameof(packet));
             if (packet.Length < IvBytes + TagBytes)
                 throw new ArgumentException("Packet is too short.", nameof(packet));
 
-            int ciphertextLen = packet.Length - IvBytes - TagBytes;
+            var ciphertextLen = packet.Length - IvBytes - TagBytes;
             if (ciphertextLen <= 0)
                 throw new ArgumentException("Packet ciphertext length is invalid.", nameof(packet));
             if (ciphertextLen % AesBlockBytes != 0)
-                throw new ArgumentException($"Invalid ciphertext length: {ciphertextLen} (must be multiple of {AesBlockBytes}).", nameof(packet));
+                throw new ArgumentException(
+                    $"Invalid ciphertext length: {ciphertextLen} (must be multiple of {AesBlockBytes}).",
+                    nameof(packet));
 
-            byte[] iv = new byte[IvBytes];
+            var iv = new byte[IvBytes];
             Buffer.BlockCopy(packet, 0, iv, 0, IvBytes);
 
-            byte[] ciphertext = new byte[ciphertextLen];
+            var ciphertext = new byte[ciphertextLen];
             Buffer.BlockCopy(packet, IvBytes, ciphertext, 0, ciphertextLen);
 
-            byte[] receivedTag = new byte[TagBytes];
+            var receivedTag = new byte[TagBytes];
             Buffer.BlockCopy(packet, IvBytes + ciphertextLen, receivedTag, 0, TagBytes);
 
-            byte[] expectedTag = ComputeTag(iv, ciphertext);
+            var expectedTag = ComputeTag(iv, ciphertext);
             if (!CryptoPrimitives.ConstantTimeEquals(expectedTag, receivedTag))
                 throw new CryptographicException("Invalid packet authentication tag.");
 
@@ -130,15 +134,15 @@ namespace ShortP2P.Crypto
 
         private byte[] ComputeTag(byte[] iv, byte[] ciphertext)
         {
-            byte[] input = CryptoPrimitives.Concat(iv, ciphertext);
+            var input = CryptoPrimitives.Concat(iv, ciphertext);
             using (var hmac = new HMACSHA256(_macKey))
             {
-                byte[] full = hmac.ComputeHash(input);
-                byte[] tag = new byte[TagBytes];
+                var full = hmac.ComputeHash(input);
+                var tag = new byte[TagBytes];
                 Buffer.BlockCopy(full, 0, tag, 0, TagBytes);
+
                 return tag;
             }
         }
     }
 }
-

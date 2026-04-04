@@ -1,9 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Security.Cryptography;
-using ShortP2P.Crypto;
-using Xunit;
 
 namespace ShortP2P.Crypto.Tests;
 
@@ -47,7 +42,7 @@ public class P2PCryptoTests
         Assert.NotNull(aliceSession);
         Assert.NotNull(bobSession);
 
-        var sizes = new List<int> { 0, 1, 15, aliceSession.MaxPlaintextBytes };
+        var sizes = new List<int> { 0, 1, 15, P2PSession.MaxPlainTextBytes };
         foreach (var size in sizes)
         {
             var plaintext = RandomBytes(size);
@@ -73,7 +68,7 @@ public class P2PCryptoTests
         Assert.True(encrypted.Length <= 128);
 
         var tampered = (byte[])encrypted.Clone();
-        tampered[tampered.Length - 1] ^= 0x01;
+        tampered[^1] ^= 0x01;
 
         Assert.Throws<CryptographicException>(() => session.Decrypt(tampered));
     }
@@ -87,17 +82,24 @@ public class P2PCryptoTests
         var session = hs.Session;
 
         var tooLarge = new byte[session.MaxPlaintextBytes + 1];
+
         Assert.Throws<ArgumentException>(() => session.Encrypt(tooLarge));
     }
 
     private static byte[] RandomBytes(int len)
     {
-        if (len < 0) throw new ArgumentOutOfRangeException(nameof(len));
-        if (len == 0) return Array.Empty<byte>();
+        switch (len)
+        {
+            case < 0:
+                throw new ArgumentOutOfRangeException(nameof(len));
+            case 0:
+                return [];
+        }
 
         var data = new byte[len];
         using var rng = RandomNumberGenerator.Create();
         rng.GetBytes(data);
+
         return data;
     }
 }

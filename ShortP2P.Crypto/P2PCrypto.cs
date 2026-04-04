@@ -1,20 +1,21 @@
 using System;
+using System.Security.Cryptography;
 
 namespace ShortP2P.Crypto
 {
     /// <summary>
-    /// Public facade for P2P key generation, handshake, and packet encryption.
+    ///     Public facade for P2P key generation, handshake, and packet encryption.
     /// </summary>
     public static class P2PCrypto
     {
         /// <summary>
-        /// Generates an RSA-1024 key pair for handshake.
-        /// PublicKey/PrivateKey are returned as raw RSA parameters.
+        ///     Generates an RSA-1024 key pair for handshake.
+        ///     PublicKey/PrivateKey are returned as raw RSA parameters.
         /// </summary>
         public static RsaKeyPair GenerateKeyPair()
         {
             // RSA key generation uses platform crypto; available in netstandard2.0.
-            using (var rsa = System.Security.Cryptography.RSA.Create())
+            using (var rsa = RSA.Create())
             {
                 rsa.KeySize = 1024;
                 var parameters = rsa.ExportParameters(true);
@@ -25,8 +26,8 @@ namespace ShortP2P.Crypto
         }
 
         /// <summary>
-        /// Creates a handshake packet for the peer.
-        /// The caller must provide the peer's public key.
+        ///     Creates a handshake packet for the peer.
+        ///     The caller must provide the peer's public key.
         /// </summary>
         public static byte[] CreateHandshake(RsaPublicKey remotePublicKey)
         {
@@ -34,8 +35,8 @@ namespace ShortP2P.Crypto
         }
 
         /// <summary>
-        /// Starts the handshake from the initiator side: returns the packet to send to the peer
-        /// and a ready-to-use session for encrypting packets.
+        ///     Starts the handshake from the initiator side: returns the packet to send to the peer
+        ///     and a ready-to-use session for encrypting packets.
         /// </summary>
         public static P2PHandshakeResult CreateHandshakeInitiation(RsaPublicKey remotePublicKey)
         {
@@ -43,14 +44,14 @@ namespace ShortP2P.Crypto
         }
 
         /// <summary>
-        /// Creates a session from peer handshake packet by decrypting it with the local private key.
+        ///     Creates a session from peer handshake packet by decrypting it with the local private key.
         /// </summary>
         public static P2PSession CreateSession(RsaPrivateKey localPrivateKey, byte[] remoteHandshakePacket)
         {
             if (localPrivateKey == null) throw new ArgumentNullException(nameof(localPrivateKey));
             if (remoteHandshakePacket == null) throw new ArgumentNullException(nameof(remoteHandshakePacket));
 
-            byte[] sessionKeys = P2PHandshake.DecryptHandshakePacket(localPrivateKey, remoteHandshakePacket);
+            var sessionKeys = P2PHandshake.DecryptHandshakePacket(localPrivateKey, remoteHandshakePacket);
 
             var aesKey = new byte[16];
             var macKey = new byte[32];
@@ -61,7 +62,7 @@ namespace ShortP2P.Crypto
         }
 
         /// <summary>
-        /// Convenience wrapper for <see cref="P2PSession.Encrypt(byte[])"/>.
+        ///     Convenience wrapper for <see cref="P2PSession.Encrypt(byte[])" />.
         /// </summary>
         public static byte[] Encrypt(P2PSession session, byte[] plaintext)
         {
@@ -70,7 +71,7 @@ namespace ShortP2P.Crypto
         }
 
         /// <summary>
-        /// Convenience wrapper for <see cref="P2PSession.Decrypt(byte[])"/>.
+        ///     Convenience wrapper for <see cref="P2PSession.Decrypt(byte[])" />.
         /// </summary>
         public static byte[] Decrypt(P2PSession session, byte[] packet)
         {
@@ -79,4 +80,3 @@ namespace ShortP2P.Crypto
         }
     }
 }
-
