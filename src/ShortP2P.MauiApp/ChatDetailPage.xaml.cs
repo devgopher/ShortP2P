@@ -32,6 +32,8 @@ public partial class ChatDetailPage : ContentPage
         }
 
         Title = chat.PeerNickname;
+        PeerIdLabel.Text = $"Id: {chat.PeerNetworkIdShort}";
+        PeerEndpointLabel.Text = $"Адрес: {chat.PeerHost}:{chat.PeerPort}";
         var user = _auth.CurrentUser;
         if (user == null)
         {

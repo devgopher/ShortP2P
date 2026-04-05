@@ -27,12 +27,23 @@ public sealed class ChatForm : Form
         Width = 520;
         Height = 480;
 
+        var peerMeta = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = 44,
+            AutoSize = false,
+            ForeColor = SystemColors.GrayText,
+            Padding = new Padding(8, 6, 8, 4),
+            Text = $"Id: {chat.PeerNetworkIdShort}\r\nАдрес: {chat.PeerHost}:{chat.PeerPort}",
+        };
+
         var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 36, ColumnCount = 2 };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.Controls.Add(_input, 0, 0);
         bottom.Controls.Add(_send, 1, 0);
 
+        Controls.Add(peerMeta);
         Controls.Add(_messages);
         Controls.Add(bottom);
 
