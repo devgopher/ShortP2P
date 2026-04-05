@@ -11,6 +11,11 @@ public sealed class ChatRepository
         _db = db ?? throw new ArgumentNullException(nameof(db));
     }
 
+    /// <summary>Список чатов на главном экране: обновить после входящего приглашения и т.п.</summary>
+    public event EventHandler? ChatListChanged;
+
+    public void NotifyChatListChanged() => ChatListChanged?.Invoke(this, EventArgs.Empty);
+
     public async Task<IReadOnlyList<ChatEntity>> ListChatsAsync(int userId)
     {
         var conn = await _db.GetConnectionAsync();
@@ -41,7 +46,17 @@ public sealed class ChatRepository
             UpdatedUtcTicks = DateTime.UtcNow.Ticks,
         };
         await conn.InsertAsync(chat);
+        NotifyChatListChanged();
         return chat;
+    }
+
+    public async Task<ChatEntity?> FindChatByPeerNetworkIdAsync(int userId, string peerNetworkIdShort)
+    {
+        var id = peerNetworkIdShort.Trim();
+        var conn = await _db.GetConnectionAsync();
+        return await conn.Table<ChatEntity>()
+            .Where(c => c.UserId == userId && c.PeerNetworkIdShort == id)
+            .FirstOrDefaultAsync();
     }
 
     public async Task UpdateChatP2pRouteAsync(int chatId, string peerHost, int peerPort, string? relayRouteBlob,

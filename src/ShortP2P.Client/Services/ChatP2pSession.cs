@@ -101,6 +101,24 @@ public sealed class ChatP2pSession : IAsyncDisposable
             });
             _pumpTask = Task.Run(() => PumpAsync(_cts.Token), _cts.Token);
         }
+
+        try
+        {
+            await SendChatInviteAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // пир офлайн или сеть недоступна
+        }
+    }
+
+    private async Task SendChatInviteAsync(CancellationToken cancellationToken)
+    {
+        var host = LocalEndpointHelper.GetPreferredLanIPv4String();
+        var nid = CompressedNetworkId.FromShortString(_user.NetworkIdShort);
+        var invite = ChatInviteCodec.Build(_user.Nickname, nid,
+            RsaKeySerializer.SerializePublic(_auth.GetCurrentPublicKey()), host, _user.DataUdpPort);
+        await SendRouteRawAsync(invite, cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask SendTextAsync(string text, CancellationToken cancellationToken = default)
@@ -269,6 +287,13 @@ public sealed class ChatP2pSession : IAsyncDisposable
                 var buf = msg.Payload.ToArray();
                 if (buf.Length == 0)
                     continue;
+
+                if (buf[0] == ChatInviteCodec.FrameChatInvite)
+                {
+                    await IncomingChatInviteHandler.TryAcceptAsync(buf, _auth, _repo, cancellationToken)
+                        .ConfigureAwait(false);
+                    continue;
+                }
 
                 if (buf[0] == FrameHandshake && buf.Length == 129)
                 {

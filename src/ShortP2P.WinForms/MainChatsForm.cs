@@ -89,6 +89,21 @@ public sealed class MainChatsForm : Form
             await RefreshAsync().ConfigureAwait(true);
         };
         Activated += async (_, _) => await RefreshAsync().ConfigureAwait(true);
+        _chats.ChatListChanged += OnChatListChangedFromInvite;
+        FormClosed += (_, _) => _chats.ChatListChanged -= OnChatListChangedFromInvite;
+    }
+
+    private void OnChatListChangedFromInvite(object? sender, EventArgs e)
+    {
+        if (!IsHandleCreated || IsDisposed)
+            return;
+        try
+        {
+            BeginInvoke(new Action(() => _ = RefreshAsync()));
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
     private async Task RefreshAsync()

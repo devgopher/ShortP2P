@@ -192,7 +192,10 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
                 var relayLocalInner = ExtractLocalRelayInner(buf);
                 if (relayLocalInner != null && relayLocalInner.Length > 0)
                 {
-                    await DispatchChatOrDropAsync(relayLocalInner, msg.RemoteAddress).ConfigureAwait(false);
+                    if (relayLocalInner[0] == ChatInviteCodec.FrameChatInvite)
+                        await HandleChatInviteAsync(relayLocalInner, cancellationToken).ConfigureAwait(false);
+                    else
+                        await DispatchChatOrDropAsync(relayLocalInner, msg.RemoteAddress).ConfigureAwait(false);
                     continue;
                 }
 
@@ -225,12 +228,23 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
                     continue;
                 }
 
+                if (buf[0] == ChatInviteCodec.FrameChatInvite)
+                {
+                    await HandleChatInviteAsync(buf, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
                 await DispatchChatOrDropAsync(buf, msg.RemoteAddress).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
         {
         }
+    }
+
+    private async Task HandleChatInviteAsync(byte[] packet, CancellationToken ct)
+    {
+        await IncomingChatInviteHandler.TryAcceptAsync(packet, auth, chats, ct).ConfigureAwait(false);
     }
 
     private async Task DispatchChatOrDropAsync(ReadOnlyMemory<byte> buf, TransportAddress from)

@@ -18,6 +18,9 @@ public partial class ChatsPage : ContentPage
         _p2p = p2p;
     }
 
+    private void OnChatListChangedFromInvite(object? sender, EventArgs e) =>
+        MainThread.BeginInvokeOnMainThread(() => _ = RefreshAsync());
+
     private async void OnRoutingClicked(object? sender, EventArgs e)
     {
         var page = MauiProgram.Services.GetRequiredService<RoutingSettingsPage>();
@@ -27,6 +30,8 @@ public partial class ChatsPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
+        _chats.ChatListChanged -= OnChatListChangedFromInvite;
+        _chats.ChatListChanged += OnChatListChangedFromInvite;
         var u = _auth.CurrentUser;
         if (u != null)
         {
@@ -41,6 +46,12 @@ public partial class ChatsPage : ContentPage
         }
 
         await RefreshAsync().ConfigureAwait(true);
+    }
+
+    protected override void OnDisappearing()
+    {
+        _chats.ChatListChanged -= OnChatListChangedFromInvite;
+        base.OnDisappearing();
     }
 
     private async Task RefreshAsync()
