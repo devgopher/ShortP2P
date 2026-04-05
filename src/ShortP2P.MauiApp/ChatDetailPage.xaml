@@ -4,9 +4,15 @@
              x:Class="ShortP2P.MauiApp.ChatDetailPage"
              Title="Chat">
     <Grid RowDefinitions="Auto,*,Auto" Padding="8" RowSpacing="8">
-        <VerticalStackLayout Grid.Row="0" Spacing="2" Padding="0,0,0,4">
+        <VerticalStackLayout Grid.Row="0" Spacing="6" Padding="0,0,0,4">
             <Label x:Name="PeerIdLabel" FontSize="12" TextColor="Gray" />
-            <Label x:Name="PeerEndpointLabel" FontSize="12" TextColor="Gray" />
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="6" RowDefinitions="Auto">
+                <Label Grid.Column="0" Text="IP" FontSize="12" VerticalOptions="Center" TextColor="Gray" />
+                <Entry x:Name="PeerHostEntry" Grid.Column="1" Placeholder="192.168.1.1" />
+                <Label Grid.Column="2" Text="Порт" FontSize="12" VerticalOptions="Center" TextColor="Gray" />
+                <Entry x:Name="PeerPortEntry" Grid.Column="3" WidthRequest="88" Keyboard="Numeric" Placeholder="17201" />
+                <Button x:Name="ApplyPeerEndpointButton" Grid.Column="4" Text="Применить" Clicked="OnApplyPeerEndpointClicked" />
+            </Grid>
         </VerticalStackLayout>
         <CollectionView x:Name="MessagesCollection" Grid.Row="1">
             <CollectionView.ItemTemplate>

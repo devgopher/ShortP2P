@@ -1,3 +1,4 @@
+using System.Net;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
 
@@ -33,7 +34,8 @@ public partial class ChatDetailPage : ContentPage
 
         Title = chat.PeerNickname;
         PeerIdLabel.Text = $"Id: {chat.PeerNetworkIdShort}";
-        PeerEndpointLabel.Text = $"Адрес: {chat.PeerHost}:{chat.PeerPort}";
+        PeerHostEntry.Text = chat.PeerHost;
+        PeerPortEntry.Text = chat.PeerPort.ToString();
         var user = _auth.CurrentUser;
         if (user == null)
         {
@@ -76,6 +78,47 @@ public partial class ChatDetailPage : ContentPage
         MessagesCollection.ItemsSource = rows
             .Select(m => new MessageRow(m.Outgoing ? "You" : "Peer", m.Text))
             .ToList();
+    }
+
+    private async void OnApplyPeerEndpointClicked(object? sender, EventArgs e)
+    {
+        if (_p2pSession == null)
+        {
+            await DisplayAlert("Чат", "Сессия ещё не готова.", "OK").ConfigureAwait(true);
+            return;
+        }
+
+        var host = PeerHostEntry.Text?.Trim() ?? "";
+        if (host.Length == 0)
+        {
+            await DisplayAlert("Адрес", "Укажите IP или hostname.", "OK").ConfigureAwait(true);
+            return;
+        }
+
+        if (!int.TryParse(PeerPortEntry.Text?.Trim(), out var port) || port is < 1 or > 65535)
+        {
+            await DisplayAlert("Адрес", "Порт должен быть числом 1–65535.", "OK").ConfigureAwait(true);
+            return;
+        }
+
+        try
+        {
+            _ = IPAddress.Parse(host);
+        }
+        catch
+        {
+            await DisplayAlert("Адрес", "Некорректный IP или hostname.", "OK").ConfigureAwait(true);
+            return;
+        }
+
+        try
+        {
+            await _p2pSession.ApplyPeerEndpointAsync(host, port).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlert("Адрес", ex.Message, "OK").ConfigureAwait(true);
+        }
     }
 
     private async void OnSendClicked(object? sender, EventArgs e)

@@ -112,6 +112,32 @@ public sealed class ChatP2pSession : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    ///     Сохраняет новый IP/порт пира (прямой UDP), убирает цепочку ретрансляции и сбрасывает шифросессию.
+    /// </summary>
+    public async Task ApplyPeerEndpointAsync(string peerHost, int peerPort, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(peerHost);
+        peerHost = peerHost.Trim();
+        _ = IPAddress.Parse(peerHost);
+        if (peerPort is < 1 or > 65535)
+            throw new ArgumentOutOfRangeException(nameof(peerPort));
+
+        await _repo.UpdateChatP2pRouteAsync(_chat.Id, peerHost, peerPort, null).ConfigureAwait(false);
+        _chat.PeerHost = peerHost;
+        _chat.PeerPort = peerPort;
+        _chat.RelayRouteBlob = null;
+        RebuildRouteFromChat();
+        await ResetCryptoStateAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await SendChatInviteAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+    }
+
     private async Task SendChatInviteAsync(CancellationToken cancellationToken)
     {
         var host = LocalEndpointHelper.GetPreferredLanIPv4String();
