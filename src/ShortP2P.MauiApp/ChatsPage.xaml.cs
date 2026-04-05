@@ -8,17 +8,38 @@ public partial class ChatsPage : ContentPage
 {
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
+    private readonly UserP2pRuntime _p2p;
 
-    public ChatsPage(AuthService auth, ChatRepository chats)
+    public ChatsPage(AuthService auth, ChatRepository chats, UserP2pRuntime p2p)
     {
         InitializeComponent();
         _auth = auth;
         _chats = chats;
+        _p2p = p2p;
+    }
+
+    private async void OnRoutingClicked(object? sender, EventArgs e)
+    {
+        var page = MauiProgram.Services.GetRequiredService<RoutingSettingsPage>();
+        await Navigation.PushAsync(page).ConfigureAwait(true);
     }
 
     protected override async void OnAppearing()
     {
         base.OnAppearing();
+        var u = _auth.CurrentUser;
+        if (u != null)
+        {
+            try
+            {
+                await _p2p.EnsureStartedAsync(u).ConfigureAwait(true);
+            }
+            catch
+            {
+                // UDP/discovery may fail on some devices; chat may still work for direct hosts
+            }
+        }
+
         await RefreshAsync().ConfigureAwait(true);
     }
 
@@ -63,6 +84,14 @@ public partial class ChatsPage : ContentPage
 
     private async void OnLogoutClicked(object? sender, EventArgs e)
     {
+        try
+        {
+            await _p2p.StopAsync().ConfigureAwait(true);
+        }
+        catch
+        {
+        }
+
         await _auth.LogoutAsync().ConfigureAwait(true);
         Application.Current!.MainPage = new NavigationPage(MauiProgram.Services.GetRequiredService<LoginPage>());
     }

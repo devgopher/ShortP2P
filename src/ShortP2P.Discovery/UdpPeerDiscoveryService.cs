@@ -91,21 +91,30 @@ public sealed class UdpPeerDiscoveryService : IPeerDiscoveryService
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
+        {
             try
             {
                 var result = await _udp.ReceiveAsync(cancellationToken).ConfigureAwait(false);
                 if (!DiscoveryBeaconCodec.TryParseAnnounce(result.Buffer, _options.MaxNicknameUtf8Bytes,
                         out var remoteIdentity) || remoteIdentity == null)
+                {
+                    await Task.Delay(ReceivePauseMs, cancellationToken).ConfigureAwait(false);
                     continue;
+                }
 
                 if (remoteIdentity.NetworkId.Value == LocalPeer.NetworkId.Value)
+                {
+                    await Task.Delay(ReceivePauseMs, cancellationToken).ConfigureAwait(false);
                     continue;
+                }
 
                 var addr = UdpTransportAddress.FromIPEndPoint(result.RemoteEndPoint);
+                var dataAddr = UdpTransportAddress.WithUdpPort(addr, remoteIdentity.DataUdpPort);
                 var discovered = new DiscoveredPeer
                 {
                     Identity = remoteIdentity,
                     ReachableAt = addr,
+                    DataReachableAt = dataAddr,
                     LastSeenUtc = DateTimeOffset.UtcNow
                 };
 
@@ -121,8 +130,16 @@ public sealed class UdpPeerDiscoveryService : IPeerDiscoveryService
             {
                 break;
             }
-        
-        await Task.Delay(ReceivePauseMs, cancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                await Task.Delay(ReceivePauseMs, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
     }
 
     private async Task AnnounceLoopAsync(CancellationToken cancellationToken)

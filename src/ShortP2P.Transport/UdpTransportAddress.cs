@@ -40,6 +40,15 @@ public static class UdpTransportAddress
         throw new NotSupportedException($"Address family {ep.AddressFamily} is not supported.");
     }
 
+    /// <summary>Тот же IP, другой порт (для beacon → data).</summary>
+    public static TransportAddress WithUdpPort(TransportAddress address, int port)
+    {
+        if (address.Kind != TransportKind.Udp)
+            throw new ArgumentException("Address is not UDP.", nameof(address));
+        var ep = ToIPEndPoint(address);
+        return FromIPEndPoint(new IPEndPoint(ep.Address, port));
+    }
+
     public static IPEndPoint ToIPEndPoint(TransportAddress address)
     {
         if (address.Kind != TransportKind.Udp)

@@ -44,6 +44,21 @@ public sealed class ChatRepository
         return chat;
     }
 
+    public async Task UpdateChatP2pRouteAsync(int chatId, string peerHost, int peerPort, string? relayRouteBlob,
+        string? peerRsaPublicJson = null)
+    {
+        var conn = await _db.GetConnectionAsync();
+        var chat = await conn.FindAsync<ChatEntity>(chatId);
+        if (chat == null) return;
+        chat.PeerHost = peerHost.Trim();
+        chat.PeerPort = peerPort;
+        chat.RelayRouteBlob = string.IsNullOrWhiteSpace(relayRouteBlob) ? null : relayRouteBlob.Trim();
+        if (peerRsaPublicJson != null)
+            chat.PeerRsaPublicJson = peerRsaPublicJson.Trim();
+        chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
+        await conn.UpdateAsync(chat);
+    }
+
     public async Task<IReadOnlyList<ChatMessageEntity>> ListMessagesAsync(int chatId)
     {
         var conn = await _db.GetConnectionAsync();
