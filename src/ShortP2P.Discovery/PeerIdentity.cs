@@ -7,7 +7,8 @@ namespace ShortP2P.Discovery;
 /// </summary>
 public sealed class PeerIdentity
 {
-    public PeerIdentity(string nickname, CompressedNetworkId networkId, int maxNicknameUtf8Bytes = 64)
+    public PeerIdentity(string nickname, CompressedNetworkId networkId, int dataUdpPort = 17200,
+        int maxNicknameUtf8Bytes = 64)
     {
         ArgumentNullException.ThrowIfNull(nickname);
         var trimmed = nickname.Trim();
@@ -16,11 +17,18 @@ public sealed class PeerIdentity
         if (utf8 > maxNicknameUtf8Bytes)
             throw new ArgumentException($"Nickname exceeds {maxNicknameUtf8Bytes} UTF-8 bytes.", nameof(nickname));
 
+        if (dataUdpPort is < 1 or > 65535)
+            throw new ArgumentOutOfRangeException(nameof(dataUdpPort));
+
         Nickname = trimmed;
         NetworkId = networkId;
+        DataUdpPort = dataUdpPort;
     }
 
     public string Nickname { get; }
 
     public CompressedNetworkId NetworkId { get; }
+
+    /// <summary>Порт UDP для данных мессенджера (объявляется в beacon для построения маршрутов).</summary>
+    public int DataUdpPort { get; }
 }

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Storage;
 using ShortP2P.Client;
 using ShortP2P.Client.Data;
+using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
 using ShortP2P.MauiApp.Services;
 
@@ -29,12 +30,15 @@ public static class MauiProgram
         builder.Services.AddSingleton<ISessionStorage, MauiSecureStorage>();
         builder.Services.AddSingleton<AuthService>();
         builder.Services.AddSingleton<ChatRepository>();
+        builder.Services.AddSingleton<P2pRoutingSettingsStore>();
+        builder.Services.AddSingleton<UserP2pRuntime>();
         builder.Services.AddTransient<LoginPage>();
         builder.Services.AddTransient<RegisterPage>();
         builder.Services.AddTransient<ChatsPage>();
         builder.Services.AddTransient<ChatDetailPage>();
         builder.Services.AddTransient<AddChatPage>();
         builder.Services.AddTransient<MyQrPage>();
+        builder.Services.AddTransient<RoutingSettingsPage>();
 
 #if DEBUG
         builder.Logging.AddDebug();

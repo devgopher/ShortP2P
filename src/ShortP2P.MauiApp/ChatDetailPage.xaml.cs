@@ -7,13 +7,15 @@ public partial class ChatDetailPage : ContentPage
 {
     private readonly AuthService _auth;
     private readonly ChatRepository _repo;
-    private ChatP2pSession? _p2p;
+    private readonly UserP2pRuntime _p2p;
+    private ChatP2pSession? _p2pSession;
 
-    public ChatDetailPage(AuthService auth, ChatRepository repo)
+    public ChatDetailPage(AuthService auth, ChatRepository repo, UserP2pRuntime p2p)
     {
         InitializeComponent();
         _auth = auth;
         _repo = repo;
+        _p2p = p2p;
     }
 
     public int ChatId { get; set; }
@@ -38,11 +40,11 @@ public partial class ChatDetailPage : ContentPage
         }
 
         var uiSync = SynchronizationContext.Current;
-        _p2p = new ChatP2pSession(chat, user, _auth, _repo, uiSync);
-        _p2p.MessagesChanged += OnP2PMessagesChanged;
+        _p2pSession = new ChatP2pSession(chat, user, _auth, _repo, uiSync, _p2p.Gateway, _p2p.Settings);
+        _p2pSession.MessagesChanged += OnP2PMessagesChanged;
         try
         {
-            await _p2p.StartAsync().ConfigureAwait(true);
+            await _p2pSession.StartAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -55,11 +57,11 @@ public partial class ChatDetailPage : ContentPage
     protected override async void OnDisappearing()
     {
         base.OnDisappearing();
-        if (_p2p != null)
+        if (_p2pSession != null)
         {
-            _p2p.MessagesChanged -= OnP2PMessagesChanged;
-            await _p2p.DisposeAsync().ConfigureAwait(true);
-            _p2p = null;
+            _p2pSession.MessagesChanged -= OnP2PMessagesChanged;
+            await _p2pSession.DisposeAsync().ConfigureAwait(true);
+            _p2pSession = null;
         }
     }
 
@@ -77,12 +79,12 @@ public partial class ChatDetailPage : ContentPage
     private async void OnSendClicked(object? sender, EventArgs e)
     {
         var text = MessageEntry.Text?.Trim() ?? "";
-        if (text.Length == 0 || _p2p == null)
+        if (text.Length == 0 || _p2pSession == null)
             return;
 
         try
         {
-            await _p2p.SendTextAsync(text).ConfigureAwait(true);
+            await _p2pSession.SendTextAsync(text).ConfigureAwait(true);
             MessageEntry.Text = string.Empty;
             await ReloadMessagesAsync().ConfigureAwait(true);
         }

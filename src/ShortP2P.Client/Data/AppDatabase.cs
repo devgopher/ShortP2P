@@ -26,6 +26,15 @@ public sealed class AppDatabase
         await _connection.CreateTableAsync<UserEntity>();
         await _connection.CreateTableAsync<ChatEntity>();
         await _connection.CreateTableAsync<ChatMessageEntity>();
+        try
+        {
+            await _connection.ExecuteAsync("ALTER TABLE chats ADD COLUMN RelayRouteBlob TEXT NULL");
+        }
+        catch
+        {
+            // column already exists
+        }
+
         return _connection;
     }
 }

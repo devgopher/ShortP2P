@@ -1,4 +1,5 @@
 using ShortP2P.Client.Data;
+using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
 
 namespace ShortP2P.WinForms;
@@ -7,13 +8,17 @@ public sealed class MainChatsForm : Form
 {
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
+    private readonly UserP2pRuntime _p2p;
     private readonly Label _profile = new() { AutoSize = true };
     private readonly ListBox _list = new() { IntegralHeight = false, Height = 280, Width = 480 };
+    private readonly P2pRoutingSettingsStore  _routingStore;
 
-    public MainChatsForm(AuthService auth, ChatRepository chats)
+    public MainChatsForm(AuthService auth, ChatRepository chats, UserP2pRuntime p2p, P2pRoutingSettingsStore routingStore)
     {
         _auth = auth;
         _chats = chats;
+        _p2p = p2p;
+        _routingStore = routingStore;
         Text = "ShortP2P — Chats";
         StartPosition = FormStartPosition.CenterScreen;
         Width = 560;
@@ -43,14 +48,17 @@ public sealed class MainChatsForm : Form
         var btnMyQr = new Button { Text = "My QR", AutoSize = true };
         var btnCopy = new Button { Text = "Copy keys", AutoSize = true };
         var btnLogout = new Button { Text = "Logout", AutoSize = true };
+        var btnRouting = new Button { Text = "P2P routing", AutoSize = true };
         toolbar.Controls.Add(btnAdd);
         toolbar.Controls.Add(btnMyQr);
         toolbar.Controls.Add(btnCopy);
+        toolbar.Controls.Add(btnRouting);
         toolbar.Controls.Add(btnLogout);
 
         btnAdd.Click += async (_, _) => await OnAddChatAsync().ConfigureAwait(true);
         btnMyQr.Click += OnMyQr;
         btnCopy.Click += OnCopyKeys;
+        btnRouting.Click += OnRoutingSettings;
         btnLogout.Click += OnLogout;
 
         _list.DisplayMember = nameof(ChatEntity.PeerNickname);
@@ -64,7 +72,22 @@ public sealed class MainChatsForm : Form
         _list.Dock = DockStyle.Fill;
         Controls.Add(root);
 
-        Shown += async (_, _) => await RefreshAsync().ConfigureAwait(true);
+        Shown += async (_, _) =>
+        {
+            var u = _auth.CurrentUser;
+            if (u != null)
+            {
+                try
+                {
+                    await _p2p.EnsureStartedAsync(u).ConfigureAwait(true);
+                }
+                catch
+                {
+                }
+            }
+
+            await RefreshAsync().ConfigureAwait(true);
+        };
         Activated += async (_, _) => await RefreshAsync().ConfigureAwait(true);
     }
 
@@ -85,6 +108,12 @@ public sealed class MainChatsForm : Form
         foreach (var c in list)
             _list.Items.Add(c);
         _list.EndUpdate();
+    }
+
+    private void OnRoutingSettings(object? sender, EventArgs e)
+    {
+        using var f = new RoutingSettingsForm(_routingStore, _p2p);
+        f.ShowDialog(this);
     }
 
     private void OnMyQr(object? sender, EventArgs e)
@@ -137,6 +166,14 @@ public sealed class MainChatsForm : Form
 
     private async void OnLogout(object? sender, EventArgs e)
     {
+        try
+        {
+            await _p2p.StopAsync().ConfigureAwait(true);
+        }
+        catch
+        {
+        }
+
         await _auth.LogoutAsync().ConfigureAwait(true);
         DialogResult = DialogResult.Retry;
         Close();
@@ -150,7 +187,7 @@ public sealed class MainChatsForm : Form
         var u = _auth.CurrentUser;
         if (u == null) return;
 
-        using var win = new ChatForm(chat, u, _auth, _chats);
+        using var win = new ChatForm(chat, u, _auth, _chats, _p2p);
         win.ShowDialog(this);
         await RefreshAsync().ConfigureAwait(true);
     }

@@ -21,5 +21,8 @@ public class ChatEntity
 
     public int PeerPort { get; set; } = 17201;
 
+    /// <summary>Сериализованный маршрут ретрансляции (первый хоп + цепочка), null/пусто — прямой UDP.</summary>
+    public string? RelayRouteBlob { get; set; }
+
     public long UpdatedUtcTicks { get; set; }
 }

@@ -20,7 +20,8 @@ internal static class DiscoveryBeaconCodec
         var nick = Encoding.UTF8.GetBytes(peer.Nickname);
         if (nick.Length > ushort.MaxValue) throw new ArgumentException("Nickname is too long.", nameof(peer));
 
-        var buf = new byte[HeaderBytes + nick.Length];
+        const int trailer = 2; // data UDP port BE
+        var buf = new byte[HeaderBytes + nick.Length + trailer];
         Magic.CopyTo(buf.AsSpan(0, 4));
         buf[4] = Version;
         buf[5] = MsgAnnounce;
@@ -30,6 +31,7 @@ internal static class DiscoveryBeaconCodec
             throw new InvalidOperationException();
         BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(24, 2), (ushort)nick.Length);
         nick.CopyTo(buf.AsSpan(26));
+        BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(26 + nick.Length, 2), (ushort)peer.DataUdpPort);
         return buf;
     }
 
@@ -44,14 +46,27 @@ internal static class DiscoveryBeaconCodec
         var id = CompressedNetworkId.FromWireBytes(data.Slice(8, 16));
         var nickLen = BinaryPrimitives.ReadUInt16BigEndian(data.Slice(24, 2));
         if (nickLen > maxNicknameUtf8Bytes) return false;
-        if (data.Length != HeaderBytes + nickLen) return false;
+        var minLen = HeaderBytes + nickLen;
+        if (data.Length < minLen) return false;
+
+        ushort dataPort = 17200;
+        if (data.Length >= minLen + 2)
+        {
+            dataPort = BinaryPrimitives.ReadUInt16BigEndian(data.Slice(minLen, 2));
+            if (dataPort == 0) return false;
+            if (data.Length != minLen + 2) return false;
+        }
+        else if (data.Length != minLen)
+        {
+            return false;
+        }
 
         var nick = Encoding.UTF8.GetString(data.Slice(26, nickLen));
         if (string.IsNullOrWhiteSpace(nick)) return false;
 
         try
         {
-            peer = new PeerIdentity(nick, id, maxNicknameUtf8Bytes);
+            peer = new PeerIdentity(nick, id, dataPort, maxNicknameUtf8Bytes);
         }
         catch (ArgumentException)
         {

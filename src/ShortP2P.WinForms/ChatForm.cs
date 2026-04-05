@@ -9,17 +9,19 @@ public sealed class ChatForm : Form
     private readonly UserEntity _user;
     private readonly AuthService _auth;
     private readonly ChatRepository _repo;
+    private readonly UserP2pRuntime _p2pRuntime;
     private readonly ListBox _messages = new() { Dock = DockStyle.Fill, IntegralHeight = false };
     private readonly TextBox _input = new() { Dock = DockStyle.Fill };
     private readonly Button _send = new() { Text = "Send", Dock = DockStyle.Right, AutoSize = true };
-    private ChatP2pSession? _p2p;
+    private ChatP2pSession? _p2pSession;
 
-    public ChatForm(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo)
+    public ChatForm(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo, UserP2pRuntime p2pRuntime)
     {
         _chat = chat;
         _user = user;
         _auth = auth;
         _repo = repo;
+        _p2pRuntime = p2pRuntime;
         Text = chat.PeerNickname;
         StartPosition = FormStartPosition.CenterParent;
         Width = 520;
@@ -41,11 +43,11 @@ public sealed class ChatForm : Form
     private async Task OnShownAsync()
     {
         var uiSync = SynchronizationContext.Current;
-        _p2p = new ChatP2pSession(_chat, _user, _auth, _repo, uiSync);
-        _p2p.MessagesChanged += OnP2pMessagesChanged;
+        _p2pSession = new ChatP2pSession(_chat, _user, _auth, _repo, uiSync, _p2pRuntime.Gateway, _p2pRuntime.Settings);
+        _p2pSession.MessagesChanged += OnP2pMessagesChanged;
         try
         {
-            await _p2p.StartAsync().ConfigureAwait(true);
+            await _p2pSession.StartAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -58,11 +60,11 @@ public sealed class ChatForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
-        if (_p2p != null)
+        if (_p2pSession != null)
         {
-            _p2p.MessagesChanged -= OnP2pMessagesChanged;
-            _p2p.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            _p2p = null;
+            _p2pSession.MessagesChanged -= OnP2pMessagesChanged;
+            _p2pSession.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            _p2pSession = null;
         }
 
         base.OnFormClosed(e);
@@ -93,12 +95,12 @@ public sealed class ChatForm : Form
     private async Task OnSendAsync()
     {
         var text = _input.Text.Trim();
-        if (text.Length == 0 || _p2p == null)
+        if (text.Length == 0 || _p2pSession == null)
             return;
 
         try
         {
-            await _p2p.SendTextAsync(text).ConfigureAwait(true);
+            await _p2pSession.SendTextAsync(text).ConfigureAwait(true);
             _input.Clear();
             await ReloadMessagesAsync().ConfigureAwait(true);
         }
