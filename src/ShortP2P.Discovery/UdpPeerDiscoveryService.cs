@@ -12,7 +12,8 @@ namespace ShortP2P.Discovery;
 /// </summary>
 public sealed class UdpPeerDiscoveryService : IPeerDiscoveryService
 {
-    private readonly Channel<DiscoveryNotification> _events = Channel.CreateUnbounded<DiscoveryNotification>();
+    private readonly Channel<DiscoveryNotification> _events =
+        Channel.CreateUnbounded<DiscoveryNotification>(new UnboundedChannelOptions());
     private readonly UdpPeerDiscoveryOptions _options;
     private readonly ConcurrentDictionary<Guid, DiscoveredPeer> _peers = new();
     private readonly UdpClient _udp;

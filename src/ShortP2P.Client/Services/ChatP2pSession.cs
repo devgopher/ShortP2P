@@ -31,7 +31,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
     private readonly object _sync = new();
     private readonly SemaphoreSlim _sessionSetup = new(1, 1);
     private UdpTransport? _udp;
-    private readonly Channel<TransportReceiveMessage> _bridge = Channel.CreateUnbounded<TransportReceiveMessage>();
+    private Channel<TransportReceiveMessage> _bridge = Channel.CreateUnbounded<TransportReceiveMessage>();
     private PrefixedCipherTransport? _prefixed;
     private MessengerService? _messenger;
     private P2PSession? _session;
@@ -78,6 +78,8 @@ public sealed class ChatP2pSession : IAsyncDisposable
     {
         await StopAsync(cancellationToken).ConfigureAwait(false);
 
+        _bridge = Channel.CreateUnbounded<TransportReceiveMessage>();
+        
         RebuildRouteFromChat();
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
