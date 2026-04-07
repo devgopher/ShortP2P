@@ -17,8 +17,8 @@ namespace ShortP2P.Client.Services;
 /// </summary>
 public sealed class ChatP2pSession : IAsyncDisposable
 {
-    public const byte FrameHandshake = 0x01;
-    public const byte FrameCipher = 0x02;
+    private const byte FrameHandshake = 0x01;
+    private const byte FrameCipher = 0x02;
 
     private readonly ChatEntity _chat;
     private readonly UserEntity _user;
@@ -137,6 +137,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
         }
         catch
         {
+            // ignored
         }
     }
 
@@ -192,7 +193,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
         var direct = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(found.PeerHost), found.PeerPort));
         string? blob = null;
-        if (found.FirstRelayHop != null && found.RelayStrip.Count > 0)
+        if (found is { FirstRelayHop: not null, RelayStrip.Count: > 0 })
         {
             blob = ChatRelayRoute.SerializeBlob(new ChatRelayRoute
             {
@@ -226,6 +227,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
             }
             catch (OperationCanceledException)
             {
+                // ignore
             }
 
             _incomingTask = null;
@@ -331,14 +333,14 @@ public sealed class ChatP2pSession : IAsyncDisposable
                     continue;
                 }
 
-                if (buf[0] == FrameCipher && buf.Length > 1)
-                {
-                    var inner = new byte[buf.Length - 1];
-                    Buffer.BlockCopy(buf, 1, inner, 0, inner.Length);
-                    await _bridge.Writer
-                        .WriteAsync(new TransportReceiveMessage(inner, msg.RemoteAddress), cancellationToken)
-                        .ConfigureAwait(false);
-                }
+                if (buf[0] != FrameCipher || buf.Length <= 1) 
+                    continue;
+                
+                var inner = new byte[buf.Length - 1];
+                Buffer.BlockCopy(buf, 1, inner, 0, inner.Length);
+                await _bridge.Writer
+                    .WriteAsync(new TransportReceiveMessage(inner, msg.RemoteAddress), cancellationToken)
+                    .ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -419,7 +421,8 @@ public sealed class ChatP2pSession : IAsyncDisposable
         if (_gateway != null)
             _gateway.SetChatSink(null);
 
-        _cts?.Cancel();
+        if (_cts != null)
+            await _cts.CancelAsync();
 
         if (_messenger != null)
             await _messenger.StopAsync(cancellationToken).ConfigureAwait(false);
@@ -432,6 +435,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
             }
             catch (OperationCanceledException)
             {
+                // ignore
             }
         }
 
@@ -443,6 +447,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
             }
             catch (OperationCanceledException)
             {
+                // ignore
             }
         }
 
@@ -463,21 +468,14 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
     public ValueTask DisposeAsync() => StopAsync();
 
-    private sealed class PrefixedCipherTransport : ITransport
+    private sealed class PrefixedCipherTransport(
+        Channel<TransportReceiveMessage> bridge,
+        Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> sendRaw)
+        : ITransport
     {
-        private readonly Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> _sendRaw;
-        private readonly Channel<TransportReceiveMessage> _bridge;
-
-        public PrefixedCipherTransport(Channel<TransportReceiveMessage> bridge,
-            Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> sendRaw)
-        {
-            _bridge = bridge;
-            _sendRaw = sendRaw;
-        }
-
         public TransportKind Kind => TransportKind.Udp;
 
-        public ChannelReader<TransportReceiveMessage> Inbound => _bridge.Reader;
+        public ChannelReader<TransportReceiveMessage> Inbound => bridge.Reader;
 
         public ValueTask StartAsync(CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
 
@@ -490,7 +488,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
             var buf = new byte[payload.Length + 1];
             buf[0] = FrameCipher;
             payload.CopyTo(buf.AsMemory(1));
-            await _sendRaw(buf, cancellationToken).ConfigureAwait(false);
+            await sendRaw(buf, cancellationToken).ConfigureAwait(false);
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
