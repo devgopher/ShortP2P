@@ -161,7 +161,7 @@ public sealed class ChatForm : Form
     {
         try
         {
-            var rows = await _repo.ListMessagesAsync(_chat.Id).ConfigureAwait(true);
+            var rows = (await _repo.ListMessagesAsync(_chat.Id).ConfigureAwait(true)).OrderByDescending(m => m.SentUtcTicks).ToList();
             if (!IsHandleCreated || IsDisposed)
                 return;
             _messages.BeginUpdate();

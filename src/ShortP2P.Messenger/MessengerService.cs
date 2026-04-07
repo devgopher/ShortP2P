@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Unicode;
 using System.Threading.Channels;
 using ShortP2P.Crypto;
 using ShortP2P.Transport.Abstractions;
@@ -132,7 +134,7 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
 
             if (buffer.Length > _options.MaxBinaryMessageBytes)
                 return;
-
+ var TT = (Encoding.UTF8.GetString(buffer));
             _incoming.Writer.TryWrite(new IncomingBinaryMessage(buffer, msg.RemoteAddress));
         }
     }

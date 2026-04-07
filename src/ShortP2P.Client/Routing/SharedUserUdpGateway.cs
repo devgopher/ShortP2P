@@ -190,7 +190,7 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
                     continue;
 
                 var relayLocalInner = ExtractLocalRelayInner(buf);
-                if (relayLocalInner != null && relayLocalInner.Length > 0)
+                if (relayLocalInner is { Length: > 0 })
                 {
                     if (relayLocalInner[0] == ChatInviteCodec.FrameChatInvite)
                         await HandleChatInviteAsync(relayLocalInner, cancellationToken).ConfigureAwait(false);
