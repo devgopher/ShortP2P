@@ -36,7 +36,14 @@ public sealed class ChatForm : Form
         Padding = new Padding(8, 5, 8, 4),
         DrawMode = DrawMode.OwnerDrawVariable,
     };
-    private readonly TextBox _input = new() { Dock = DockStyle.Fill, MaxLength = ChatP2pSession.MaxMessageChars };
+    private readonly RichTextBox _input = new()
+    {
+        Dock = DockStyle.Fill,
+        Multiline = true,
+        AcceptsTab = false,
+        BorderStyle = BorderStyle.FixedSingle,
+        MaxLength = ChatP2pSession.MaxMessageChars,
+    };
     private readonly Button _send = new() { Text = "Send", Dock = DockStyle.Right, AutoSize = true };
     private ChatP2pSession? _p2PSession;
 
@@ -81,7 +88,7 @@ public sealed class ChatForm : Form
         addrRow.Controls.Add(_applyPeerEndpoint);
         top.Controls.Add(addrRow, 0, 2);
 
-        var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 36, ColumnCount = 2 };
+        var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 88, ColumnCount = 2 };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.Controls.Add(_input, 0, 0);
@@ -95,6 +102,7 @@ public sealed class ChatForm : Form
         _send.Click += async (_, _) => await OnSendAsync().ConfigureAwait(true);
         _messages.DrawItem += OnMessagesDrawItem;
         _messages.MeasureItem += OnMessagesMeasureItem;
+        _messages.DoubleClick += OnMessageDoubleClick;
         Shown += async (_, _) => await OnShownAsync().ConfigureAwait(true);
         FormClosed += (_, _) => _p2PRuntime.PeerPresenceChanged -= OnPeerPresenceChanged;
     }
@@ -192,7 +200,8 @@ public sealed class ChatForm : Form
             {
                 var sender = m.Outgoing ? "You" : _chat.PeerNickname;
                 var color = m.Outgoing ? Color.DodgerBlue : GetPaletteColor(sender);
-                _messages.Items.Add(new ChatLine($"{sender}: {m.Text}", color));
+                var full = $"{sender}: {m.Text}";
+                _messages.Items.Add(new ChatLine(full, color));
             }
             _messages.EndUpdate();
         }
@@ -235,6 +244,17 @@ public sealed class ChatForm : Form
         var online = _p2PRuntime.IsPeerOnline(_chat.PeerNetworkIdShort);
         _peerStatusLabel.Text = online ? "Статус: онлайн" : "Статус: офлайн";
         _peerStatusLabel.ForeColor = online ? Color.SeaGreen : SystemColors.GrayText;
+    }
+
+    private void OnMessageDoubleClick(object? sender, EventArgs e)
+    {
+        if (_messages.SelectedItem is not ChatLine line)
+            return;
+        if (line.Text.Length <= 64)
+            return;
+
+        using var dlg = new MessageViewForm("Сообщение", line.Text);
+        dlg.ShowDialog(this);
     }
 
     private void OnMessagesDrawItem(object? sender, DrawItemEventArgs e)
