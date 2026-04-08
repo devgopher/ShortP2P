@@ -30,6 +30,7 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
     private Func<ReadOnlyMemory<byte>, TransportAddress, Task>? _chatSink;
     private readonly object _startSync = new();
     private readonly ConcurrentDictionary<Guid, DateTimeOffset> _presenceSeenUtc = new();
+    private readonly ConcurrentDictionary<Guid, TransportAddress> _presenceAddress = new();
 
     public event EventHandler<PeerPresenceChangedEventArgs>? PeerPresenceChanged;
 
@@ -101,6 +102,7 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
         _searchWaits.Clear();
         _foundReturnPath.Clear();
         _presenceSeenUtc.Clear();
+        _presenceAddress.Clear();
     }
 
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
@@ -254,7 +256,7 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
 
                 if (PresencePingCodec.TryParse(buf, out var pingSender))
                 {
-                    MarkPeerOnline(pingSender);
+                    MarkPeerOnline(pingSender, msg.RemoteAddress);
                     continue;
                 }
 
@@ -418,11 +420,35 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
         return DateTimeOffset.UtcNow - seen <= PresenceStaleTimeout;
     }
 
-    private void MarkPeerOnline(Guid peerNetworkId)
+    public bool TryGetPeerLastSeenAddress(Guid peerNetworkId, out TransportAddress address)
+    {
+        return _presenceAddress.TryGetValue(peerNetworkId, out address!);
+    }
+
+    public bool IsTransportAvailable(TransportKind kind)
+    {
+        return kind switch
+        {
+            TransportKind.Udp => _udp != null,
+            _ => false
+        };
+    }
+
+    public async ValueTask SendRawToAsync(ReadOnlyMemory<byte> packet, TransportAddress destination,
+        CancellationToken cancellationToken = default)
+    {
+        var udp = _udp ?? throw new InvalidOperationException("Gateway not started.");
+        if (destination.Kind != TransportKind.Udp)
+            throw new NotSupportedException($"Transport kind '{destination.Kind}' is not available yet.");
+        await udp.SendAsync(packet, destination, cancellationToken).ConfigureAwait(false);
+    }
+
+    private void MarkPeerOnline(Guid peerNetworkId, TransportAddress from)
     {
         var now = DateTimeOffset.UtcNow;
         var becameOnline = !_presenceSeenUtc.ContainsKey(peerNetworkId);
         _presenceSeenUtc[peerNetworkId] = now;
+        _presenceAddress[peerNetworkId] = from;
         if (becameOnline)
             PeerPresenceChanged?.Invoke(this, new PeerPresenceChangedEventArgs(peerNetworkId, true));
     }
@@ -493,7 +519,10 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
                 if (now - kv.Value <= PresenceStaleTimeout)
                     continue;
                 if (_presenceSeenUtc.TryRemove(kv.Key, out _))
+                {
+                    _presenceAddress.TryRemove(kv.Key, out _);
                     PeerPresenceChanged?.Invoke(this, new PeerPresenceChangedEventArgs(kv.Key, false));
+                }
             }
         }
     }

@@ -30,6 +30,7 @@ public sealed class ChatP2pSession(
 
     private readonly P2pRoutingSettings? _routing = routingSettings ?? (sharedGateway != null ? new P2pRoutingSettings() : null);
     private readonly GuaranteedDeliveryPolicy _guaranteedDelivery = new();
+    private readonly Guid _peerNetworkId = CompressedNetworkId.FromShortString(chat.PeerNetworkIdShort).Value;
 
     private readonly object _sync = new();
     private readonly SemaphoreSlim _sessionSetup = new(1, 1);
@@ -42,6 +43,7 @@ public sealed class ChatP2pSession(
     private Task? _pumpTask;
     private Task? _incomingTask;
     private bool _incomingStarted;
+    private AdaptiveChatTransportLayer? _transportLayer;
 
     private TransportAddress? _peerAddress;
     private ChatRelayRoute _route = null!;
@@ -93,6 +95,13 @@ public sealed class ChatP2pSession(
             });
             _pumpTask = Task.Run(() => PumpAsync(_cts.Token), _cts.Token);
         }
+
+        _transportLayer = new AdaptiveChatTransportLayer(
+            sharedGateway,
+            () => _route,
+            () => _peerAddress,
+            () => _udp,
+            _peerNetworkId);
 
         try
         {
@@ -250,10 +259,8 @@ public sealed class ChatP2pSession(
 
     private async ValueTask SendRouteRawAsync(ReadOnlyMemory<byte> packet, CancellationToken cancellationToken)
     {
-        if (sharedGateway != null)
-            await sharedGateway.SendP2pPayloadAsync(packet, _route, cancellationToken).ConfigureAwait(false);
-        else
-            await _udp!.SendAsync(packet, _peerAddress!, cancellationToken).ConfigureAwait(false);
+        var layer = _transportLayer ?? throw new InvalidOperationException("Transport layer is not initialized.");
+        await layer.SendPacketAsync(packet, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task EnsureSessionAsInitiatorAsync(CancellationToken cancellationToken)
@@ -443,6 +450,7 @@ public sealed class ChatP2pSession(
         _cts = null;
         _udp = null;
         _prefixed = null;
+        _transportLayer = null;
         _messenger = null;
         _session = null;
         _pumpTask = null;
