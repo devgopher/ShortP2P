@@ -15,6 +15,12 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
     public SharedUserUdpGateway Gateway { get; }
 
+    public event EventHandler<PeerPresenceChangedEventArgs>? PeerPresenceChanged
+    {
+        add => Gateway.PeerPresenceChanged += value;
+        remove => Gateway.PeerPresenceChanged -= value;
+    }
+
     public UserP2pRuntime(AuthService auth, ChatRepository chats, P2pRoutingSettingsStore store)
     {
         _chats = chats;
@@ -66,4 +72,10 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     }
 
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
+
+    public bool IsPeerOnline(string peerNetworkIdShort)
+    {
+        var id = CompressedNetworkId.FromShortString(peerNetworkIdShort).Value;
+        return Gateway.IsPeerOnline(id);
+    }
 }

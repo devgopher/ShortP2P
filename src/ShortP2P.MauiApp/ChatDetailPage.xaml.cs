@@ -34,6 +34,7 @@ public partial class ChatDetailPage : ContentPage
 
         Title = chat.PeerNickname;
         PeerIdLabel.Text = $"Id: {chat.PeerNetworkIdShort}";
+        PeerStatusLabel.Text = "Статус: офлайн";
         PeerHostEntry.Text = chat.PeerHost;
         PeerPortEntry.Text = chat.PeerPort.ToString();
         var user = _auth.CurrentUser;
@@ -46,6 +47,7 @@ public partial class ChatDetailPage : ContentPage
         var uiSync = SynchronizationContext.Current;
         _p2pSession = new ChatP2pSession(chat, user, _auth, _repo, uiSync, _p2p.Gateway, _p2p.Settings);
         _p2pSession.MessagesChanged += OnP2PMessagesChanged;
+        _p2p.PeerPresenceChanged += OnPeerPresenceChanged;
         try
         {
             await _p2pSession.StartAsync().ConfigureAwait(true);
@@ -56,6 +58,7 @@ public partial class ChatDetailPage : ContentPage
         }
 
         await ReloadMessagesAsync().ConfigureAwait(true);
+        RefreshPeerPresenceLabel(chat.PeerNetworkIdShort);
     }
 
     protected override async void OnDisappearing()
@@ -67,6 +70,7 @@ public partial class ChatDetailPage : ContentPage
             await _p2pSession.DisposeAsync().ConfigureAwait(true);
             _p2pSession = null;
         }
+        _p2p.PeerPresenceChanged -= OnPeerPresenceChanged;
     }
 
     private void OnP2PMessagesChanged(object? sender, EventArgs e) =>
@@ -140,4 +144,25 @@ public partial class ChatDetailPage : ContentPage
     }
 
     private sealed record MessageRow(string DirectionLabel, string Text);
+
+    private void OnPeerPresenceChanged(object? sender, ShortP2P.Client.Routing.PeerPresenceChangedEventArgs e)
+    {
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            var chat = await _repo.GetChatAsync(ChatId).ConfigureAwait(true);
+            if (chat == null)
+                return;
+            var peerId = ShortP2P.Discovery.CompressedNetworkId.FromShortString(chat.PeerNetworkIdShort).Value;
+            if (e.PeerNetworkId != peerId)
+                return;
+            RefreshPeerPresenceLabel(chat.PeerNetworkIdShort);
+        });
+    }
+
+    private void RefreshPeerPresenceLabel(string peerNetworkIdShort)
+    {
+        var online = _p2p.IsPeerOnline(peerNetworkIdShort);
+        PeerStatusLabel.Text = online ? "Статус: онлайн" : "Статус: офлайн";
+        PeerStatusLabel.TextColor = online ? Colors.Green : Colors.Gray;
+    }
 }

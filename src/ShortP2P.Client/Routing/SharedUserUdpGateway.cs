@@ -13,6 +13,9 @@ namespace ShortP2P.Client.Routing;
 public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats, P2pRoutingSettings settings)
     : IAsyncDisposable
 {
+    private static readonly TimeSpan PresencePingInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan PresenceStaleTimeout = TimeSpan.FromSeconds(25);
+
     private IPeerDiscoveryService? _discovery;
 
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<PeerSearchResult>> _searchWaits = new();
@@ -22,8 +25,13 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
     private UserEntity? _user;
     private CancellationTokenSource? _cts;
     private Task? _receiveLoop;
+    private Task? _presenceAnnounceLoop;
+    private Task? _presenceStaleLoop;
     private Func<ReadOnlyMemory<byte>, TransportAddress, Task>? _chatSink;
     private readonly object _startSync = new();
+    private readonly ConcurrentDictionary<Guid, DateTimeOffset> _presenceSeenUtc = new();
+
+    public event EventHandler<PeerPresenceChangedEventArgs>? PeerPresenceChanged;
 
     public void SetDiscovery(IPeerDiscoveryService? discovery) => _discovery = discovery;
 
@@ -43,6 +51,8 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
             _udp = new UdpTransport(user.DataUdpPort);
             _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _receiveLoop = Task.Run(() => ReceiveLoopAsync(_cts.Token), _cts.Token);
+            _presenceAnnounceLoop = Task.Run(() => PresenceAnnounceLoopAsync(_cts.Token), _cts.Token);
+            _presenceStaleLoop = Task.Run(() => PresenceStaleLoopAsync(_cts.Token), _cts.Token);
         }
 
         await _udp.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -51,11 +61,17 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         Task? loop;
+        Task? presenceAnnounce;
+        Task? presenceStale;
         lock (_startSync)
         {
             _cts?.Cancel();
             loop = _receiveLoop;
+            presenceAnnounce = _presenceAnnounceLoop;
+            presenceStale = _presenceStaleLoop;
             _receiveLoop = null;
+            _presenceAnnounceLoop = null;
+            _presenceStaleLoop = null;
             _cts?.Dispose();
             _cts = null;
             if (_udp != null)
@@ -68,11 +84,12 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
             _user = null;
         }
 
-        if (loop != null)
+        var loops = new[] { loop, presenceAnnounce, presenceStale }.Where(t => t != null).ToArray();
+        if (loops.Length > 0)
         {
             try
             {
-                await loop.ConfigureAwait(false);
+                await Task.WhenAll(loops!).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -83,6 +100,7 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
             kv.Value.TrySetCanceled();
         _searchWaits.Clear();
         _foundReturnPath.Clear();
+        _presenceSeenUtc.Clear();
     }
 
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
@@ -231,6 +249,12 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
                 if (buf[0] == ChatInviteCodec.FrameChatInvite)
                 {
                     await HandleChatInviteAsync(buf, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (PresencePingCodec.TryParse(buf, out var pingSender))
+                {
+                    MarkPeerOnline(pingSender);
                     continue;
                 }
 
@@ -387,6 +411,93 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
 
     private static string AddrKey(TransportAddress a) => Convert.ToHexString(a.Data);
 
+    public bool IsPeerOnline(Guid peerNetworkId)
+    {
+        if (!_presenceSeenUtc.TryGetValue(peerNetworkId, out var seen))
+            return false;
+        return DateTimeOffset.UtcNow - seen <= PresenceStaleTimeout;
+    }
+
+    private void MarkPeerOnline(Guid peerNetworkId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var becameOnline = !_presenceSeenUtc.ContainsKey(peerNetworkId);
+        _presenceSeenUtc[peerNetworkId] = now;
+        if (becameOnline)
+            PeerPresenceChanged?.Invoke(this, new PeerPresenceChangedEventArgs(peerNetworkId, true));
+    }
+
+    private async Task PresenceAnnounceLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await BroadcastPresencePingAsync(cancellationToken).ConfigureAwait(false);
+                await Task.Delay(PresencePingInterval, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch
+            {
+                // ignore one failed presence iteration
+            }
+        }
+    }
+
+    /// <summary>
+    /// Рассылка пинг пакетов для всех пиров
+    /// </summary>
+    /// <param name="cancellationToken"></param>
+    private async Task BroadcastPresencePingAsync(CancellationToken cancellationToken)
+    {
+        var udp = _udp;
+        var user = _user;
+        if (udp == null || user == null)
+            return;
+
+        var payload = PresencePingCodec.Build(CompressedNetworkId.FromShortString(user.NetworkIdShort).Value);
+        var peers = await chats.ListChatsAsync(user.Id).ConfigureAwait(false);
+        foreach (var c in peers)
+        {
+            try
+            {
+                var ep = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(c.PeerHost), c.PeerPort));
+                await udp.SendAsync(payload, ep, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // bad endpoint or temporary send issue
+            }
+        }
+    }
+
+    private async Task PresenceStaleLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            foreach (var kv in _presenceSeenUtc.ToArray())
+            {
+                if (now - kv.Value <= PresenceStaleTimeout)
+                    continue;
+                if (_presenceSeenUtc.TryRemove(kv.Key, out _))
+                    PeerPresenceChanged?.Invoke(this, new PeerPresenceChangedEventArgs(kv.Key, false));
+            }
+        }
+    }
+
     /// <summary>Возвращает полезную нагрузку, если это локальная доставка RELAY (hop count 0).</summary>
     private static byte[]? ExtractLocalRelayInner(byte[] buf)
     {
@@ -394,4 +505,10 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
             return null;
         return buf.AsSpan(2).ToArray();
     }
+}
+
+public sealed class PeerPresenceChangedEventArgs(Guid peerNetworkId, bool isOnline) : EventArgs
+{
+    public Guid PeerNetworkId { get; } = peerNetworkId;
+    public bool IsOnline { get; } = isOnline;
 }

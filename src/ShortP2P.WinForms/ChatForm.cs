@@ -17,6 +17,12 @@ public sealed class ChatForm : Form
         ForeColor = SystemColors.GrayText,
         Padding = new Padding(0, 0, 0, 4),
     };
+    private readonly Label _peerStatusLabel = new()
+    {
+        AutoSize = true,
+        ForeColor = SystemColors.GrayText,
+        Padding = new Padding(0, 0, 0, 4),
+    };
     private readonly TextBox _peerHostEntry = new() { Width = 200 };
     private readonly TextBox _peerPortEntry = new() { Width = 56 };
     private readonly Button _applyPeerEndpoint = new() { Text = "Применить", AutoSize = true };
@@ -38,6 +44,7 @@ public sealed class ChatForm : Form
         Height = 520;
 
         _peerIdLabel.Text = $"Id: {chat.PeerNetworkIdShort}";
+        _peerStatusLabel.Text = "Статус: офлайн";
         _peerHostEntry.Text = chat.PeerHost;
         _peerPortEntry.Text = chat.PeerPort.ToString();
 
@@ -47,9 +54,10 @@ public sealed class ChatForm : Form
             AutoSize = true,
             Padding = new Padding(8, 6, 8, 4),
             ColumnCount = 1,
-            RowCount = 2
+            RowCount = 3
         };
         top.Controls.Add(_peerIdLabel, 0, 0);
+        top.Controls.Add(_peerStatusLabel, 0, 1);
 
         var addrRow = new FlowLayoutPanel
         {
@@ -62,7 +70,7 @@ public sealed class ChatForm : Form
         addrRow.Controls.Add(new Label { Text = "Порт:", AutoSize = true, Padding = new Padding(8, 6, 4, 0) });
         addrRow.Controls.Add(_peerPortEntry);
         addrRow.Controls.Add(_applyPeerEndpoint);
-        top.Controls.Add(addrRow, 0, 1);
+        top.Controls.Add(addrRow, 0, 2);
 
         var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 36, ColumnCount = 2 };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -77,6 +85,7 @@ public sealed class ChatForm : Form
         _applyPeerEndpoint.Click += async (_, _) => await OnApplyPeerEndpointAsync().ConfigureAwait(true);
         _send.Click += async (_, _) => await OnSendAsync().ConfigureAwait(true);
         Shown += async (_, _) => await OnShownAsync().ConfigureAwait(true);
+        FormClosed += (_, _) => _p2pRuntime.PeerPresenceChanged -= OnPeerPresenceChanged;
     }
 
     private async Task OnShownAsync()
@@ -84,6 +93,7 @@ public sealed class ChatForm : Form
         var uiSync = SynchronizationContext.Current;
         _p2pSession = new ChatP2pSession(_chat, _user, _auth, _repo, uiSync, _p2pRuntime.Gateway, _p2pRuntime.Settings);
         _p2pSession.MessagesChanged += OnP2pMessagesChanged;
+        _p2pRuntime.PeerPresenceChanged += OnPeerPresenceChanged;
         try
         {
             await _p2pSession.StartAsync().ConfigureAwait(true);
@@ -95,6 +105,7 @@ public sealed class ChatForm : Form
         }
 
         await ReloadMessagesAsync().ConfigureAwait(true);
+        RefreshPeerPresenceLabel();
     }
 
     private async Task OnApplyPeerEndpointAsync()
@@ -192,5 +203,22 @@ public sealed class ChatForm : Form
         {
             MessageBox.Show(this, ex.Message, "Send failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
+    }
+
+    private void OnPeerPresenceChanged(object? sender, ShortP2P.Client.Routing.PeerPresenceChangedEventArgs e)
+    {
+        var current = ShortP2P.Discovery.CompressedNetworkId.FromShortString(_chat.PeerNetworkIdShort).Value;
+        if (e.PeerNetworkId != current)
+            return;
+        if (!IsHandleCreated || IsDisposed)
+            return;
+        BeginInvoke(RefreshPeerPresenceLabel);
+    }
+
+    private void RefreshPeerPresenceLabel()
+    {
+        var online = _p2pRuntime.IsPeerOnline(_chat.PeerNetworkIdShort);
+        _peerStatusLabel.Text = online ? "Статус: онлайн" : "Статус: офлайн";
+        _peerStatusLabel.ForeColor = online ? Color.SeaGreen : SystemColors.GrayText;
     }
 }
