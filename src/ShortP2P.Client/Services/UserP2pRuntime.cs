@@ -1,4 +1,5 @@
 using ShortP2P.Client.Data;
+using ShortP2P.Client.LocalNetwork;
 using ShortP2P.Client.Routing;
 using ShortP2P.Discovery;
 using ShortP2P.Transport.Abstractions;
@@ -16,6 +17,9 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
     public SharedUserUdpGateway Gateway { get; }
 
+    /// <summary>Сканирование LAN по discovery-пингам (UDP 565, приём того же кадра по Bluetooth при наличии транспорта).</summary>
+    public LocalNetworkScanner LocalScan { get; }
+
     public event EventHandler<PeerPresenceChangedEventArgs>? PeerPresenceChanged
     {
         add => Gateway.PeerPresenceChanged += value;
@@ -28,6 +32,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         _chats = chats;
         _store = store;
         Gateway = new SharedUserUdpGateway(auth, chats, Settings, bluetoothTransport);
+        LocalScan = new LocalNetworkScanner(Gateway);
     }
 
     public async Task EnsureStartedAsync(UserEntity user, CancellationToken cancellationToken = default)
@@ -39,6 +44,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         Settings.SearchWaitTimeout = persisted.SearchWaitTimeout;
 
         await Gateway.EnsureStartedAsync(user, cancellationToken).ConfigureAwait(false);
+        await LocalScan.StartAsync(user, cancellationToken).ConfigureAwait(false);
 
         if (_discovery != null)
         {
@@ -55,6 +61,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
+        await LocalScan.StopAsync(cancellationToken).ConfigureAwait(false);
         Gateway.SetDiscovery(null);
         Gateway.SetChatSink(null);
         if (_discovery != null)

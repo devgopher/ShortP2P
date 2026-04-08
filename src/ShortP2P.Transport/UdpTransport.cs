@@ -7,10 +7,18 @@ namespace ShortP2P.Transport;
 /// <summary>
 ///     UDP-транспорт (кроссплатформенный). Один датаграмма = один блок для верхнего слоя.
 /// </summary>
-public sealed class UdpTransport(int listenPort) : ITransport
+public sealed class UdpTransport(int listenPort, bool enableBroadcast = false) : ITransport
 {
     private readonly Channel<TransportReceiveMessage> _channel = Channel.CreateUnbounded<TransportReceiveMessage>();
-    private readonly UdpClient _udp = new(listenPort);
+    private readonly UdpClient _udp = CreateClient(listenPort, enableBroadcast);
+
+    private static UdpClient CreateClient(int listenPort, bool enableBroadcast)
+    {
+        var c = new UdpClient(listenPort);
+        if (enableBroadcast)
+            c.EnableBroadcast = true;
+        return c;
+    }
     private CancellationTokenSource? _cts;
     private Task? _receiveTask;
 

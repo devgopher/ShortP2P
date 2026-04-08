@@ -43,6 +43,11 @@ public sealed class SharedUserUdpGateway(
 
     public event EventHandler<PeerPresenceChangedEventArgs>? PeerPresenceChanged;
 
+    /// <summary>
+    ///     Входящий discovery/presence ping (порт 565 или тот же кадр по Bluetooth).
+    /// </summary>
+    public event EventHandler<DiscoveryPingReceivedEventArgs>? DiscoveryPingReceived;
+
     public void SetDiscovery(IPeerDiscoveryService? discovery) => _discovery = discovery;
 
     public void SetChatSink(Func<ReadOnlyMemory<byte>, TransportAddress, Task>? sink) => _chatSink = sink;
@@ -59,7 +64,7 @@ public sealed class SharedUserUdpGateway(
 
             _user = user;
             _udp = new UdpTransport(user.DataUdpPort);
-            _presenceUdp = new UdpTransport(PresencePingCodec.UdpPort);
+            _presenceUdp = new UdpTransport(PresencePingCodec.UdpPort, enableBroadcast: true);
             _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _receiveLoop = Task.Run(() => ReceiveLoopAsync(_cts.Token), _cts.Token);
             _presenceReceiveLoop = Task.Run(() => PresenceReceiveLoopAsync(_cts.Token), _cts.Token);
@@ -274,11 +279,26 @@ public sealed class SharedUserUdpGateway(
         }
     }
 
+    /// <summary>Отправка датаграммы на выделенный порт discovery/presence (565).</summary>
+    public async ValueTask SendOnPresencePortAsync(ReadOnlyMemory<byte> payload, TransportAddress destination,
+        CancellationToken cancellationToken = default)
+    {
+        var p = _presenceUdp ?? throw new InvalidOperationException("Gateway not started.");
+        await p.SendAsync(payload, destination, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task ProcessIncomingBufferAsync(byte[] buf, TransportAddress remoteAddress,
         CancellationToken cancellationToken)
     {
         if (buf.Length == 0)
             return;
+
+        if (buf.Length >= 17 && buf[0] == PresencePingCodec.FramePresencePing &&
+            PresencePingCodec.TryParse(buf, out var pingId, out var pingNick))
+        {
+            await HandleDiscoveryPingAsync(pingId, pingNick, remoteAddress).ConfigureAwait(false);
+            return;
+        }
 
         var relayLocalInner = ExtractLocalRelayInner(buf);
         if (relayLocalInner is { Length: > 0 })
@@ -341,19 +361,34 @@ public sealed class SharedUserUdpGateway(
             await foreach (var msg in presenceUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 var buf = msg.Payload.ToArray();
-                if (!PresencePingCodec.TryParse(buf, out var pingSender))
+                if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick))
                     continue;
-                var user = _user;
-                if (user == null) continue;
-                var shortId = CompressedNetworkId.FromGuid(pingSender).ToShortString();
-                var chat = await chats.FindChatByPeerNetworkIdAsync(user.Id, shortId).ConfigureAwait(false);
-                if (chat == null) continue;
-                var dataAddr = UdpTransportAddress.WithUdpPort(msg.RemoteAddress, chat.PeerPort);
-                MarkPeerOnline(pingSender, dataAddr);
+                await HandleDiscoveryPingAsync(pingSender, nick, msg.RemoteAddress).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
         {
+        }
+    }
+
+    private async Task HandleDiscoveryPingAsync(Guid networkId, string nickname, TransportAddress remote)
+    {
+        var peer = new DiscoveredLocalPeer(networkId, nickname, remote, remote.Kind, DateTimeOffset.UtcNow);
+        DiscoveryPingReceived?.Invoke(this, new DiscoveryPingReceivedEventArgs(peer));
+
+        var user = _user;
+        if (user == null) return;
+        var shortId = CompressedNetworkId.FromGuid(networkId).ToShortString();
+        var chat = await chats.FindChatByPeerNetworkIdAsync(user.Id, shortId).ConfigureAwait(false);
+        if (chat == null) return;
+        if (remote.Kind == TransportKind.Udp)
+        {
+            var dataAddr = UdpTransportAddress.WithUdpPort(remote, chat.PeerPort);
+            MarkPeerOnline(networkId, dataAddr);
+        }
+        else if (remote.Kind == TransportKind.Bluetooth)
+        {
+            MarkPeerOnline(networkId, remote);
         }
     }
 
@@ -589,7 +624,8 @@ public sealed class SharedUserUdpGateway(
         if (presenceUdp == null || user == null)
             return;
 
-        var payload = PresencePingCodec.Build(CompressedNetworkId.FromShortString(user.NetworkIdShort).Value);
+        var payload = PresencePingCodec.Build(CompressedNetworkId.FromShortString(user.NetworkIdShort).Value,
+            user.Nickname);
         var peers = await chats.ListChatsAsync(user.Id).ConfigureAwait(false);
         foreach (var c in peers)
         {
