@@ -10,8 +10,9 @@ public sealed class MainChatsForm : Form
     private readonly ChatRepository _chats;
     private readonly UserP2pRuntime _p2p;
     private readonly Label _profile = new() { AutoSize = true };
-    private readonly ListBox _list = new() { IntegralHeight = false, Height = 280, Width = 480 };
-    private readonly P2pRoutingSettingsStore  _routingStore;
+    private readonly ListBox _list = new() { IntegralHeight = false };
+    private readonly P2pRoutingSettingsStore _routingStore;
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     public MainChatsForm(AuthService auth, ChatRepository chats, UserP2pRuntime p2p, P2pRoutingSettingsStore routingStore)
     {
@@ -108,6 +109,9 @@ public sealed class MainChatsForm : Form
 
     private async Task RefreshAsync()
     {
+        await _refreshGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
         var u = _auth.CurrentUser;
         if (u == null)
         {
@@ -116,13 +120,36 @@ public sealed class MainChatsForm : Form
             return;
         }
 
+        var prevTop = _list.Items.Count > 0 ? _list.TopIndex : 0;
+        var prevSelectedId = (_list.SelectedItem as ChatEntity)?.Id;
+
         _profile.Text = $"You: {u.Nickname} · id {u.NetworkIdShort} · local UDP {u.DataUdpPort}";
         var list = await _chats.ListChatsAsync(u.Id).ConfigureAwait(true);
         _list.BeginUpdate();
         _list.Items.Clear();
         foreach (var c in list)
             _list.Items.Add(c);
+
+        if (prevSelectedId.HasValue)
+            foreach (var item in _list.Items)
+                if (item is ChatEntity chat && chat.Id == prevSelectedId.Value)
+                {
+                    _list.SelectedItem = item;
+                    break;
+                }
+
+        if (_list.Items.Count > 0)
+        {
+            var safeTop = Math.Clamp(prevTop, 0, _list.Items.Count - 1);
+            _list.TopIndex = safeTop;
+        }
+
         _list.EndUpdate();
+    }
+        finally
+        {
+            _refreshGate.Release();
+        }
     }
 
     private void OnRoutingSettings(object? sender, EventArgs e)

@@ -10,7 +10,7 @@ public sealed class ChatForm : Form
     private readonly UserEntity _user;
     private readonly AuthService _auth;
     private readonly ChatRepository _repo;
-    private readonly UserP2pRuntime _p2pRuntime;
+    private readonly UserP2pRuntime _p2PRuntime;
     private readonly Label _peerIdLabel = new()
     {
         AutoSize = true,
@@ -23,21 +23,22 @@ public sealed class ChatForm : Form
         ForeColor = SystemColors.GrayText,
         Padding = new Padding(0, 0, 0, 4),
     };
+    
     private readonly TextBox _peerHostEntry = new() { Width = 200 };
     private readonly TextBox _peerPortEntry = new() { Width = 56 };
     private readonly Button _applyPeerEndpoint = new() { Text = "Применить", AutoSize = true };
-    private readonly ListBox _messages = new() { Dock = DockStyle.Fill, IntegralHeight = false };
+    private readonly ListBox _messages = new() { Dock = DockStyle.Bottom, IntegralHeight = true, Height = 300, ScrollAlwaysVisible = true, Padding = new Padding(8, 5, 8, 4) };
     private readonly TextBox _input = new() { Dock = DockStyle.Fill };
     private readonly Button _send = new() { Text = "Send", Dock = DockStyle.Right, AutoSize = true };
-    private ChatP2pSession? _p2pSession;
+    private ChatP2pSession? _p2PSession;
 
-    public ChatForm(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo, UserP2pRuntime p2pRuntime)
+    public ChatForm(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo, UserP2pRuntime p2PRuntime)
     {
         _chat = chat;
         _user = user;
         _auth = auth;
         _repo = repo;
-        _p2pRuntime = p2pRuntime;
+        _p2PRuntime = p2PRuntime;
         Text = chat.PeerNickname;
         StartPosition = FormStartPosition.CenterParent;
         Width = 520;
@@ -85,18 +86,18 @@ public sealed class ChatForm : Form
         _applyPeerEndpoint.Click += async (_, _) => await OnApplyPeerEndpointAsync().ConfigureAwait(true);
         _send.Click += async (_, _) => await OnSendAsync().ConfigureAwait(true);
         Shown += async (_, _) => await OnShownAsync().ConfigureAwait(true);
-        FormClosed += (_, _) => _p2pRuntime.PeerPresenceChanged -= OnPeerPresenceChanged;
+        FormClosed += (_, _) => _p2PRuntime.PeerPresenceChanged -= OnPeerPresenceChanged;
     }
 
     private async Task OnShownAsync()
     {
         var uiSync = SynchronizationContext.Current;
-        _p2pSession = new ChatP2pSession(_chat, _user, _auth, _repo, uiSync, _p2pRuntime.Gateway, _p2pRuntime.Settings);
-        _p2pSession.MessagesChanged += OnP2pMessagesChanged;
-        _p2pRuntime.PeerPresenceChanged += OnPeerPresenceChanged;
+        _p2PSession = new ChatP2pSession(_chat, _user, _auth, _repo, uiSync, _p2PRuntime.Gateway, _p2PRuntime.Settings);
+        _p2PSession.MessagesChanged += OnP2pMessagesChanged;
+        _p2PRuntime.PeerPresenceChanged += OnPeerPresenceChanged;
         try
         {
-            await _p2pSession.StartAsync().ConfigureAwait(true);
+            await _p2PSession.StartAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -110,7 +111,7 @@ public sealed class ChatForm : Form
 
     private async Task OnApplyPeerEndpointAsync()
     {
-        if (_p2pSession == null)
+        if (_p2PSession == null)
         {
             MessageBox.Show(this, "Сессия ещё не готова.", "Чат", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
@@ -141,7 +142,7 @@ public sealed class ChatForm : Form
 
         try
         {
-            await _p2pSession.ApplyPeerEndpointAsync(host, port).ConfigureAwait(true);
+            await _p2PSession.ApplyPeerEndpointAsync(host, port).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -155,11 +156,11 @@ public sealed class ChatForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
-        if (_p2pSession != null)
+        if (_p2PSession != null)
         {
-            _p2pSession.MessagesChanged -= OnP2pMessagesChanged;
-            _p2pSession.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            _p2pSession = null;
+            _p2PSession.MessagesChanged -= OnP2pMessagesChanged;
+            _p2PSession.DisposeAsync();
+            _p2PSession = null;
         }
 
         base.OnFormClosed(e);
@@ -190,12 +191,12 @@ public sealed class ChatForm : Form
     private async Task OnSendAsync()
     {
         var text = _input.Text.Trim();
-        if (text.Length == 0 || _p2pSession == null)
+        if (text.Length == 0 || _p2PSession == null)
             return;
 
         try
         {
-            await _p2pSession.SendTextAsync(text).ConfigureAwait(true);
+            await _p2PSession.SendTextAsync(text).ConfigureAwait(true);
             _input.Clear();
             await ReloadMessagesAsync().ConfigureAwait(true);
         }
@@ -217,7 +218,7 @@ public sealed class ChatForm : Form
 
     private void RefreshPeerPresenceLabel()
     {
-        var online = _p2pRuntime.IsPeerOnline(_chat.PeerNetworkIdShort);
+        var online = _p2PRuntime.IsPeerOnline(_chat.PeerNetworkIdShort);
         _peerStatusLabel.Text = online ? "Статус: онлайн" : "Статус: офлайн";
         _peerStatusLabel.ForeColor = online ? Color.SeaGreen : SystemColors.GrayText;
     }
