@@ -2,6 +2,7 @@ using ShortP2P.Client;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Transport.Bluetooth.Windows;
 
 namespace ShortP2P.WinForms;
 
@@ -20,17 +21,39 @@ internal static class Program
         var auth = new AuthService(db, session);
         var chats = new ChatRepository(db);
         var routingStore = new P2pRoutingSettingsStore(session);
-        var p2p = new UserP2pRuntime(auth, chats, routingStore);
 
-        while (true)
+        WindowsBluetoothTransport? bluetooth = null;
+        try
         {
-            using var login = new LoginForm(auth);
-            if (login.ShowDialog() != DialogResult.OK)
-                return;
+            bluetooth = new WindowsBluetoothTransport();
+        }
+        catch
+        {
+            // Нет адаптера, отключённый Bluetooth или среда без WinRT — работаем только по UDP.
+        }
 
-            using var main = new MainChatsForm(auth, chats, p2p, routingStore);
-            if (main.ShowDialog() != DialogResult.Retry)
-                return;
+        UserP2pRuntime? p2p = null;
+        try
+        {
+            p2p = new UserP2pRuntime(auth, chats, routingStore, bluetooth);
+
+            while (true)
+            {
+                using var login = new LoginForm(auth);
+                if (login.ShowDialog() != DialogResult.OK)
+                    return;
+
+                using var main = new MainChatsForm(auth, chats, p2p, routingStore);
+                if (main.ShowDialog() != DialogResult.Retry)
+                    return;
+            }
+        }
+        finally
+        {
+            if (p2p != null)
+                p2p.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            if (bluetooth != null)
+                bluetooth.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
     }
 }

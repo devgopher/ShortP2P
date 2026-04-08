@@ -8,8 +8,15 @@ using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Client.Routing;
 
-/// <summary>Единый UDP-сокет пользователя: поиск пиров по графу (≤3 рёбер), ретрансляция, демультиплексирование чата.</summary>
-public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats, P2pRoutingSettings settings)
+/// <summary>
+///     Единый UDP-сокет пользователя: поиск пиров по графу (≤3 рёбер), ретрансляция, демультиплексирование чата.
+///     Опционально — второй транспорт (например Bluetooth RFCOMM на Windows) для прямой доставки по <see cref="TransportAddress" />.
+/// </summary>
+public sealed class SharedUserUdpGateway(
+    AuthService auth,
+    ChatRepository chats,
+    P2pRoutingSettings settings,
+    ITransport? bluetoothTransport = null)
     : IAsyncDisposable
 {
     private static readonly TimeSpan PresencePingInterval = TimeSpan.FromSeconds(10);
@@ -24,6 +31,7 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
     private UserEntity? _user;
     private CancellationTokenSource? _cts;
     private Task? _receiveLoop;
+    private Task? _bluetoothReceiveLoop;
     private Task? _presenceAnnounceLoop;
     private Task? _presenceStaleLoop;
     private Func<ReadOnlyMemory<byte>, TransportAddress, Task>? _chatSink;
@@ -51,25 +59,32 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
             _udp = new UdpTransport(user.DataUdpPort);
             _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _receiveLoop = Task.Run(() => ReceiveLoopAsync(_cts.Token), _cts.Token);
+            if (bluetoothTransport != null)
+                _bluetoothReceiveLoop = Task.Run(() => BluetoothReceiveLoopAsync(_cts.Token), _cts.Token);
             _presenceAnnounceLoop = Task.Run(() => PresenceAnnounceLoopAsync(_cts.Token), _cts.Token);
             _presenceStaleLoop = Task.Run(() => PresenceStaleLoopAsync(_cts.Token), _cts.Token);
         }
 
         await _udp.StartAsync(cancellationToken).ConfigureAwait(false);
+        if (bluetoothTransport != null)
+            await bluetoothTransport.StartAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         Task? loop;
+        Task? bluetoothLoop;
         Task? presenceAnnounce;
         Task? presenceStale;
         lock (_startSync)
         {
             _cts?.Cancel();
             loop = _receiveLoop;
+            bluetoothLoop = _bluetoothReceiveLoop;
             presenceAnnounce = _presenceAnnounceLoop;
             presenceStale = _presenceStaleLoop;
             _receiveLoop = null;
+            _bluetoothReceiveLoop = null;
             _presenceAnnounceLoop = null;
             _presenceStaleLoop = null;
             _cts?.Dispose();
@@ -84,7 +99,7 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
             _user = null;
         }
 
-        var loops = new[] { loop, presenceAnnounce, presenceStale }.Where(t => t != null).ToArray();
+        var loops = new[] { loop, bluetoothLoop, presenceAnnounce, presenceStale }.Where(t => t != null).ToArray();
         if (loops.Length > 0)
         {
             try
@@ -93,6 +108,19 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
             }
             catch (OperationCanceledException)
             {
+                // ignore
+            }
+        }
+
+        if (bluetoothTransport != null)
+        {
+            try
+            {
+                await bluetoothTransport.StopAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore
             }
         }
 
@@ -155,15 +183,15 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
     public async ValueTask SendP2pPayloadAsync(ReadOnlyMemory<byte> prefixedFrame, ChatRelayRoute route,
         CancellationToken cancellationToken = default)
     {
-        var udp = _udp ?? throw new InvalidOperationException("Gateway not started.");
+        _ = _udp ?? throw new InvalidOperationException("Gateway not started.");
         if (route is { FirstHop: not null, RelayStrip.Count: > 0 })
         {
             var relay = LanRoutingCodec.BuildRelay(route.RelayStrip, prefixedFrame.Span);
-            await udp.SendAsync(relay, route.FirstHop, cancellationToken).ConfigureAwait(false);
+            await SendToTransportAsync(relay, route.FirstHop, cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            await udp.SendAsync(prefixedFrame, route.Direct, cancellationToken).ConfigureAwait(false);
+            await SendToTransportAsync(prefixedFrame, route.Direct, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -205,65 +233,106 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
             await foreach (var msg in udp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 var buf = msg.Payload.ToArray();
-                if (buf.Length == 0)
-                    continue;
-
-                var relayLocalInner = ExtractLocalRelayInner(buf);
-                if (relayLocalInner is { Length: > 0 })
-                {
-                    if (relayLocalInner[0] == ChatInviteCodec.FrameChatInvite)
-                        await HandleChatInviteAsync(relayLocalInner, cancellationToken).ConfigureAwait(false);
-                    else
-                        await DispatchChatOrDropAsync(relayLocalInner, msg.RemoteAddress).ConfigureAwait(false);
-                    continue;
-                }
-
-                if (buf[0] == LanRoutingCodec.FrameRelay && buf.Length > 2 && buf[1] > 0)
-                {
-                    if (LanRoutingCodec.TryStripRelayHop(buf, out var next, out var fwd) && next != null && fwd != null)
-                    {
-                        try
-                        {
-                            await udp.SendAsync(fwd, next, cancellationToken).ConfigureAwait(false);
-                        }
-                        catch
-                        {
-                            // ignore
-                        }
-                    }
-
-                    continue;
-                }
-
-                if (buf[0] == LanRoutingCodec.FrameFind)
-                {
-                    await HandleFindAsync(buf, msg.RemoteAddress, cancellationToken).ConfigureAwait(false);
-                    continue;
-                }
-
-                if (buf[0] == LanRoutingCodec.FrameFound)
-                {
-                    await HandleFoundAsync(buf, msg.RemoteAddress, cancellationToken).ConfigureAwait(false);
-                    continue;
-                }
-
-                if (buf[0] == ChatInviteCodec.FrameChatInvite)
-                {
-                    await HandleChatInviteAsync(buf, cancellationToken).ConfigureAwait(false);
-                    continue;
-                }
-
-                if (PresencePingCodec.TryParse(buf, out var pingSender))
-                {
-                    MarkPeerOnline(pingSender, msg.RemoteAddress);
-                    continue;
-                }
-
-                await DispatchChatOrDropAsync(buf, msg.RemoteAddress).ConfigureAwait(false);
+                await ProcessIncomingBufferAsync(buf, msg.RemoteAddress, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
         {
+        }
+    }
+
+    private async Task BluetoothReceiveLoopAsync(CancellationToken cancellationToken)
+    {
+        var bt = bluetoothTransport;
+        if (bt == null) return;
+        try
+        {
+            await foreach (var msg in bt.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var buf = msg.Payload.ToArray();
+                await ProcessIncomingBufferAsync(buf, msg.RemoteAddress, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task ProcessIncomingBufferAsync(byte[] buf, TransportAddress remoteAddress,
+        CancellationToken cancellationToken)
+    {
+        if (buf.Length == 0)
+            return;
+
+        var relayLocalInner = ExtractLocalRelayInner(buf);
+        if (relayLocalInner is { Length: > 0 })
+        {
+            if (relayLocalInner[0] == ChatInviteCodec.FrameChatInvite)
+                await HandleChatInviteAsync(relayLocalInner, cancellationToken).ConfigureAwait(false);
+            else
+                await DispatchChatOrDropAsync(relayLocalInner, remoteAddress).ConfigureAwait(false);
+            return;
+        }
+
+        if (buf[0] == LanRoutingCodec.FrameRelay && buf.Length > 2 && buf[1] > 0)
+        {
+            if (LanRoutingCodec.TryStripRelayHop(buf, out var next, out var fwd) && next != null && fwd != null)
+            {
+                try
+                {
+                    await SendToTransportAsync(fwd, next, cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            return;
+        }
+
+        if (buf[0] == LanRoutingCodec.FrameFind)
+        {
+            await HandleFindAsync(buf, remoteAddress, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (buf[0] == LanRoutingCodec.FrameFound)
+        {
+            await HandleFoundAsync(buf, remoteAddress, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (buf[0] == ChatInviteCodec.FrameChatInvite)
+        {
+            await HandleChatInviteAsync(buf, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (PresencePingCodec.TryParse(buf, out var pingSender))
+        {
+            MarkPeerOnline(pingSender, remoteAddress);
+            return;
+        }
+
+        await DispatchChatOrDropAsync(buf, remoteAddress).ConfigureAwait(false);
+    }
+
+    private async Task SendToTransportAsync(ReadOnlyMemory<byte> packet, TransportAddress destination,
+        CancellationToken cancellationToken)
+    {
+        switch (destination.Kind)
+        {
+            case TransportKind.Udp:
+                var udp = _udp ?? throw new InvalidOperationException("Gateway not started.");
+                await udp.SendAsync(packet, destination, cancellationToken).ConfigureAwait(false);
+                return;
+            case TransportKind.Bluetooth:
+                var bt = bluetoothTransport ?? throw new InvalidOperationException("Bluetooth transport is not configured.");
+                await bt.SendAsync(packet, destination, cancellationToken).ConfigureAwait(false);
+                return;
+            default:
+                throw new NotSupportedException($"Transport kind '{destination.Kind}' is not supported.");
         }
     }
 
@@ -312,7 +381,7 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
                 RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), host, user.DataUdpPort, first, strip);
             try
             {
-                await udp.SendAsync(found, from, ct).ConfigureAwait(false);
+                await SendToTransportAsync(found, from, ct).ConfigureAwait(false);
             }
             catch
             {
@@ -375,8 +444,7 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
 
     private async Task HandleFoundAsync(byte[] packet, TransportAddress from, CancellationToken ct)
     {
-        var udp = _udp;
-        if (udp == null) return;
+        if (_udp == null) return;
         if (!LanRoutingCodec.TryParseFound(packet, out var searchId, out _, out _, out var pub, out var host,
                 out var port, out var firstHop, out var strip))
             return;
@@ -399,7 +467,7 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
         {
             try
             {
-                await udp.SendAsync(packet, upstream, ct).ConfigureAwait(false);
+                await SendToTransportAsync(packet, upstream, ct).ConfigureAwait(false);
             }
             catch
             {
@@ -429,6 +497,7 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
         return kind switch
         {
             TransportKind.Udp => _udp != null,
+            TransportKind.Bluetooth => bluetoothTransport != null,
             _ => false
         };
     }
@@ -436,10 +505,8 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
     public async ValueTask SendRawToAsync(ReadOnlyMemory<byte> packet, TransportAddress destination,
         CancellationToken cancellationToken = default)
     {
-        var udp = _udp ?? throw new InvalidOperationException("Gateway not started.");
-        if (destination.Kind != TransportKind.Udp)
-            throw new NotSupportedException($"Transport kind '{destination.Kind}' is not available yet.");
-        await udp.SendAsync(packet, destination, cancellationToken).ConfigureAwait(false);
+        _ = _udp ?? throw new InvalidOperationException("Gateway not started.");
+        await SendToTransportAsync(packet, destination, cancellationToken).ConfigureAwait(false);
     }
 
     private void MarkPeerOnline(Guid peerNetworkId, TransportAddress from)

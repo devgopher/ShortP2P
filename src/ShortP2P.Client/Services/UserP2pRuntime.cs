@@ -1,6 +1,7 @@
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Discovery;
+using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Client.Services;
 
@@ -21,11 +22,12 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         remove => Gateway.PeerPresenceChanged -= value;
     }
 
-    public UserP2pRuntime(AuthService auth, ChatRepository chats, P2pRoutingSettingsStore store)
+    public UserP2pRuntime(AuthService auth, ChatRepository chats, P2pRoutingSettingsStore store,
+        ITransport? bluetoothTransport = null)
     {
         _chats = chats;
         _store = store;
-        Gateway = new SharedUserUdpGateway(auth, chats, Settings);
+        Gateway = new SharedUserUdpGateway(auth, chats, Settings, bluetoothTransport);
     }
 
     public async Task EnsureStartedAsync(UserEntity user, CancellationToken cancellationToken = default)
