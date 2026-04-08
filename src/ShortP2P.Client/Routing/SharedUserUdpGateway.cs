@@ -137,7 +137,7 @@ public sealed class SharedUserUdpGateway(AuthService auth, ChatRepository chats,
         CancellationToken cancellationToken = default)
     {
         var udp = _udp ?? throw new InvalidOperationException("Gateway not started.");
-        if (route.FirstHop != null && route.RelayStrip.Count > 0)
+        if (route is { FirstHop: not null, RelayStrip.Count: > 0 })
         {
             var relay = LanRoutingCodec.BuildRelay(route.RelayStrip, prefixedFrame.Span);
             await udp.SendAsync(relay, route.FirstHop, cancellationToken).ConfigureAwait(false);

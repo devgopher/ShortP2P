@@ -8,6 +8,8 @@ using ShortP2P.Discovery;
 using ShortP2P.Messenger;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
+using Polly;
+using Polly.Retry;
 
 namespace ShortP2P.Client.Services;
 
@@ -15,18 +17,20 @@ namespace ShortP2P.Client.Services;
 /// One chat: UDP transport, RSA handshake (0x01 + 128 bytes), encrypted messenger frames (0x02 + ciphertext).
 /// С опциональным <see cref="SharedUserUdpGateway"/> — поиск пира по графу (≤3 рёбер), ретрансляция и повторы при ошибке.
 /// </summary>
-public sealed class ChatP2pSession : IAsyncDisposable
+public sealed class ChatP2pSession(
+    ChatEntity chat,
+    UserEntity user,
+    AuthService auth,
+    ChatRepository repo,
+    SynchronizationContext? uiSynchronizationContext = null,
+    SharedUserUdpGateway? sharedGateway = null,
+    P2pRoutingSettings? routingSettings = null)
+    : IAsyncDisposable
 {
     private const byte FrameHandshake = 0x01;
     private const byte FrameCipher = 0x02;
 
-    private readonly ChatEntity _chat;
-    private readonly UserEntity _user;
-    private readonly AuthService _auth;
-    private readonly ChatRepository _repo;
-    private readonly SynchronizationContext? _uiSync;
-    private readonly SharedUserUdpGateway? _gateway;
-    private readonly P2pRoutingSettings? _routing;
+    private readonly P2pRoutingSettings? _routing = routingSettings ?? (sharedGateway != null ? new P2pRoutingSettings() : null);
 
     private readonly object _sync = new();
     private readonly SemaphoreSlim _sessionSetup = new(1, 1);
@@ -44,34 +48,21 @@ public sealed class ChatP2pSession : IAsyncDisposable
     private ChatRelayRoute _route = null!;
     private RsaPublicKey? _peerPublicKey;
 
-    public ChatP2pSession(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo,
-        SynchronizationContext? uiSynchronizationContext = null, SharedUserUdpGateway? sharedGateway = null,
-        P2pRoutingSettings? routingSettings = null)
-    {
-        _chat = chat;
-        _user = user;
-        _auth = auth;
-        _repo = repo;
-        _uiSync = uiSynchronizationContext;
-        _gateway = sharedGateway;
-        _routing = routingSettings ?? (sharedGateway != null ? new P2pRoutingSettings() : null);
-    }
-
     public event EventHandler? MessagesChanged;
 
     private void RaiseMessagesChanged()
     {
-        if (_uiSync != null)
-            _uiSync.Post(_ => MessagesChanged?.Invoke(this, EventArgs.Empty), null);
+        if (uiSynchronizationContext != null)
+            uiSynchronizationContext.Post(_ => MessagesChanged?.Invoke(this, EventArgs.Empty), null);
         else
             MessagesChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void RebuildRouteFromChat()
     {
-        _peerPublicKey = RsaKeySerializer.DeserializePublic(_chat.PeerRsaPublicJson);
-        _peerAddress = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(_chat.PeerHost), _chat.PeerPort));
-        _route = ChatRelayRoute.FromChat(_peerAddress, _chat.RelayRouteBlob);
+        _peerPublicKey = RsaKeySerializer.DeserializePublic(chat.PeerRsaPublicJson);
+        _peerAddress = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(chat.PeerHost), chat.PeerPort));
+        _route = ChatRelayRoute.FromChat(_peerAddress, chat.RelayRouteBlob);
     }
 
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
@@ -84,18 +75,18 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        if (_gateway != null)
+        if (sharedGateway != null)
         {
-            await _gateway.EnsureStartedAsync(_user, cancellationToken).ConfigureAwait(false);
+            await sharedGateway.EnsureStartedAsync(user, cancellationToken).ConfigureAwait(false);
             _prefixed = new PrefixedCipherTransport(_bridge, async (mem, ct) =>
             {
                 await SendRouteRawAsync(mem, ct).ConfigureAwait(false);
             });
-            _gateway.SetChatSink(ProcessGatewayDatagramAsync);
+            sharedGateway.SetChatSink(ProcessGatewayDatagramAsync);
         }
         else
         {
-            _udp = new UdpTransport(_user.DataUdpPort);
+            _udp = new UdpTransport(user.DataUdpPort);
             await _udp.StartAsync(cancellationToken).ConfigureAwait(false);
             _prefixed = new PrefixedCipherTransport(_bridge, async (mem, ct) =>
             {
@@ -125,10 +116,10 @@ public sealed class ChatP2pSession : IAsyncDisposable
         if (peerPort is < 1 or > 65535)
             throw new ArgumentOutOfRangeException(nameof(peerPort));
 
-        await _repo.UpdateChatP2pRouteAsync(_chat.Id, peerHost, peerPort, null).ConfigureAwait(false);
-        _chat.PeerHost = peerHost;
-        _chat.PeerPort = peerPort;
-        _chat.RelayRouteBlob = null;
+        await repo.UpdateChatP2pRouteAsync(chat.Id, peerHost, peerPort, null).ConfigureAwait(false);
+        chat.PeerHost = peerHost;
+        chat.PeerPort = peerPort;
+        chat.RelayRouteBlob = null;
         RebuildRouteFromChat();
         await ResetCryptoStateAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -144,9 +135,9 @@ public sealed class ChatP2pSession : IAsyncDisposable
     private async Task SendChatInviteAsync(CancellationToken cancellationToken)
     {
         var host = LocalEndpointHelper.GetPreferredLanIPv4String();
-        var nid = CompressedNetworkId.FromShortString(_user.NetworkIdShort);
-        var invite = ChatInviteCodec.Build(_user.Nickname, nid,
-            RsaKeySerializer.SerializePublic(_auth.GetCurrentPublicKey()), host, _user.DataUdpPort);
+        var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
+        var invite = ChatInviteCodec.Build(user.Nickname, nid,
+            RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), host, user.DataUdpPort);
         await SendRouteRawAsync(invite, cancellationToken).ConfigureAwait(false);
     }
 
@@ -154,39 +145,43 @@ public sealed class ChatP2pSession : IAsyncDisposable
     {
         if (string.IsNullOrEmpty(text))
             return;
+        var bytes = Encoding.UTF8.GetBytes(text);
+        var shouldRetry = sharedGateway != null && _routing != null;
+        var totalAttempts = shouldRetry ? Math.Max(1, _routing!.SendFailureSearchAttempts) : 1;
+        var retryDelay = shouldRetry ? _routing!.SendFailureRetryDelay : TimeSpan.Zero;
 
-        var maxAttempts = _gateway != null && _routing != null ? Math.Max(1, _routing.SendFailureSearchAttempts) : 1;
-
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        RetryStrategyOptions retryOptions = new()
         {
-            try
+            MaxRetryAttempts = Math.Max(0, totalAttempts - 1),
+            Delay = retryDelay,
+            BackoffType = DelayBackoffType.Constant,
+            ShouldHandle = new PredicateBuilder().Handle<Exception>(ex => ex is not OperationCanceledException),
+            OnRetry = async args =>
             {
-                await EnsureSessionAsInitiatorAsync(cancellationToken).ConfigureAwait(false);
+                if (!shouldRetry)
+                    return;
 
-                var bytes = Encoding.UTF8.GetBytes(text);
-                await _messenger!.SendBinaryAsync(bytes, _peerAddress!, cancellationToken).ConfigureAwait(false);
-                await _repo.AddMessageAsync(_chat.Id, true, text).ConfigureAwait(false);
-                RaiseMessagesChanged();
-                return;
+                await TryRefreshRouteViaSearchAsync(args.Context.CancellationToken).ConfigureAwait(false);
+                await ResetCryptoStateAsync(args.Context.CancellationToken).ConfigureAwait(false);
             }
-            catch (Exception)
-            {
-                var canRetry = attempt < maxAttempts && _gateway != null && _routing != null;
-                if (!canRetry)
-                    throw;
+        };
 
-                await Task.Delay(_routing!.SendFailureRetryDelay, cancellationToken).ConfigureAwait(false);
-                await TryRefreshRouteViaSearchAsync(cancellationToken).ConfigureAwait(false);
-                await ResetCryptoStateAsync(cancellationToken).ConfigureAwait(false);
-            }
-        }
+        var pipeline = new ResiliencePipelineBuilder().AddRetry(retryOptions).Build();
+        await pipeline.ExecuteAsync(async ct =>
+        {
+            await EnsureSessionAsInitiatorAsync(ct).ConfigureAwait(false);
+            await _messenger!.SendBinaryAsync(bytes, _peerAddress!, ct).ConfigureAwait(false);
+        }, cancellationToken).ConfigureAwait(false);
+
+        await repo.AddMessageAsync(chat.Id, true, text).ConfigureAwait(false);
+        RaiseMessagesChanged();
     }
 
     private async Task TryRefreshRouteViaSearchAsync(CancellationToken cancellationToken)
     {
-        if (_gateway == null) return;
-        var targetId = CompressedNetworkId.FromShortString(_chat.PeerNetworkIdShort).Value;
-        var found = await _gateway.SearchPeerAsync(targetId, _chat.PeerNickname, cancellationToken)
+        if (sharedGateway == null) return;
+        var targetId = CompressedNetworkId.FromShortString(chat.PeerNetworkIdShort).Value;
+        var found = await sharedGateway.SearchPeerAsync(targetId, chat.PeerNickname, cancellationToken)
             .ConfigureAwait(false);
         if (found == null)
             return;
@@ -203,13 +198,13 @@ public sealed class ChatP2pSession : IAsyncDisposable
             });
         }
 
-        await _repo.UpdateChatP2pRouteAsync(_chat.Id, found.PeerHost, found.PeerPort, blob).ConfigureAwait(false);
-        var fresh = await _repo.GetChatAsync(_chat.Id).ConfigureAwait(false);
+        await repo.UpdateChatP2pRouteAsync(chat.Id, found.PeerHost, found.PeerPort, blob).ConfigureAwait(false);
+        var fresh = await repo.GetChatAsync(chat.Id).ConfigureAwait(false);
         if (fresh != null)
         {
-            _chat.PeerHost = fresh.PeerHost;
-            _chat.PeerPort = fresh.PeerPort;
-            _chat.RelayRouteBlob = fresh.RelayRouteBlob;
+            chat.PeerHost = fresh.PeerHost;
+            chat.PeerPort = fresh.PeerPort;
+            chat.RelayRouteBlob = fresh.RelayRouteBlob;
             RebuildRouteFromChat();
         }
     }
@@ -266,8 +261,8 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
     private async ValueTask SendRouteRawAsync(ReadOnlyMemory<byte> packet, CancellationToken cancellationToken)
     {
-        if (_gateway != null)
-            await _gateway.SendP2pPayloadAsync(packet, _route, cancellationToken).ConfigureAwait(false);
+        if (sharedGateway != null)
+            await sharedGateway.SendP2pPayloadAsync(packet, _route, cancellationToken).ConfigureAwait(false);
         else
             await _udp!.SendAsync(packet, _peerAddress!, cancellationToken).ConfigureAwait(false);
     }
@@ -320,7 +315,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
                 if (buf[0] == ChatInviteCodec.FrameChatInvite)
                 {
-                    await IncomingChatInviteHandler.TryAcceptAsync(buf, _auth, _repo, cancellationToken)
+                    await IncomingChatInviteHandler.TryAcceptAsync(buf, auth, repo, cancellationToken)
                         .ConfigureAwait(false);
                     continue;
                 }
@@ -354,13 +349,13 @@ public sealed class ChatP2pSession : IAsyncDisposable
         await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            MessengerService? created = null;
+            MessengerService? created;
             lock (_sync)
             {
                 if (_session != null)
                     return;
 
-                var localPrivate = _auth.GetCurrentPrivateKey();
+                var localPrivate = auth.GetCurrentPrivateKey();
                 _session = P2PCrypto.CreateSession(localPrivate, handshakePacket);
                 _messenger = new MessengerService(_prefixed!, _session);
                 created = _messenger;
@@ -406,7 +401,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
             await foreach (var incoming in m.Incoming.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 var text = Encoding.UTF8.GetString(incoming.Payload.ToArray());
-                await _repo.AddMessageAsync(_chat.Id, false, text).ConfigureAwait(false);
+                await repo.AddMessageAsync(chat.Id, false, text).ConfigureAwait(false);
                 RaiseMessagesChanged();
             }
         }
@@ -418,8 +413,8 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
-        if (_gateway != null)
-            _gateway.SetChatSink(null);
+        if (sharedGateway != null)
+            sharedGateway.SetChatSink(null);
 
         if (_cts != null)
             await _cts.CancelAsync();

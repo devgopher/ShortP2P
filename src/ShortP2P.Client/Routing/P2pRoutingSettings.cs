@@ -10,7 +10,7 @@ public sealed class P2pRoutingSettings
     public int SendFailureSearchAttempts { get; set; } = 3;
 
     /// <summary>Пауза между попытками поиска/отправки.</summary>
-    public TimeSpan SendFailureRetryDelay { get; set; } = TimeSpan.FromSeconds(1.5);
+    public TimeSpan SendFailureRetryDelay { get; set; } = TimeSpan.FromMinutes(1);
 
     /// <summary>Ожидание ответа на FIND.</summary>
     public TimeSpan SearchWaitTimeout { get; set; } = TimeSpan.FromSeconds(4);

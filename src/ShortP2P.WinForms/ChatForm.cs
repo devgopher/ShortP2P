@@ -47,7 +47,7 @@ public sealed class ChatForm : Form
             AutoSize = true,
             Padding = new Padding(8, 6, 8, 4),
             ColumnCount = 1,
-            RowCount = 2,
+            RowCount = 2
         };
         top.Controls.Add(_peerIdLabel, 0, 0);
 
@@ -155,7 +155,7 @@ public sealed class ChatForm : Form
     }
 
     private void OnP2pMessagesChanged(object? sender, EventArgs e) =>
-        BeginInvoke(new Action(() => _ = ReloadMessagesAsync()));
+        BeginInvoke(() => _ = ReloadMessagesAsync());
 
     private async Task ReloadMessagesAsync()
     {
