@@ -2,9 +2,13 @@ namespace ShortP2P.Client.Routing;
 
 /// <summary>
 ///     Кодек ping-пакета присутствия: "я онлайн".
+///     Датаграммы ходят только на выделенный UDP-порт <see cref="UdpPort" />, отдельно от основного data-порта.
 /// </summary>
 public static class PresencePingCodec
 {
+    /// <summary>Локальный и удалённый UDP-порт только для presence ping.</summary>
+    public const int UdpPort = 565;
+
     public const byte FramePresencePing = 0x31;
 
     public static byte[] Build(Guid networkId)

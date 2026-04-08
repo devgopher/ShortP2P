@@ -28,9 +28,11 @@ public sealed class SharedUserUdpGateway(
     private readonly ConcurrentDictionary<(Guid Sid, string HopKey), TransportAddress> _foundReturnPath = new();
 
     private UdpTransport? _udp;
+    private UdpTransport? _presenceUdp;
     private UserEntity? _user;
     private CancellationTokenSource? _cts;
     private Task? _receiveLoop;
+    private Task? _presenceReceiveLoop;
     private Task? _bluetoothReceiveLoop;
     private Task? _presenceAnnounceLoop;
     private Task? _presenceStaleLoop;
@@ -57,8 +59,10 @@ public sealed class SharedUserUdpGateway(
 
             _user = user;
             _udp = new UdpTransport(user.DataUdpPort);
+            _presenceUdp = new UdpTransport(PresencePingCodec.UdpPort);
             _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _receiveLoop = Task.Run(() => ReceiveLoopAsync(_cts.Token), _cts.Token);
+            _presenceReceiveLoop = Task.Run(() => PresenceReceiveLoopAsync(_cts.Token), _cts.Token);
             if (bluetoothTransport != null)
                 _bluetoothReceiveLoop = Task.Run(() => BluetoothReceiveLoopAsync(_cts.Token), _cts.Token);
             _presenceAnnounceLoop = Task.Run(() => PresenceAnnounceLoopAsync(_cts.Token), _cts.Token);
@@ -66,6 +70,7 @@ public sealed class SharedUserUdpGateway(
         }
 
         await _udp.StartAsync(cancellationToken).ConfigureAwait(false);
+        await _presenceUdp!.StartAsync(cancellationToken).ConfigureAwait(false);
         if (bluetoothTransport != null)
             await bluetoothTransport.StartAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -73,6 +78,7 @@ public sealed class SharedUserUdpGateway(
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         Task? loop;
+        Task? presenceLoop;
         Task? bluetoothLoop;
         Task? presenceAnnounce;
         Task? presenceStale;
@@ -80,10 +86,12 @@ public sealed class SharedUserUdpGateway(
         {
             _cts?.Cancel();
             loop = _receiveLoop;
+            presenceLoop = _presenceReceiveLoop;
             bluetoothLoop = _bluetoothReceiveLoop;
             presenceAnnounce = _presenceAnnounceLoop;
             presenceStale = _presenceStaleLoop;
             _receiveLoop = null;
+            _presenceReceiveLoop = null;
             _bluetoothReceiveLoop = null;
             _presenceAnnounceLoop = null;
             _presenceStaleLoop = null;
@@ -96,10 +104,18 @@ public sealed class SharedUserUdpGateway(
                 _ = u.StopAsync(cancellationToken);
             }
 
+            if (_presenceUdp != null)
+            {
+                var p = _presenceUdp;
+                _presenceUdp = null;
+                _ = p.StopAsync(cancellationToken);
+            }
+
             _user = null;
         }
 
-        var loops = new[] { loop, bluetoothLoop, presenceAnnounce, presenceStale }.Where(t => t != null).ToArray();
+        var loops = new[] { loop, presenceLoop, bluetoothLoop, presenceAnnounce, presenceStale }.Where(t => t != null)
+            .ToArray();
         if (loops.Length > 0)
         {
             try
@@ -309,13 +325,36 @@ public sealed class SharedUserUdpGateway(
             return;
         }
 
-        if (PresencePingCodec.TryParse(buf, out var pingSender))
-        {
-            MarkPeerOnline(pingSender, remoteAddress);
-            return;
-        }
-
         await DispatchChatOrDropAsync(buf, remoteAddress).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    ///     Приём только presence ping на порту <see cref="PresencePingCodec.UdpPort" />; адрес для данных — IP отправителя и
+    ///     <see cref="ChatEntity.PeerPort" /> из чата.
+    /// </summary>
+    private async Task PresenceReceiveLoopAsync(CancellationToken cancellationToken)
+    {
+        var presenceUdp = _presenceUdp;
+        if (presenceUdp == null) return;
+        try
+        {
+            await foreach (var msg in presenceUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var buf = msg.Payload.ToArray();
+                if (!PresencePingCodec.TryParse(buf, out var pingSender))
+                    continue;
+                var user = _user;
+                if (user == null) continue;
+                var shortId = CompressedNetworkId.FromGuid(pingSender).ToShortString();
+                var chat = await chats.FindChatByPeerNetworkIdAsync(user.Id, shortId).ConfigureAwait(false);
+                if (chat == null) continue;
+                var dataAddr = UdpTransportAddress.WithUdpPort(msg.RemoteAddress, chat.PeerPort);
+                MarkPeerOnline(pingSender, dataAddr);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
     }
 
     private async Task SendToTransportAsync(ReadOnlyMemory<byte> packet, TransportAddress destination,
@@ -545,9 +584,9 @@ public sealed class SharedUserUdpGateway(
     /// <param name="cancellationToken"></param>
     private async Task BroadcastPresencePingAsync(CancellationToken cancellationToken)
     {
-        var udp = _udp;
+        var presenceUdp = _presenceUdp;
         var user = _user;
-        if (udp == null || user == null)
+        if (presenceUdp == null || user == null)
             return;
 
         var payload = PresencePingCodec.Build(CompressedNetworkId.FromShortString(user.NetworkIdShort).Value);
@@ -556,8 +595,9 @@ public sealed class SharedUserUdpGateway(
         {
             try
             {
-                var ep = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(c.PeerHost), c.PeerPort));
-                await udp.SendAsync(payload, ep, cancellationToken).ConfigureAwait(false);
+                var ep = UdpTransportAddress.FromIPEndPoint(
+                    new IPEndPoint(IPAddress.Parse(c.PeerHost), PresencePingCodec.UdpPort));
+                await presenceUdp.SendAsync(payload, ep, cancellationToken).ConfigureAwait(false);
             }
             catch
             {
