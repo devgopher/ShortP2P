@@ -1,3 +1,4 @@
+using ShortP2P.Client.LocalNetwork;
 using ShortP2P.Client.Routing;
 using ShortP2P.Discovery;
 using ShortP2P.Client.Services;
@@ -18,6 +19,7 @@ public sealed class LocalNetworkScanForm : Form
         MultiSelect = false,
     };
 
+    private readonly Label _status = new() { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "" };
     private readonly Button _scan = new() { Text = "Сканировать", AutoSize = true };
     private readonly Button _close = new() { Text = "Закрыть", DialogResult = DialogResult.OK };
 
@@ -49,13 +51,15 @@ public sealed class LocalNetworkScanForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 2,
+            RowCount = 3,
             Padding = new Padding(12),
         };
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.Controls.Add(_list, 0, 0);
-        root.Controls.Add(bottom, 0, 1);
+        root.Controls.Add(_status, 0, 0);
+        root.Controls.Add(_list, 0, 1);
+        root.Controls.Add(bottom, 0, 2);
         Controls.Add(root);
 
         _scan.Click += async (_, _) => await OnScanAsync().ConfigureAwait(true);
@@ -118,14 +122,16 @@ public sealed class LocalNetworkScanForm : Form
     private async Task OnScanAsync()
     {
         _scan.Enabled = false;
+        var sec = (int)Math.Round(LocalNetworkScanner.DefaultScanListenDuration.TotalSeconds);
+        _status.Text = $"Слушаем пинги {sec} с…";
         try
         {
-            _p2p.LocalScan.ClearDiscoveredClients();
-            await _p2p.LocalScan.TriggerScanAsync().ConfigureAwait(true);
+            await _p2p.LocalScan.ScanAsync(LocalNetworkScanner.DefaultScanListenDuration).ConfigureAwait(true);
             RefreshList();
         }
         finally
         {
+            _status.Text = "";
             _scan.Enabled = true;
         }
     }

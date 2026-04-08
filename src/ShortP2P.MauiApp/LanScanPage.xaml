@@ -5,9 +5,10 @@
              Title="LAN scan">
     <Grid RowDefinitions="Auto,*" Padding="12" RowSpacing="10">
         <VerticalStackLayout Grid.Row="0" Spacing="8">
-            <Label Text="Discovery on UDP port 565. Tap Scan to broadcast and refresh the list."
+            <Label Text="Discovery on UDP port 565. Tap Scan: listen for pings, then results appear."
                    FontSize="12" TextColor="Gray" />
             <Button x:Name="ScanButton" Text="Scan" Clicked="OnScanClicked" />
+            <Label x:Name="StatusLabel" FontSize="12" TextColor="Gray" Text="" />
         </VerticalStackLayout>
         <CollectionView x:Name="PeerCollection" Grid.Row="1">
             <CollectionView.ItemTemplate>

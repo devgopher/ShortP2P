@@ -15,7 +15,12 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
     private static readonly TimeSpan BroadcastInterval = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(45);
 
+    /// <summary>Длительность приёма пингов при ручном сканировании по умолчанию.</summary>
+    public static readonly TimeSpan DefaultScanListenDuration = TimeSpan.FromSeconds(20);
+
     private readonly SharedUserUdpGateway _gateway;
+
+    private volatile bool _scanSessionActive;
 
     private readonly ConcurrentDictionary<Guid, DiscoveredLocalPeer> _entries = new();
     private readonly object _snapshotSync = new();
@@ -95,12 +100,42 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
     {
         _entries.Clear();
         RebuildSnapshot();
-        ClientsChanged?.Invoke(this, EventArgs.Empty);
+        if (!_scanSessionActive)
+            ClientsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Один раунд broadcast discovery-пингов на порт <see cref="PresencePingCodec.UdpPort" />.</summary>
     public Task TriggerScanAsync(CancellationToken cancellationToken = default) =>
         SendDiscoveryBroadcastRoundAsync(cancellationToken);
+
+    /// <summary>
+    ///     Ручное сканирование: очистка списка, один broadcast, приём пингов <paramref name="listenDuration" />,
+    ///     затем одно обновление <see cref="Clients" /> и событие <see cref="ClientsChanged" />.
+    /// </summary>
+    public async Task ScanAsync(TimeSpan listenDuration, CancellationToken cancellationToken = default)
+    {
+        if (listenDuration < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(listenDuration));
+
+        _scanSessionActive = true;
+        try
+        {
+            _entries.Clear();
+            RebuildSnapshot();
+            ClientsChanged?.Invoke(this, EventArgs.Empty);
+
+            await SendDiscoveryBroadcastRoundAsync(cancellationToken).ConfigureAwait(false);
+            if (listenDuration > TimeSpan.Zero)
+                await Task.Delay(listenDuration, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _scanSessionActive = false;
+        }
+
+        RebuildSnapshot();
+        ClientsChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     private void OnDiscoveryPingReceived(object? sender, DiscoveryPingReceivedEventArgs e)
     {
@@ -111,6 +146,8 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
 
         var peer = e.Peer;
         _entries.AddOrUpdate(peer.NetworkId, peer, (_, _) => peer);
+        if (_scanSessionActive)
+            return;
         RebuildSnapshot();
         ClientsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -197,6 +234,8 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
 
             if (!removed) continue;
             RebuildSnapshot();
+            if (_scanSessionActive)
+                continue;
             ClientsChanged?.Invoke(this, EventArgs.Empty);
         }
     }

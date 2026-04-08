@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using ShortP2P.Client.LocalNetwork;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
 using ShortP2P.Discovery;
@@ -70,14 +71,16 @@ public partial class LanScanPage : ContentPage
     private async void OnScanClicked(object? sender, EventArgs e)
     {
         ScanButton.IsEnabled = false;
+        var sec = (int)Math.Round(LocalNetworkScanner.DefaultScanListenDuration.TotalSeconds);
+        StatusLabel.Text = $"Listening {sec} s…";
         try
         {
-            _p2p.LocalScan.ClearDiscoveredClients();
-            await _p2p.LocalScan.TriggerScanAsync().ConfigureAwait(true);
+            await _p2p.LocalScan.ScanAsync(LocalNetworkScanner.DefaultScanListenDuration).ConfigureAwait(true);
             RefreshRows();
         }
         finally
         {
+            StatusLabel.Text = "";
             ScanButton.IsEnabled = true;
         }
     }
