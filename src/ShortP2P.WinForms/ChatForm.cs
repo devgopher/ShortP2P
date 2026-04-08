@@ -58,6 +58,7 @@ public sealed class ChatForm : Form
         StartPosition = FormStartPosition.CenterParent;
         Width = 520;
         Height = 520;
+        MaximizeBox = false;
 
         _peerIdLabel.Text = $"Id: {chat.PeerNetworkIdShort}";
         _peerStatusLabel.Text = "Статус: офлайн";
