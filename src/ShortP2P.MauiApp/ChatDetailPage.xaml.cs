@@ -80,7 +80,12 @@ public partial class ChatDetailPage : ContentPage
     {
         var rows = await _repo.ListMessagesAsync(ChatId).ConfigureAwait(true);
         MessagesCollection.ItemsSource = rows
-            .Select(m => new MessageRow(m.Outgoing ? "You" : Title ?? "Peer", m.Text))
+            .Select(m =>
+            {
+                var sender = m.Outgoing ? "You" : Title ?? "Peer";
+                var color = m.Outgoing ? Colors.DodgerBlue : GetPaletteColor(sender);
+                return new MessageRow(sender, m.Text, color);
+            })
             .ToList();
     }
 
@@ -143,7 +148,16 @@ public partial class ChatDetailPage : ContentPage
         }
     }
 
-    private sealed record MessageRow(string DirectionLabel, string Text);
+    private sealed record MessageRow(string DirectionLabel, string Text, Color MessageColor);
+
+    private static Color GetPaletteColor(string key)
+    {
+        var hash = Math.Abs(key.GetHashCode(StringComparison.Ordinal));
+        var idx = hash % 64;
+        var hue = idx * (360.0f / 64.0f);
+        // palette of 64 readable non-background colors
+        return Color.FromHsla(hue / 360.0f, 0.72f, 0.44f);
+    }
 
     private void OnPeerPresenceChanged(object? sender, ShortP2P.Client.Routing.PeerPresenceChangedEventArgs e)
     {

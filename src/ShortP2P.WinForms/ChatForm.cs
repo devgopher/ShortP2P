@@ -27,7 +27,15 @@ public sealed class ChatForm : Form
     private readonly TextBox _peerHostEntry = new() { Width = 200 };
     private readonly TextBox _peerPortEntry = new() { Width = 56 };
     private readonly Button _applyPeerEndpoint = new() { Text = "Применить", AutoSize = true };
-    private readonly ListBox _messages = new() { Dock = DockStyle.Bottom, IntegralHeight = true, Height = 300, ScrollAlwaysVisible = true, Padding = new Padding(8, 5, 8, 4) };
+    private readonly ListBox _messages = new()
+    {
+        Dock = DockStyle.Bottom,
+        IntegralHeight = true,
+        Height = 300,
+        ScrollAlwaysVisible = true,
+        Padding = new Padding(8, 5, 8, 4),
+        DrawMode = DrawMode.OwnerDrawFixed,
+    };
     private readonly TextBox _input = new() { Dock = DockStyle.Fill };
     private readonly Button _send = new() { Text = "Send", Dock = DockStyle.Right, AutoSize = true };
     private ChatP2pSession? _p2PSession;
@@ -85,6 +93,7 @@ public sealed class ChatForm : Form
 
         _applyPeerEndpoint.Click += async (_, _) => await OnApplyPeerEndpointAsync().ConfigureAwait(true);
         _send.Click += async (_, _) => await OnSendAsync().ConfigureAwait(true);
+        _messages.DrawItem += OnMessagesDrawItem;
         Shown += async (_, _) => await OnShownAsync().ConfigureAwait(true);
         FormClosed += (_, _) => _p2PRuntime.PeerPresenceChanged -= OnPeerPresenceChanged;
     }
@@ -179,7 +188,11 @@ public sealed class ChatForm : Form
             _messages.BeginUpdate();
             _messages.Items.Clear();
             foreach (var m in rows)
-                _messages.Items.Add($"{(m.Outgoing ? "You" : _chat.PeerNickname)}: {m.Text}");
+            {
+                var sender = m.Outgoing ? "You" : _chat.PeerNickname;
+                var color = m.Outgoing ? Color.DodgerBlue : GetPaletteColor(sender);
+                _messages.Items.Add(new ChatLine($"{sender}: {m.Text}", color));
+            }
             _messages.EndUpdate();
         }
         catch (ObjectDisposedException)
@@ -221,5 +234,52 @@ public sealed class ChatForm : Form
         var online = _p2PRuntime.IsPeerOnline(_chat.PeerNetworkIdShort);
         _peerStatusLabel.Text = online ? "Статус: онлайн" : "Статус: офлайн";
         _peerStatusLabel.ForeColor = online ? Color.SeaGreen : SystemColors.GrayText;
+    }
+
+    private void OnMessagesDrawItem(object? sender, DrawItemEventArgs e)
+    {
+        e.DrawBackground();
+        if (e.Index < 0 || e.Index >= _messages.Items.Count)
+            return;
+
+        var line = _messages.Items[e.Index] as ChatLine;
+        var text = line?.Text ?? _messages.Items[e.Index]?.ToString() ?? "";
+        var color = line?.Color ?? ForeColor;
+        TextRenderer.DrawText(e.Graphics, text, e.Font, e.Bounds, color,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        e.DrawFocusRectangle();
+    }
+
+    private static Color GetPaletteColor(string key)
+    {
+        var hash = Math.Abs(StringComparer.Ordinal.GetHashCode(key));
+        var idx = hash % 64;
+        var hue = idx * (360.0 / 64.0);
+        return ColorFromHsl(hue, 0.72, 0.44);
+    }
+
+    private static Color ColorFromHsl(double hue, double saturation, double lightness)
+    {
+        hue = hue % 360.0;
+        var c = (1.0 - Math.Abs(2.0 * lightness - 1.0)) * saturation;
+        var x = c * (1.0 - Math.Abs((hue / 60.0) % 2.0 - 1.0));
+        var m = lightness - c / 2.0;
+        double r1, g1, b1;
+        if (hue < 60) (r1, g1, b1) = (c, x, 0);
+        else if (hue < 120) (r1, g1, b1) = (x, c, 0);
+        else if (hue < 180) (r1, g1, b1) = (0, c, x);
+        else if (hue < 240) (r1, g1, b1) = (0, x, c);
+        else if (hue < 300) (r1, g1, b1) = (x, 0, c);
+        else (r1, g1, b1) = (c, 0, x);
+
+        var r = (int)Math.Round((r1 + m) * 255.0);
+        var g = (int)Math.Round((g1 + m) * 255.0);
+        var b = (int)Math.Round((b1 + m) * 255.0);
+        return Color.FromArgb(r, g, b);
+    }
+
+    private sealed record ChatLine(string Text, Color Color)
+    {
+        public override string ToString() => Text;
     }
 }
