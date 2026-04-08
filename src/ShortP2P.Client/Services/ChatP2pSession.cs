@@ -8,8 +8,6 @@ using ShortP2P.Discovery;
 using ShortP2P.Messenger;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
-using Polly;
-using Polly.Retry;
 
 namespace ShortP2P.Client.Services;
 
@@ -31,6 +29,7 @@ public sealed class ChatP2pSession(
     private const byte FrameCipher = 0x02;
 
     private readonly P2pRoutingSettings? _routing = routingSettings ?? (sharedGateway != null ? new P2pRoutingSettings() : null);
+    private readonly GuaranteedDeliveryPolicy _guaranteedDelivery = new();
 
     private readonly object _sync = new();
     private readonly SemaphoreSlim _sessionSetup = new(1, 1);
@@ -147,31 +146,21 @@ public sealed class ChatP2pSession(
             return;
         var bytes = Encoding.UTF8.GetBytes(text);
         var shouldRetry = sharedGateway != null && _routing != null;
-        var totalAttempts = shouldRetry ? Math.Max(1, _routing!.SendFailureSearchAttempts) : 1;
-        var retryDelay = shouldRetry ? _routing!.SendFailureRetryDelay : TimeSpan.Zero;
 
-        RetryStrategyOptions retryOptions = new()
-        {
-            MaxRetryAttempts = Math.Max(0, totalAttempts - 1),
-            Delay = retryDelay,
-            BackoffType = DelayBackoffType.Constant,
-            ShouldHandle = new PredicateBuilder().Handle<Exception>(ex => ex is not OperationCanceledException),
-            OnRetry = async args =>
+        await _guaranteedDelivery.ExecuteAsync(
+            async ct =>
             {
-                if (!shouldRetry)
-                    return;
-
-                await TryRefreshRouteViaSearchAsync(args.Context.CancellationToken).ConfigureAwait(false);
-                await ResetCryptoStateAsync(args.Context.CancellationToken).ConfigureAwait(false);
-            }
-        };
-
-        var pipeline = new ResiliencePipelineBuilder().AddRetry(retryOptions).Build();
-        await pipeline.ExecuteAsync(async ct =>
-        {
-            await EnsureSessionAsInitiatorAsync(ct).ConfigureAwait(false);
-            await _messenger!.SendBinaryAsync(bytes, _peerAddress!, ct).ConfigureAwait(false);
-        }, cancellationToken).ConfigureAwait(false);
+                await EnsureSessionAsInitiatorAsync(ct).ConfigureAwait(false);
+                await _messenger!.SendBinaryAsync(bytes, _peerAddress!, ct).ConfigureAwait(false);
+            },
+            async ct =>
+            {
+                await TryRefreshRouteViaSearchAsync(ct).ConfigureAwait(false);
+                await ResetCryptoStateAsync(ct).ConfigureAwait(false);
+            },
+            shouldRetry,
+            _routing,
+            cancellationToken).ConfigureAwait(false);
 
         await repo.AddMessageAsync(chat.Id, true, text).ConfigureAwait(false);
         RaiseMessagesChanged();
