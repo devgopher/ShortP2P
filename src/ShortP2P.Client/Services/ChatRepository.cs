@@ -137,4 +137,18 @@ public sealed class ChatRepository
 
         ChatMessageAppended?.Invoke(this, new ChatMessageAppendedEventArgs(chatId, outgoing));
     }
+
+    /// <summary>Удаляет чат и все его сообщения локально. Возвращает false, если чат не найден или не принадлежит userId.</summary>
+    public async Task<bool> DeleteChatAsync(int chatId, int userId, CancellationToken cancellationToken = default)
+    {
+        var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
+        var chat = await conn.FindAsync<ChatEntity>(chatId).ConfigureAwait(false);
+        if (chat == null || chat.UserId != userId)
+            return false;
+
+        await conn.ExecuteAsync("DELETE FROM messages WHERE ChatId = ?", chatId).ConfigureAwait(false);
+        await conn.DeleteAsync(chat).ConfigureAwait(false);
+        NotifyChatListChanged();
+        return true;
+    }
 }

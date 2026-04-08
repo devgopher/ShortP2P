@@ -46,7 +46,7 @@ public sealed class MainChatsForm : Form
 
         var hint = new Label
         {
-            Text = "P2P chats (UDP). Add a peer manually, or use My QR / QR from file or clipboard in Add chat.",
+            Text = "P2P chats (UDP). Add a peer manually, or use My QR / QR from file or clipboard in Add chat. Delete chat removes it only on this PC.",
             AutoSize = true,
             ForeColor = SystemColors.GrayText,
         };
@@ -58,7 +58,9 @@ public sealed class MainChatsForm : Form
         var btnLogout = new Button { Text = "Logout", AutoSize = true };
         var btnRouting = new Button { Text = "P2P routing", AutoSize = true };
         var btnLanScan = new Button { Text = "LAN scan", AutoSize = true };
+        var btnDelete = new Button { Text = "Delete chat", AutoSize = true };
         toolbar.Controls.Add(btnAdd);
+        toolbar.Controls.Add(btnDelete);
         toolbar.Controls.Add(btnMyQr);
         toolbar.Controls.Add(btnCopy);
         toolbar.Controls.Add(btnLanScan);
@@ -66,6 +68,7 @@ public sealed class MainChatsForm : Form
         toolbar.Controls.Add(btnLogout);
 
         btnAdd.Click += async (_, _) => await OnAddChatAsync().ConfigureAwait(true);
+        btnDelete.Click += async (_, _) => await OnDeleteChatAsync().ConfigureAwait(true);
         btnMyQr.Click += OnMyQr;
         btnCopy.Click += OnCopyKeys;
         btnLanScan.Click += OnLanScan;
@@ -279,6 +282,41 @@ public sealed class MainChatsForm : Form
 
         await _chats.AddChatAsync(u.Id, dlg.PeerNickname, dlg.PeerNetworkIdShort, dlg.PeerPublicKeyJson.Trim(),
             dlg.PeerHost, dlg.PeerPort).ConfigureAwait(true);
+        await RefreshAsync().ConfigureAwait(true);
+    }
+
+    private async Task OnDeleteChatAsync()
+    {
+        if (_list.SelectedItem is not ChatEntity chat)
+        {
+            MessageBox.Show(this, "Выберите чат в списке.", "Удаление", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var u = _auth.CurrentUser;
+        if (u == null)
+            return;
+
+        var ok = MessageBox.Show(this,
+            $"Удалить чат «{chat.PeerNickname}» только на этом устройстве?\nИстория сообщений будет удалена.",
+            "Удаление чата",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question,
+            MessageBoxDefaultButton.Button2);
+        if (ok != DialogResult.Yes)
+            return;
+
+        await _p2p.RemoveChatSessionAsync(chat.Id).ConfigureAwait(true);
+        var removed = await _chats.DeleteChatAsync(chat.Id, u.Id).ConfigureAwait(true);
+        if (!removed)
+        {
+            MessageBox.Show(this, "Не удалось удалить чат.", "Удаление", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        _newChatIds.Remove(chat.Id);
+        _unreadChatIds.Remove(chat.Id);
+        _knownChatIds.Remove(chat.Id);
         await RefreshAsync().ConfigureAwait(true);
     }
 

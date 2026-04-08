@@ -118,6 +118,37 @@ public partial class ChatsPage : ContentPage
         await DisplayAlert("Copied", "Network id and public key JSON copied to clipboard.", "OK").ConfigureAwait(true);
     }
 
+    private async void OnChatSwipeDelete(object? sender, EventArgs e)
+    {
+        ChatEntity? chat = null;
+        for (var p = sender as Element; p != null; p = p.Parent)
+        {
+            if (p is SwipeView sw && sw.BindingContext is ChatEntity c)
+            {
+                chat = c;
+                break;
+            }
+        }
+
+        if (chat == null)
+            return;
+
+        var u = _auth.CurrentUser;
+        if (u == null)
+            return;
+
+        var confirm = await DisplayAlert("Delete chat",
+            $"Remove «{chat.PeerNickname}» only on this device? All messages will be deleted.",
+            "Delete",
+            "Cancel").ConfigureAwait(true);
+        if (!confirm)
+            return;
+
+        await _p2p.RemoveChatSessionAsync(chat.Id).ConfigureAwait(true);
+        await _chats.DeleteChatAsync(chat.Id, u.Id).ConfigureAwait(true);
+        await RefreshAsync().ConfigureAwait(true);
+    }
+
     private async void OnLogoutClicked(object? sender, EventArgs e)
     {
         try

@@ -69,6 +69,28 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             _sessionsStarted.Add(chatId);
     }
 
+    /// <summary>Останавливает и снимает P2P-сессию для удалённого из БД чата.</summary>
+    public async Task RemoveChatSessionAsync(int chatId, CancellationToken cancellationToken = default)
+    {
+        ChatP2pSession? session;
+        lock (_sessionLock)
+        {
+            _chatSessions.Remove(chatId, out session);
+            _sessionsStarted.Remove(chatId);
+        }
+
+        if (session != null)
+        {
+            try
+            {
+                await session.DisposeAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+        }
+    }
+
     /// <summary>Запускает фоновые P2P-сессии для всех чатов из БД (ещё не стартовавшие).</summary>
     public async Task EnsureAllChatSessionsStartedAsync(UserEntity user, AuthService auth, ChatRepository repo,
         SynchronizationContext? uiSync, CancellationToken cancellationToken = default)
