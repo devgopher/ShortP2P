@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Net;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
-using ShortP2P.Crypto;
 using ShortP2P.Discovery;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;

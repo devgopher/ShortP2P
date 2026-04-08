@@ -40,7 +40,7 @@ public sealed class ChatP2pSession(
     private MessengerService? _messenger;
     private P2PSession? _session;
     private CancellationTokenSource? _cts;
-    private Task? _pumpTask;
+    private Task? _transportReceiveTask;
     private Task? _incomingTask;
     private bool _incomingStarted;
     private AdaptiveChatTransportLayer? _transportLayer;
@@ -83,7 +83,6 @@ public sealed class ChatP2pSession(
             {
                 await SendRouteRawAsync(mem, ct).ConfigureAwait(false);
             });
-            sharedGateway.SetChatSink(ProcessGatewayDatagramAsync);
         }
         else
         {
@@ -93,7 +92,6 @@ public sealed class ChatP2pSession(
             {
                 await _udp!.SendAsync(mem, _peerAddress!, ct).ConfigureAwait(false);
             });
-            _pumpTask = Task.Run(() => PumpAsync(_cts.Token), _cts.Token);
         }
 
         _transportLayer = new AdaptiveChatTransportLayer(
@@ -102,6 +100,8 @@ public sealed class ChatP2pSession(
             () => _peerAddress,
             () => _udp,
             _peerNetworkId);
+        await _transportLayer.StartAsync(_cts.Token).ConfigureAwait(false);
+        _transportReceiveTask = Task.Run(() => TransportReceiveLoopAsync(_cts.Token), _cts.Token);
 
         try
         {
@@ -234,29 +234,6 @@ public sealed class ChatP2pSession(
         }
     }
 
-    private async Task ProcessGatewayDatagramAsync(ReadOnlyMemory<byte> bufMem, TransportAddress from)
-    {
-        var token = _cts!.Token;
-        var buf = bufMem.ToArray();
-        if (buf.Length == 0)
-            return;
-
-        if (buf[0] == FrameHandshake && buf.Length == 129)
-        {
-            var handshake = new byte[128];
-            Buffer.BlockCopy(buf, 1, handshake, 0, 128);
-            await HandleResponderHandshakeAsync(handshake, token).ConfigureAwait(false);
-            return;
-        }
-
-        if (buf[0] == FrameCipher && buf.Length > 1)
-        {
-            var inner = new byte[buf.Length - 1];
-            Buffer.BlockCopy(buf, 1, inner, 0, inner.Length);
-            await _bridge.Writer.WriteAsync(new TransportReceiveMessage(inner, from), token).ConfigureAwait(false);
-        }
-    }
-
     private async ValueTask SendRouteRawAsync(ReadOnlyMemory<byte> packet, CancellationToken cancellationToken)
     {
         var layer = _transportLayer ?? throw new InvalidOperationException("Transport layer is not initialized.");
@@ -299,11 +276,15 @@ public sealed class ChatP2pSession(
         }
     }
 
-    private async Task PumpAsync(CancellationToken cancellationToken)
+    private async Task TransportReceiveLoopAsync(CancellationToken cancellationToken)
     {
         try
         {
-            await foreach (var msg in _udp!.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            var layer = _transportLayer;
+            if (layer == null)
+                return;
+
+            await foreach (var msg in layer.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 var buf = msg.Payload.ToArray();
                 if (buf.Length == 0)
@@ -415,14 +396,17 @@ public sealed class ChatP2pSession(
         if (_cts != null)
             await _cts.CancelAsync();
 
+        if (_transportLayer != null)
+            await _transportLayer.StopAsync(cancellationToken).ConfigureAwait(false);
+
         if (_messenger != null)
             await _messenger.StopAsync(cancellationToken).ConfigureAwait(false);
 
-        if (_pumpTask != null)
+        if (_transportReceiveTask != null)
         {
             try
             {
-                await _pumpTask.ConfigureAwait(false);
+                await _transportReceiveTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -453,7 +437,7 @@ public sealed class ChatP2pSession(
         _transportLayer = null;
         _messenger = null;
         _session = null;
-        _pumpTask = null;
+        _transportReceiveTask = null;
         _incomingTask = null;
         _incomingStarted = false;
     }
