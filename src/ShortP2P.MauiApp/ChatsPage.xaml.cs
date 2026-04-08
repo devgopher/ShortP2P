@@ -27,6 +27,12 @@ public partial class ChatsPage : ContentPage
         await Navigation.PushAsync(page).ConfigureAwait(true);
     }
 
+    private async void OnLanScanClicked(object? sender, EventArgs e)
+    {
+        var page = MauiProgram.Services.GetRequiredService<LanScanPage>();
+        await Navigation.PushAsync(page).ConfigureAwait(true);
+    }
+
     protected override async void OnAppearing()
     {
         base.OnAppearing();

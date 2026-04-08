@@ -8,6 +8,7 @@
         <ToolbarItem Text="My QR" Order="Primary" Priority="1" Clicked="OnMyQrClicked" />
         <ToolbarItem Text="Copy keys" Order="Secondary" Clicked="OnCopyKeysClicked" />
         <ToolbarItem Text="P2P routing" Order="Secondary" Clicked="OnRoutingClicked" />
+        <ToolbarItem Text="LAN scan" Order="Secondary" Clicked="OnLanScanClicked" />
         <ToolbarItem Text="Logout" Order="Secondary" Clicked="OnLogoutClicked" />
     </ContentPage.ToolbarItems>
 

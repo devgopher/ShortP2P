@@ -53,15 +53,18 @@ public sealed class MainChatsForm : Form
         var btnCopy = new Button { Text = "Copy keys", AutoSize = true };
         var btnLogout = new Button { Text = "Logout", AutoSize = true };
         var btnRouting = new Button { Text = "P2P routing", AutoSize = true };
+        var btnLanScan = new Button { Text = "LAN scan", AutoSize = true };
         toolbar.Controls.Add(btnAdd);
         toolbar.Controls.Add(btnMyQr);
         toolbar.Controls.Add(btnCopy);
+        toolbar.Controls.Add(btnLanScan);
         toolbar.Controls.Add(btnRouting);
         toolbar.Controls.Add(btnLogout);
 
         btnAdd.Click += async (_, _) => await OnAddChatAsync().ConfigureAwait(true);
         btnMyQr.Click += OnMyQr;
         btnCopy.Click += OnCopyKeys;
+        btnLanScan.Click += OnLanScan;
         btnRouting.Click += OnRoutingSettings;
         btnLogout.Click += OnLogout;
 
@@ -175,6 +178,12 @@ public sealed class MainChatsForm : Form
         {
             _refreshGate.Release();
         }
+    }
+
+    private void OnLanScan(object? sender, EventArgs e)
+    {
+        using var f = new LocalNetworkScanForm(_p2p);
+        f.ShowDialog(this);
     }
 
     private void OnRoutingSettings(object? sender, EventArgs e)

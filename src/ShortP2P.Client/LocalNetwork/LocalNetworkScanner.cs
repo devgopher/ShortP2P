@@ -90,6 +90,18 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
 
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
 
+    /// <summary>Очистить список найденных (например перед ручным сканированием).</summary>
+    public void ClearDiscoveredClients()
+    {
+        _entries.Clear();
+        RebuildSnapshot();
+        ClientsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Один раунд broadcast discovery-пингов на порт <see cref="PresencePingCodec.UdpPort" />.</summary>
+    public Task TriggerScanAsync(CancellationToken cancellationToken = default) =>
+        SendDiscoveryBroadcastRoundAsync(cancellationToken);
+
     private void OnDiscoveryPingReceived(object? sender, DiscoveryPingReceivedEventArgs e)
     {
         var u = _user;
@@ -113,33 +125,34 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
             _snapshot = list;
     }
 
+    private async Task SendDiscoveryBroadcastRoundAsync(CancellationToken cancellationToken)
+    {
+        var u = _user;
+        if (u == null) return;
+        var payload = PresencePingCodec.Build(
+            CompressedNetworkId.FromShortString(u.NetworkIdShort).Value,
+            u.Nickname);
+        foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(PresencePingCodec.UdpPort))
+        {
+            try
+            {
+                var addr = UdpTransportAddress.FromIPEndPoint(ep);
+                await _gateway.SendOnPresencePortAsync(payload, addr, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // один broadcast может быть недоступен
+            }
+        }
+    }
+
     private async Task BroadcastLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                var u = _user;
-                if (u != null)
-                {
-                    var payload = PresencePingCodec.Build(
-                        CompressedNetworkId.FromShortString(u.NetworkIdShort).Value,
-                        u.Nickname);
-                    foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(PresencePingCodec.UdpPort))
-                    {
-                        try
-                        {
-                            var addr = UdpTransportAddress.FromIPEndPoint(ep);
-                            await _gateway.SendOnPresencePortAsync(payload, addr, cancellationToken)
-                                .ConfigureAwait(false);
-                        }
-                        catch
-                        {
-                            // один broadcast может быть недоступен
-                        }
-                    }
-                }
-
+                await SendDiscoveryBroadcastRoundAsync(cancellationToken).ConfigureAwait(false);
                 await Task.Delay(BroadcastInterval, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

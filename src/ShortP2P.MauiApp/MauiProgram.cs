@@ -39,6 +39,7 @@ public static class MauiProgram
         builder.Services.AddTransient<AddChatPage>();
         builder.Services.AddTransient<MyQrPage>();
         builder.Services.AddTransient<RoutingSettingsPage>();
+        builder.Services.AddTransient<LanScanPage>();
 
 #if DEBUG
         builder.Logging.AddDebug();

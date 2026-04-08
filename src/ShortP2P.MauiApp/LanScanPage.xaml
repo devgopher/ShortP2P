@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="ShortP2P.MauiApp.LanScanPage"
+             Title="LAN scan">
+    <Grid RowDefinitions="Auto,*" Padding="12" RowSpacing="10">
+        <VerticalStackLayout Grid.Row="0" Spacing="8">
+            <Label Text="Discovery on UDP port 565. Tap Scan to broadcast and refresh the list."
+                   FontSize="12" TextColor="Gray" />
+            <Button x:Name="ScanButton" Text="Scan" Clicked="OnScanClicked" />
+        </VerticalStackLayout>
+        <CollectionView x:Name="PeerCollection" Grid.Row="1">
+            <CollectionView.ItemTemplate>
+                <DataTemplate>
+                    <Grid Padding="12,8" RowDefinitions="Auto,Auto,Auto">
+                        <Label Grid.Row="0" Text="{Binding Nickname}" FontSize="16" />
+                        <Label Grid.Row="1" Text="{Binding NetworkIdShort}" FontSize="12" TextColor="Gray" />
+                        <Label Grid.Row="2" Text="{Binding DetailLine}" FontSize="11" TextColor="Gray" />
+                    </Grid>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+    </Grid>
+</ContentPage>
