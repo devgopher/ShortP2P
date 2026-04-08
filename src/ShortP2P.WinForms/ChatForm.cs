@@ -111,17 +111,22 @@ public sealed class ChatForm : Form
     private async Task OnShownAsync()
     {
         var uiSync = SynchronizationContext.Current;
-        _p2PSession = new ChatP2pSession(_chat, _user, _auth, _repo, uiSync, _p2PRuntime.Gateway, _p2PRuntime.Settings);
+        var fresh = await _repo.GetChatAsync(_chat.Id).ConfigureAwait(true) ?? _chat;
+        _p2PSession = _p2PRuntime.GetOrCreateSession(fresh, _user, _auth, _repo, uiSync);
         _p2PSession.MessagesChanged += OnP2pMessagesChanged;
         _p2PRuntime.PeerPresenceChanged += OnPeerPresenceChanged;
-        try
+        if (!_p2PRuntime.IsChatSessionStarted(_chat.Id))
         {
-            await _p2PSession.StartAsync().ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, $"Could not start UDP: {ex.Message}", "P2P", MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
+            try
+            {
+                await _p2PSession.StartAsync().ConfigureAwait(true);
+                _p2PRuntime.MarkChatSessionStarted(_chat.Id);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Could not start UDP: {ex.Message}", "P2P", MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
         }
 
         await ReloadMessagesAsync().ConfigureAwait(true);
@@ -178,7 +183,6 @@ public sealed class ChatForm : Form
         if (_p2PSession != null)
         {
             _p2PSession.MessagesChanged -= OnP2pMessagesChanged;
-            _p2PSession.DisposeAsync();
             _p2PSession = null;
         }
 

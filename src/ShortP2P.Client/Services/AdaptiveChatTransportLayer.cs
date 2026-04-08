@@ -14,11 +14,13 @@ public sealed class AdaptiveChatTransportLayer(
     Func<ChatRelayRoute> currentRouteProvider,
     Func<TransportAddress?> directPeerAddressProvider,
     Func<UdpTransport?> udpProvider,
-    Guid peerNetworkId)
+    Guid peerNetworkId,
+    Func<TransportAddress, bool>? shouldAcceptFrom = null)
 {
     private readonly Channel<TransportReceiveMessage> _inbound = Channel.CreateUnbounded<TransportReceiveMessage>();
     private CancellationTokenSource? _cts;
     private Task? _directReceiveTask;
+    private Func<ReadOnlyMemory<byte>, TransportAddress, Task>? _registeredGatewaySink;
 
     public ChannelReader<TransportReceiveMessage> Inbound => _inbound.Reader;
 
@@ -30,7 +32,8 @@ public sealed class AdaptiveChatTransportLayer(
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         if (sharedGateway != null)
         {
-            sharedGateway.SetChatSink(OnGatewayDatagramAsync);
+            _registeredGatewaySink = OnGatewayDatagramAsync;
+            sharedGateway.AddChatSink(_registeredGatewaySink);
         }
         else
         {
@@ -47,8 +50,11 @@ public sealed class AdaptiveChatTransportLayer(
         if (_cts == null)
             return;
 
-        if (sharedGateway != null)
-            sharedGateway.SetChatSink(null);
+        if (sharedGateway != null && _registeredGatewaySink != null)
+        {
+            sharedGateway.RemoveChatSink(_registeredGatewaySink);
+            _registeredGatewaySink = null;
+        }
 
         try
         {
@@ -98,6 +104,8 @@ public sealed class AdaptiveChatTransportLayer(
 
     private async Task OnGatewayDatagramAsync(ReadOnlyMemory<byte> payload, TransportAddress from)
     {
+        if (shouldAcceptFrom != null && !shouldAcceptFrom(from))
+            return;
         var token = _cts?.Token ?? CancellationToken.None;
         await _inbound.Writer.WriteAsync(new TransportReceiveMessage(payload, from), token).ConfigureAwait(false);
     }

@@ -1,3 +1,4 @@
+using System.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
@@ -19,7 +20,23 @@ public partial class ChatsPage : ContentPage
     }
 
     private void OnChatListChangedFromInvite(object? sender, EventArgs e) =>
-        MainThread.BeginInvokeOnMainThread(() => _ = RefreshAsync());
+        MainThread.BeginInvokeOnMainThread(() => _ = OnChatListChangedAsync());
+
+    private async Task OnChatListChangedAsync()
+    {
+        await RefreshAsync().ConfigureAwait(true);
+        var u = _auth.CurrentUser;
+        if (u == null)
+            return;
+        try
+        {
+            await _p2p.EnsureAllChatSessionsStartedAsync(u, _auth, _chats, SynchronizationContext.Current)
+                .ConfigureAwait(true);
+        }
+        catch
+        {
+        }
+    }
 
     private async void OnRoutingClicked(object? sender, EventArgs e)
     {
@@ -44,6 +61,8 @@ public partial class ChatsPage : ContentPage
             try
             {
                 await _p2p.EnsureStartedAsync(u).ConfigureAwait(true);
+                await _p2p.EnsureAllChatSessionsStartedAsync(u, _auth, _chats, SynchronizationContext.Current)
+                    .ConfigureAwait(true);
             }
             catch
             {

@@ -45,16 +45,20 @@ public partial class ChatDetailPage : ContentPage
         }
 
         var uiSync = SynchronizationContext.Current;
-        _p2pSession = new ChatP2pSession(chat, user, _auth, _repo, uiSync, _p2p.Gateway, _p2p.Settings);
+        _p2pSession = _p2p.GetOrCreateSession(chat, user, _auth, _repo, uiSync);
         _p2pSession.MessagesChanged += OnP2PMessagesChanged;
         _p2p.PeerPresenceChanged += OnPeerPresenceChanged;
-        try
+        if (!_p2p.IsChatSessionStarted(chat.Id))
         {
-            await _p2pSession.StartAsync().ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            await DisplayAlert("P2P", $"Could not start UDP: {ex.Message}", "OK").ConfigureAwait(true);
+            try
+            {
+                await _p2pSession.StartAsync().ConfigureAwait(true);
+                _p2p.MarkChatSessionStarted(chat.Id);
+            }
+            catch (Exception ex)
+            {
+                await DisplayAlert("P2P", $"Could not start UDP: {ex.Message}", "OK").ConfigureAwait(true);
+            }
         }
 
         await ReloadMessagesAsync().ConfigureAwait(true);
@@ -67,7 +71,6 @@ public partial class ChatDetailPage : ContentPage
         if (_p2pSession != null)
         {
             _p2pSession.MessagesChanged -= OnP2PMessagesChanged;
-            await _p2pSession.DisposeAsync().ConfigureAwait(true);
             _p2pSession = null;
         }
         _p2p.PeerPresenceChanged -= OnPeerPresenceChanged;

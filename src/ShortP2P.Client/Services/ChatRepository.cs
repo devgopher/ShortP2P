@@ -2,6 +2,12 @@ using ShortP2P.Client.Data;
 
 namespace ShortP2P.Client.Services;
 
+public sealed class ChatMessageAppendedEventArgs(int chatId, bool outgoing) : EventArgs
+{
+    public int ChatId { get; } = chatId;
+    public bool Outgoing { get; } = outgoing;
+}
+
 public sealed class ChatRepository
 {
     private readonly AppDatabase _db;
@@ -14,6 +20,9 @@ public sealed class ChatRepository
 
     /// <summary>Список чатов на главном экране: обновить после входящего приглашения и т.п.</summary>
     public event EventHandler? ChatListChanged;
+
+    /// <summary>Новое сообщение записано в БД (входящее или исходящее).</summary>
+    public event EventHandler<ChatMessageAppendedEventArgs>? ChatMessageAppended;
 
     public void NotifyChatListChanged() => ChatListChanged?.Invoke(this, EventArgs.Empty);
 
@@ -125,5 +134,7 @@ public sealed class ChatRepository
             chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
             await conn.UpdateAsync(chat);
         }
+
+        ChatMessageAppended?.Invoke(this, new ChatMessageAppendedEventArgs(chatId, outgoing));
     }
 }

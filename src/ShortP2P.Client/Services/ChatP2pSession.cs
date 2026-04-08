@@ -67,6 +67,39 @@ public sealed class ChatP2pSession(
         _route = ChatRelayRoute.FromChat(_peerAddress, chat.RelayRouteBlob);
     }
 
+    /// <summary>Обновляет строку чата из БД (тот же Id), не создавая новую сессию.</summary>
+    public void ApplyChatRow(ChatEntity row)
+    {
+        if (row.Id != chat.Id)
+            throw new ArgumentException("Chat id mismatch.", nameof(row));
+        chat.PeerNickname = row.PeerNickname;
+        chat.PeerNetworkIdShort = row.PeerNetworkIdShort;
+        chat.PeerRsaPublicJson = row.PeerRsaPublicJson;
+        chat.PeerHost = row.PeerHost;
+        chat.PeerPort = row.PeerPort;
+        chat.RelayRouteBlob = row.RelayRouteBlob;
+        chat.UpdatedUtcTicks = row.UpdatedUtcTicks;
+        RebuildRouteFromChat();
+    }
+
+    private bool ShouldAcceptIncomingFrom(TransportAddress from)
+    {
+        try
+        {
+            var ep = UdpTransportAddress.ToIPEndPoint(from);
+            if (IPAddress.TryParse(chat.PeerHost, out var ip) && ep.Port == chat.PeerPort && ep.Address.Equals(ip))
+                return true;
+            if (!string.IsNullOrEmpty(chat.RelayRouteBlob))
+                return true;
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return false;
+    }
+
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
         await StopAsync(cancellationToken).ConfigureAwait(false);
@@ -100,7 +133,8 @@ public sealed class ChatP2pSession(
             () => _route,
             () => _peerAddress,
             () => _udp,
-            _peerNetworkId);
+            _peerNetworkId,
+            ShouldAcceptIncomingFrom);
         await _transportLayer.StartAsync(_cts.Token).ConfigureAwait(false);
         _transportReceiveTask = Task.Run(() => TransportReceiveLoopAsync(_cts.Token), _cts.Token);
 
@@ -415,9 +449,6 @@ public sealed class ChatP2pSession(
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
-        if (sharedGateway != null)
-            sharedGateway.SetChatSink(null);
-
         if (_cts != null)
             await _cts.CancelAsync();
 

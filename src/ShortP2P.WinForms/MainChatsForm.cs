@@ -2,6 +2,8 @@ using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
 
+using System.Threading;
+
 namespace ShortP2P.WinForms;
 
 public sealed class MainChatsForm : Form
@@ -15,6 +17,8 @@ public sealed class MainChatsForm : Form
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly HashSet<int> _knownChatIds = new();
     private readonly HashSet<int> _newChatIds = new();
+    private readonly HashSet<int> _unreadChatIds = new();
+    private int? _focusedChatId;
     private bool _knownChatsInitialized;
 
     public MainChatsForm(AuthService auth, ChatRepository chats, UserP2pRuntime p2p, P2pRoutingSettingsStore routingStore)
@@ -88,6 +92,8 @@ public sealed class MainChatsForm : Form
                 try
                 {
                     await _p2p.EnsureStartedAsync(u).ConfigureAwait(true);
+                    await _p2p.EnsureAllChatSessionsStartedAsync(u, _auth, _chats, SynchronizationContext.Current)
+                        .ConfigureAwait(true);
                 }
                 catch
                 {
@@ -98,7 +104,31 @@ public sealed class MainChatsForm : Form
         };
         Activated += async (_, _) => await RefreshAsync().ConfigureAwait(true);
         _chats.ChatListChanged += OnChatListChangedFromInvite;
-        FormClosed += (_, _) => _chats.ChatListChanged -= OnChatListChangedFromInvite;
+        _chats.ChatMessageAppended += OnChatMessageAppended;
+        FormClosed += (_, _) =>
+        {
+            _chats.ChatListChanged -= OnChatListChangedFromInvite;
+            _chats.ChatMessageAppended -= OnChatMessageAppended;
+        };
+    }
+
+    private void OnChatMessageAppended(object? sender, ChatMessageAppendedEventArgs e)
+    {
+        if (e.Outgoing || _focusedChatId == e.ChatId)
+            return;
+        if (!IsHandleCreated || IsDisposed)
+            return;
+        try
+        {
+            BeginInvoke(new Action(() =>
+            {
+                _unreadChatIds.Add(e.ChatId);
+                _list.Invalidate();
+            }));
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
     private void OnChatListChangedFromInvite(object? sender, EventArgs e)
@@ -107,9 +137,25 @@ public sealed class MainChatsForm : Form
             return;
         try
         {
-            BeginInvoke(new Action(() => _ = RefreshAsync()));
+            BeginInvoke(new Action(() => _ = OnChatListChangedAsync()));
         }
         catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private async Task OnChatListChangedAsync()
+    {
+        await RefreshAsync().ConfigureAwait(true);
+        var u = _auth.CurrentUser;
+        if (u == null)
+            return;
+        try
+        {
+            await _p2p.EnsureAllChatSessionsStartedAsync(u, _auth, _chats, SynchronizationContext.Current)
+                .ConfigureAwait(true);
+        }
+        catch
         {
         }
     }
@@ -188,8 +234,12 @@ public sealed class MainChatsForm : Form
         using var f = new LocalNetworkScanForm(_p2p, _auth, _chats,
             (chat, owner) =>
             {
+                _focusedChatId = chat.Id;
+                _unreadChatIds.Remove(chat.Id);
+                _list.Invalidate();
                 using var win = new ChatForm(chat, u, _auth, _chats, _p2p);
                 win.ShowDialog(owner);
+                _focusedChatId = null;
             },
             RefreshAsync);
         f.ShowDialog(this);
@@ -270,13 +320,16 @@ public sealed class MainChatsForm : Form
         if (_list.SelectedItem is not ChatEntity chat)
             return;
         _newChatIds.Remove(chat.Id);
+        _unreadChatIds.Remove(chat.Id);
         _list.Invalidate();
 
         var u = _auth.CurrentUser;
         if (u == null) return;
 
+        _focusedChatId = chat.Id;
         using var win = new ChatForm(chat, u, _auth, _chats, _p2p);
         win.ShowDialog(this);
+        _focusedChatId = null;
         await RefreshAsync().ConfigureAwait(true);
     }
 
@@ -289,10 +342,11 @@ public sealed class MainChatsForm : Form
         if (_list.Items[e.Index] is not ChatEntity chat)
             return;
 
-        var isNew = _newChatIds.Contains(chat.Id);
-        var text = isNew ? $"● {chat.PeerNickname}" : chat.PeerNickname;
-        var color = isNew ? Color.DodgerBlue : e.ForeColor;
-        TextRenderer.DrawText(e.Graphics, text, e.Font, e.Bounds, color,
+        var emphasize = _unreadChatIds.Contains(chat.Id) || _newChatIds.Contains(chat.Id);
+        var baseFont = e.Font ?? _list.Font;
+        using var drawFont = emphasize ? new Font(baseFont, FontStyle.Bold) : null;
+        var font = drawFont ?? baseFont;
+        TextRenderer.DrawText(e.Graphics, chat.PeerNickname, font, e.Bounds, e.ForeColor,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         e.DrawFocusRectangle();
     }

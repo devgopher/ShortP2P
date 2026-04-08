@@ -36,7 +36,8 @@ public sealed class SharedUserUdpGateway(
     private Task? _bluetoothReceiveLoop;
     private Task? _presenceAnnounceLoop;
     private Task? _presenceStaleLoop;
-    private Func<ReadOnlyMemory<byte>, TransportAddress, Task>? _chatSink;
+    private readonly object _chatSinkLock = new();
+    private readonly List<Func<ReadOnlyMemory<byte>, TransportAddress, Task>> _chatSinks = new();
     private readonly object _startSync = new();
     private readonly ConcurrentDictionary<Guid, DateTimeOffset> _presenceSeenUtc = new();
     private readonly ConcurrentDictionary<Guid, TransportAddress> _presenceAddress = new();
@@ -50,7 +51,24 @@ public sealed class SharedUserUdpGateway(
 
     public void SetDiscovery(IPeerDiscoveryService? discovery) => _discovery = discovery;
 
-    public void SetChatSink(Func<ReadOnlyMemory<byte>, TransportAddress, Task>? sink) => _chatSink = sink;
+    /// <summary>Регистрирует приёмник P2P-полезной нагрузки (несколько чатов могут слушать параллельно).</summary>
+    public void AddChatSink(Func<ReadOnlyMemory<byte>, TransportAddress, Task> sink)
+    {
+        lock (_chatSinkLock)
+            _chatSinks.Add(sink);
+    }
+
+    public void RemoveChatSink(Func<ReadOnlyMemory<byte>, TransportAddress, Task> sink)
+    {
+        lock (_chatSinkLock)
+            _chatSinks.Remove(sink);
+    }
+
+    public void ClearChatSinks()
+    {
+        lock (_chatSinkLock)
+            _chatSinks.Clear();
+    }
 
     public async Task EnsureStartedAsync(UserEntity user, CancellationToken cancellationToken = default)
     {
@@ -432,9 +450,21 @@ public sealed class SharedUserUdpGateway(
 
     private async Task DispatchChatOrDropAsync(ReadOnlyMemory<byte> buf, TransportAddress from)
     {
-        var sink = _chatSink;
-        if (sink != null)
-            await sink(buf, from).ConfigureAwait(false);
+        List<Func<ReadOnlyMemory<byte>, TransportAddress, Task>> copy;
+        lock (_chatSinkLock)
+            copy = _chatSinks.ToList();
+
+        foreach (var sink in copy)
+        {
+            try
+            {
+                await sink(buf, from).ConfigureAwait(false);
+            }
+            catch
+            {
+                // один чат не должен ломать приём у других
+            }
+        }
     }
 
     private async Task HandleFindAsync(byte[] packet, TransportAddress from, CancellationToken ct)
