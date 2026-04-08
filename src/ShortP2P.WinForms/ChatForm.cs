@@ -179,7 +179,7 @@ public sealed class ChatForm : Form
             _messages.BeginUpdate();
             _messages.Items.Clear();
             foreach (var m in rows)
-                _messages.Items.Add($"{(m.Outgoing ? "You" : "Peer")}: {m.Text}");
+                _messages.Items.Add($"{(m.Outgoing ? "You" : _chat.PeerNickname)}: {m.Text}");
             _messages.EndUpdate();
         }
         catch (ObjectDisposedException)

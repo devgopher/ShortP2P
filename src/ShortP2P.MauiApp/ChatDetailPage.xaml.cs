@@ -80,7 +80,7 @@ public partial class ChatDetailPage : ContentPage
     {
         var rows = await _repo.ListMessagesAsync(ChatId).ConfigureAwait(true);
         MessagesCollection.ItemsSource = rows
-            .Select(m => new MessageRow(m.Outgoing ? "You" : "Peer", m.Text))
+            .Select(m => new MessageRow(m.Outgoing ? "You" : Title ?? "Peer", m.Text))
             .ToList();
     }
 
