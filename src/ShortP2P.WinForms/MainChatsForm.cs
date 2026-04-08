@@ -185,11 +185,13 @@ public sealed class MainChatsForm : Form
         var u = _auth.CurrentUser;
         if (u == null)
             return;
-        using var f = new LocalNetworkScanForm(_p2p, _auth, _chats, chat =>
-        {
-            using var win = new ChatForm(chat, u, _auth, _chats, _p2p);
-            win.ShowDialog(this);
-        });
+        using var f = new LocalNetworkScanForm(_p2p, _auth, _chats,
+            (chat, owner) =>
+            {
+                using var win = new ChatForm(chat, u, _auth, _chats, _p2p);
+                win.ShowDialog(owner);
+            },
+            RefreshAsync);
         f.ShowDialog(this);
         _ = RefreshAsync();
     }

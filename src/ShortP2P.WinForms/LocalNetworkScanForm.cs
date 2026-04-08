@@ -13,7 +13,8 @@ public sealed class LocalNetworkScanForm : Form
     private readonly UserP2pRuntime _p2p;
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
-    private readonly Action<ChatEntity> _openChat;
+    private readonly Action<ChatEntity, IWin32Window> _openChat;
+    private readonly Func<Task>? _refreshMainChatsAsync;
     private readonly ListView _list = new()
     {
         View = View.Details,
@@ -27,12 +28,14 @@ public sealed class LocalNetworkScanForm : Form
     private readonly Button _scan = new() { Text = "Сканировать", AutoSize = true };
     private readonly Button _close = new() { Text = "Закрыть", DialogResult = DialogResult.OK };
 
-    public LocalNetworkScanForm(UserP2pRuntime p2p, AuthService auth, ChatRepository chats, Action<ChatEntity> openChat)
+    public LocalNetworkScanForm(UserP2pRuntime p2p, AuthService auth, ChatRepository chats,
+        Action<ChatEntity, IWin32Window> openChat, Func<Task>? refreshMainChatsAsync = null)
     {
         _p2p = p2p;
         _auth = auth;
         _chats = chats;
         _openChat = openChat;
+        _refreshMainChatsAsync = refreshMainChatsAsync;
         Text = "Локальная сеть";
         StartPosition = FormStartPosition.CenterParent;
         Width = 640;
@@ -54,23 +57,33 @@ public sealed class LocalNetworkScanForm : Form
         bottom.Controls.Add(_scan);
         bottom.Controls.Add(_close);
 
+        var scanHint = new Label
+        {
+            AutoSize = true,
+            ForeColor = SystemColors.GrayText,
+            Text =
+                "Двойной щелчок по строке (или Enter) — открыть чат или создать новый; список на главном экране обновится сам.",
+        };
+
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             Padding = new Padding(12),
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.Controls.Add(_status, 0, 0);
-        root.Controls.Add(_list, 0, 1);
-        root.Controls.Add(bottom, 0, 2);
+        root.Controls.Add(scanHint, 0, 0);
+        root.Controls.Add(_status, 0, 1);
+        root.Controls.Add(_list, 0, 2);
+        root.Controls.Add(bottom, 0, 3);
         Controls.Add(root);
 
         _scan.Click += async (_, _) => await OnScanAsync().ConfigureAwait(true);
-        _list.MouseDoubleClick += async (_, e) => await OnPeerDoubleClickAsync(e).ConfigureAwait(true);
+        _list.ItemActivate += async (_, _) => await OnListItemActivateAsync().ConfigureAwait(true);
         AcceptButton = _close;
 
         Shown += (_, _) =>
@@ -127,10 +140,11 @@ public sealed class LocalNetworkScanForm : Form
             _ => k.ToString(),
         };
 
-    private async Task OnPeerDoubleClickAsync(MouseEventArgs e)
+    private async Task OnListItemActivateAsync()
     {
-        var hit = _list.HitTest(e.Location);
-        if (hit.Item?.Tag is not DiscoveredLocalPeer peer)
+        if (_list.SelectedItems.Count == 0)
+            return;
+        if (_list.SelectedItems[0].Tag is not DiscoveredLocalPeer peer)
             return;
 
         try
@@ -141,8 +155,10 @@ public sealed class LocalNetworkScanForm : Form
             {
                 case LanChatStartKind.AlreadyExists:
                 case LanChatStartKind.Created:
+                    if (_refreshMainChatsAsync != null)
+                        await _refreshMainChatsAsync().ConfigureAwait(true);
                     if (result.Chat != null)
-                        _openChat(result.Chat);
+                        _openChat(result.Chat, this);
                     break;
                 case LanChatStartKind.WaitingForPeer:
                     MessageBox.Show(this, result.Message ?? "", "LAN", MessageBoxButtons.OK, MessageBoxIcon.Information);

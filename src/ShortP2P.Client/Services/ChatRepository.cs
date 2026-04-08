@@ -5,6 +5,7 @@ namespace ShortP2P.Client.Services;
 public sealed class ChatRepository
 {
     private readonly AppDatabase _db;
+    private readonly SemaphoreSlim _addChatGate = new(1, 1);
 
     public ChatRepository(AppDatabase db)
     {
@@ -19,10 +20,15 @@ public sealed class ChatRepository
     public async Task<IReadOnlyList<ChatEntity>> ListChatsAsync(int userId)
     {
         var conn = await _db.GetConnectionAsync();
-        return await conn.Table<ChatEntity>()
+        var rows = await conn.Table<ChatEntity>()
             .Where(c => c.UserId == userId)
-            .OrderByDescending(c => c.UpdatedUtcTicks)
             .ToListAsync();
+        // Один пир на network id (защита от дубликатов после повторной доставки UDP / гонки).
+        return rows
+            .GroupBy(c => c.PeerNetworkIdShort.Trim(), StringComparer.Ordinal)
+            .Select(g => g.OrderByDescending(c => c.UpdatedUtcTicks).First())
+            .OrderByDescending(c => c.UpdatedUtcTicks)
+            .ToList();
     }
 
     public async Task<ChatEntity?> GetChatAsync(int chatId)
@@ -34,29 +40,47 @@ public sealed class ChatRepository
     public async Task<ChatEntity> AddChatAsync(int userId, string peerNickname, string peerNetworkIdShort,
         string peerRsaPublicJson, string peerHost, int peerPort)
     {
-        var conn = await _db.GetConnectionAsync();
-        var chat = new ChatEntity
+        await _addChatGate.WaitAsync().ConfigureAwait(false);
+        try
         {
-            UserId = userId,
-            PeerNickname = peerNickname.Trim(),
-            PeerNetworkIdShort = peerNetworkIdShort.Trim(),
-            PeerRsaPublicJson = peerRsaPublicJson.Trim(),
-            PeerHost = peerHost.Trim(),
-            PeerPort = peerPort,
-            UpdatedUtcTicks = DateTime.UtcNow.Ticks,
-        };
-        await conn.InsertAsync(chat);
-        NotifyChatListChanged();
-        return chat;
+            var existing = await FindChatByPeerNetworkIdAsync(userId, peerNetworkIdShort).ConfigureAwait(false);
+            if (existing != null)
+            {
+                await UpdateChatP2pRouteAsync(existing.Id, peerHost, peerPort, relayRouteBlob: null, peerRsaPublicJson)
+                    .ConfigureAwait(false);
+                NotifyChatListChanged();
+                return existing;
+            }
+
+            var conn = await _db.GetConnectionAsync();
+            var chat = new ChatEntity
+            {
+                UserId = userId,
+                PeerNickname = peerNickname.Trim(),
+                PeerNetworkIdShort = peerNetworkIdShort.Trim(),
+                PeerRsaPublicJson = peerRsaPublicJson.Trim(),
+                PeerHost = peerHost.Trim(),
+                PeerPort = peerPort,
+                UpdatedUtcTicks = DateTime.UtcNow.Ticks,
+            };
+            await conn.InsertAsync(chat);
+            NotifyChatListChanged();
+            return chat;
+        }
+        finally
+        {
+            _addChatGate.Release();
+        }
     }
 
     public async Task<ChatEntity?> FindChatByPeerNetworkIdAsync(int userId, string peerNetworkIdShort)
     {
         var id = peerNetworkIdShort.Trim();
         var conn = await _db.GetConnectionAsync();
-        return await conn.Table<ChatEntity>()
+        var list = await conn.Table<ChatEntity>()
             .Where(c => c.UserId == userId && c.PeerNetworkIdShort == id)
-            .FirstOrDefaultAsync();
+            .ToListAsync();
+        return list.OrderByDescending(c => c.UpdatedUtcTicks).FirstOrDefault();
     }
 
     public async Task UpdateChatP2pRouteAsync(int chatId, string peerHost, int peerPort, string? relayRouteBlob,
