@@ -30,11 +30,11 @@ public sealed class ChatForm : Form
     private readonly ListBox _messages = new()
     {
         Dock = DockStyle.Bottom,
-        IntegralHeight = true,
+        IntegralHeight = false,
         Height = 300,
         ScrollAlwaysVisible = true,
         Padding = new Padding(8, 5, 8, 4),
-        DrawMode = DrawMode.OwnerDrawFixed,
+        DrawMode = DrawMode.OwnerDrawVariable,
     };
     private readonly TextBox _input = new() { Dock = DockStyle.Fill };
     private readonly Button _send = new() { Text = "Send", Dock = DockStyle.Right, AutoSize = true };
@@ -94,6 +94,7 @@ public sealed class ChatForm : Form
         _applyPeerEndpoint.Click += async (_, _) => await OnApplyPeerEndpointAsync().ConfigureAwait(true);
         _send.Click += async (_, _) => await OnSendAsync().ConfigureAwait(true);
         _messages.DrawItem += OnMessagesDrawItem;
+        _messages.MeasureItem += OnMessagesMeasureItem;
         Shown += async (_, _) => await OnShownAsync().ConfigureAwait(true);
         FormClosed += (_, _) => _p2PRuntime.PeerPresenceChanged -= OnPeerPresenceChanged;
     }
@@ -245,9 +246,27 @@ public sealed class ChatForm : Form
         var line = _messages.Items[e.Index] as ChatLine;
         var text = line?.Text ?? _messages.Items[e.Index]?.ToString() ?? "";
         var color = line?.Color ?? ForeColor;
-        TextRenderer.DrawText(e.Graphics, text, e.Font, e.Bounds, color,
-            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        var textBounds = new Rectangle(e.Bounds.X + 4, e.Bounds.Y + 2, Math.Max(10, e.Bounds.Width - 8),
+            Math.Max(10, e.Bounds.Height - 4));
+        TextRenderer.DrawText(e.Graphics, text, e.Font, textBounds, color,
+            TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
         e.DrawFocusRectangle();
+    }
+
+    private void OnMessagesMeasureItem(object? sender, MeasureItemEventArgs e)
+    {
+        if (e.Index < 0 || e.Index >= _messages.Items.Count)
+        {
+            e.ItemHeight = Font.Height + 8;
+            return;
+        }
+
+        var line = _messages.Items[e.Index] as ChatLine;
+        var text = line?.Text ?? _messages.Items[e.Index]?.ToString() ?? "";
+        var width = Math.Max(120, _messages.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 12);
+        var measured = TextRenderer.MeasureText(text, _messages.Font, new Size(width, int.MaxValue),
+            TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+        e.ItemHeight = Math.Max(_messages.Font.Height + 8, measured.Height + 8);
     }
 
     private static Color GetPaletteColor(string key)
