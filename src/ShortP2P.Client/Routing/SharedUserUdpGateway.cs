@@ -287,6 +287,14 @@ public sealed class SharedUserUdpGateway(
         await p.SendAsync(payload, destination, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Отправка на data-UDP пира (тот же сокет, что и сообщения чата).</summary>
+    public async ValueTask SendOnDataUdpAsync(ReadOnlyMemory<byte> payload, TransportAddress destination,
+        CancellationToken cancellationToken = default)
+    {
+        var udp = _udp ?? throw new InvalidOperationException("Gateway not started.");
+        await udp.SendAsync(payload, destination, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task ProcessIncomingBufferAsync(byte[] buf, TransportAddress remoteAddress,
         CancellationToken cancellationToken)
     {
@@ -294,9 +302,9 @@ public sealed class SharedUserUdpGateway(
             return;
 
         if (buf.Length >= 17 && buf[0] == PresencePingCodec.FramePresencePing &&
-            PresencePingCodec.TryParse(buf, out var pingId, out var pingNick))
+            PresencePingCodec.TryParse(buf, out var pingId, out var pingNick, out var peerDataPort))
         {
-            await HandleDiscoveryPingAsync(pingId, pingNick, remoteAddress).ConfigureAwait(false);
+            await HandleDiscoveryPingAsync(pingId, pingNick, peerDataPort, remoteAddress).ConfigureAwait(false);
             return;
         }
 
@@ -361,9 +369,9 @@ public sealed class SharedUserUdpGateway(
             await foreach (var msg in presenceUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 var buf = msg.Payload.ToArray();
-                if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick))
+                if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick, out var dataPort))
                     continue;
-                await HandleDiscoveryPingAsync(pingSender, nick, msg.RemoteAddress).ConfigureAwait(false);
+                await HandleDiscoveryPingAsync(pingSender, nick, dataPort, msg.RemoteAddress).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -371,9 +379,11 @@ public sealed class SharedUserUdpGateway(
         }
     }
 
-    private async Task HandleDiscoveryPingAsync(Guid networkId, string nickname, TransportAddress remote)
+    private async Task HandleDiscoveryPingAsync(Guid networkId, string nickname, int peerDataUdpPort,
+        TransportAddress remote)
     {
-        var peer = new DiscoveredLocalPeer(networkId, nickname, remote, remote.Kind, DateTimeOffset.UtcNow);
+        var peer = new DiscoveredLocalPeer(networkId, nickname, remote, remote.Kind, DateTimeOffset.UtcNow,
+            peerDataUdpPort);
         DiscoveryPingReceived?.Invoke(this, new DiscoveryPingReceivedEventArgs(peer));
 
         var user = _user;
@@ -412,7 +422,12 @@ public sealed class SharedUserUdpGateway(
 
     private async Task HandleChatInviteAsync(byte[] packet, CancellationToken ct)
     {
-        await IncomingChatInviteHandler.TryAcceptAsync(packet, auth, chats, ct).ConfigureAwait(false);
+        await IncomingChatInviteHandler.TryAcceptAsync(packet, auth, chats,
+            async (payload, dest, token) =>
+            {
+                var udp = _udp ?? throw new InvalidOperationException("Gateway not started.");
+                await udp.SendAsync(payload, dest, token).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
     }
 
     private async Task DispatchChatOrDropAsync(ReadOnlyMemory<byte> buf, TransportAddress from)
@@ -625,7 +640,7 @@ public sealed class SharedUserUdpGateway(
             return;
 
         var payload = PresencePingCodec.Build(CompressedNetworkId.FromShortString(user.NetworkIdShort).Value,
-            user.Nickname);
+            user.Nickname, user.DataUdpPort);
         var peers = await chats.ListChatsAsync(user.Id).ConfigureAwait(false);
         foreach (var c in peers)
         {

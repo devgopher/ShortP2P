@@ -1,0 +1,95 @@
+using System.Net;
+using ShortP2P.Client.Data;
+using ShortP2P.Client.Routing;
+using ShortP2P.Crypto;
+using ShortP2P.Discovery;
+using ShortP2P.Transport;
+using ShortP2P.Transport.Abstractions;
+
+namespace ShortP2P.Client.Services;
+
+/// <summary>Начало чата с пиром из LAN discovery: отправка ChatInvite и ожидание ответного приглашения с ключом.</summary>
+public static class LanChatStartFromDiscovery
+{
+    public static async Task<LanChatStartResult> TryStartAsync(
+        DiscoveredLocalPeer peer,
+        AuthService auth,
+        ChatRepository chats,
+        SharedUserUdpGateway gateway,
+        CancellationToken cancellationToken = default)
+    {
+        var user = auth.CurrentUser;
+        if (user == null)
+            return LanChatStartResult.Failed("Выполните вход.");
+
+        if (peer.TransportKind != TransportKind.Udp)
+            return LanChatStartResult.Failed("Для чата из списка нужен пир, найденный по UDP.");
+
+        var idShort = CompressedNetworkId.FromGuid(peer.NetworkId).ToShortString();
+        var existing = await chats.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);
+        if (existing != null)
+            return LanChatStartResult.AlreadyExists(existing);
+
+        var ip = UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address;
+        var ep = new IPEndPoint(ip, peer.PeerDataUdpPort);
+        var dest = UdpTransportAddress.FromIPEndPoint(ep);
+
+        var host = LocalEndpointHelper.GetPreferredLanIPv4String();
+        var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
+        var invite = ChatInviteCodec.Build(user.Nickname, nid,
+            RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), host, user.DataUdpPort);
+
+        await gateway.SendOnDataUdpAsync(invite, dest, cancellationToken).ConfigureAwait(false);
+
+        for (var i = 0; i < 50; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+            var chat = await chats.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);
+            if (chat != null)
+                return LanChatStartResult.Created(chat);
+        }
+
+        return LanChatStartResult.WaitingForPeer();
+    }
+}
+
+public enum LanChatStartKind
+{
+    AlreadyExists,
+    Created,
+    WaitingForPeer,
+    Failed,
+}
+
+public sealed class LanChatStartResult
+{
+    public LanChatStartKind Kind { get; private init; }
+    public ChatEntity? Chat { get; private init; }
+    public string? Message { get; private init; }
+
+    public static LanChatStartResult AlreadyExists(ChatEntity chat) => new()
+    {
+        Kind = LanChatStartKind.AlreadyExists,
+        Chat = chat,
+    };
+
+    public static LanChatStartResult Created(ChatEntity chat) => new()
+    {
+        Kind = LanChatStartKind.Created,
+        Chat = chat,
+    };
+
+    public static LanChatStartResult WaitingForPeer() => new()
+    {
+        Kind = LanChatStartKind.WaitingForPeer,
+        Message =
+            "Приглашение отправлено. Чат появится в списке, когда пир ответит (при необходимости откройте список чатов позже).",
+    };
+
+    public static LanChatStartResult Failed(string message) => new()
+    {
+        Kind = LanChatStartKind.Failed,
+        Message = message,
+    };
+}

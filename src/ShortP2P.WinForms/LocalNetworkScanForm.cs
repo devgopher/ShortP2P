@@ -1,3 +1,4 @@
+using ShortP2P.Client.Data;
 using ShortP2P.Client.LocalNetwork;
 using ShortP2P.Client.Routing;
 using ShortP2P.Discovery;
@@ -10,6 +11,9 @@ namespace ShortP2P.WinForms;
 public sealed class LocalNetworkScanForm : Form
 {
     private readonly UserP2pRuntime _p2p;
+    private readonly AuthService _auth;
+    private readonly ChatRepository _chats;
+    private readonly Action<ChatEntity> _openChat;
     private readonly ListView _list = new()
     {
         View = View.Details,
@@ -23,9 +27,12 @@ public sealed class LocalNetworkScanForm : Form
     private readonly Button _scan = new() { Text = "Сканировать", AutoSize = true };
     private readonly Button _close = new() { Text = "Закрыть", DialogResult = DialogResult.OK };
 
-    public LocalNetworkScanForm(UserP2pRuntime p2p)
+    public LocalNetworkScanForm(UserP2pRuntime p2p, AuthService auth, ChatRepository chats, Action<ChatEntity> openChat)
     {
         _p2p = p2p;
+        _auth = auth;
+        _chats = chats;
+        _openChat = openChat;
         Text = "Локальная сеть";
         StartPosition = FormStartPosition.CenterParent;
         Width = 640;
@@ -63,6 +70,7 @@ public sealed class LocalNetworkScanForm : Form
         Controls.Add(root);
 
         _scan.Click += async (_, _) => await OnScanAsync().ConfigureAwait(true);
+        _list.MouseDoubleClick += async (_, e) => await OnPeerDoubleClickAsync(e).ConfigureAwait(true);
         AcceptButton = _close;
 
         Shown += (_, _) =>
@@ -118,6 +126,37 @@ public sealed class LocalNetworkScanForm : Form
             TransportKind.Infrared => "IrDA",
             _ => k.ToString(),
         };
+
+    private async Task OnPeerDoubleClickAsync(MouseEventArgs e)
+    {
+        var hit = _list.HitTest(e.Location);
+        if (hit.Item?.Tag is not DiscoveredLocalPeer peer)
+            return;
+
+        try
+        {
+            var result = await LanChatStartFromDiscovery
+                .TryStartAsync(peer, _auth, _chats, _p2p.Gateway, CancellationToken.None).ConfigureAwait(true);
+            switch (result.Kind)
+            {
+                case LanChatStartKind.AlreadyExists:
+                case LanChatStartKind.Created:
+                    if (result.Chat != null)
+                        _openChat(result.Chat);
+                    break;
+                case LanChatStartKind.WaitingForPeer:
+                    MessageBox.Show(this, result.Message ?? "", "LAN", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    break;
+                case LanChatStartKind.Failed:
+                    MessageBox.Show(this, result.Message ?? "Ошибка", "LAN", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "LAN", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
 
     private async Task OnScanAsync()
     {

@@ -168,7 +168,8 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
         if (u == null) return;
         var payload = PresencePingCodec.Build(
             CompressedNetworkId.FromShortString(u.NetworkIdShort).Value,
-            u.Nickname);
+            u.Nickname,
+            u.DataUdpPort);
         foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(PresencePingCodec.UdpPort))
         {
             try

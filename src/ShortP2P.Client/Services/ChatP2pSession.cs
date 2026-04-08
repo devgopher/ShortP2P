@@ -317,7 +317,7 @@ public sealed class ChatP2pSession(
 
                 if (buf[0] == ChatInviteCodec.FrameChatInvite)
                 {
-                    await IncomingChatInviteHandler.TryAcceptAsync(buf, auth, repo, cancellationToken)
+                    await IncomingChatInviteHandler.TryAcceptAsync(buf, auth, repo, null, cancellationToken)
                         .ConfigureAwait(false);
                     continue;
                 }

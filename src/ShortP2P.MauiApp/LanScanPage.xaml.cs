@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using Microsoft.Extensions.DependencyInjection;
+using ShortP2P.Client.Data;
 using ShortP2P.Client.LocalNetwork;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
@@ -9,6 +11,7 @@ namespace ShortP2P.MauiApp;
 
 public sealed class LanScanRow
 {
+    public required DiscoveredLocalPeer Peer { get; init; }
     public string Nickname { get; init; } = "";
     public string NetworkIdShort { get; init; } = "";
     public string DetailLine { get; init; } = "";
@@ -26,6 +29,7 @@ public sealed class LanScanRow
         var seen = p.LastSeenUtc.ToLocalTime().ToString("g");
         return new LanScanRow
         {
+            Peer = p,
             Nickname = string.IsNullOrEmpty(p.Nickname) ? "—" : p.Nickname,
             NetworkIdShort = idShort,
             DetailLine = $"{transport} · last ping {seen}",
@@ -35,12 +39,16 @@ public sealed class LanScanRow
 
 public partial class LanScanPage : ContentPage
 {
+    private readonly AuthService _auth;
+    private readonly ChatRepository _chats;
     private readonly UserP2pRuntime _p2p;
     private readonly ObservableCollection<LanScanRow> _rows = new();
 
-    public LanScanPage(UserP2pRuntime p2p)
+    public LanScanPage(AuthService auth, ChatRepository chats, UserP2pRuntime p2p)
     {
         InitializeComponent();
+        _auth = auth;
+        _chats = chats;
         _p2p = p2p;
         PeerCollection.ItemsSource = _rows;
     }
@@ -82,6 +90,45 @@ public partial class LanScanPage : ContentPage
         {
             StatusLabel.Text = "";
             ScanButton.IsEnabled = true;
+        }
+    }
+
+    private async void OnPeerDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (sender is not Element el)
+            return;
+        var row = el.BindingContext as LanScanRow
+                  ?? (el.Parent as Element)?.BindingContext as LanScanRow;
+        if (row == null)
+            return;
+
+        try
+        {
+            var result = await LanChatStartFromDiscovery
+                .TryStartAsync(row.Peer, _auth, _chats, _p2p.Gateway, CancellationToken.None).ConfigureAwait(true);
+            switch (result.Kind)
+            {
+                case LanChatStartKind.AlreadyExists:
+                case LanChatStartKind.Created:
+                    if (result.Chat != null)
+                    {
+                        var page = MauiProgram.Services.GetRequiredService<ChatDetailPage>();
+                        page.ChatId = result.Chat.Id;
+                        await Navigation.PushAsync(page).ConfigureAwait(true);
+                    }
+
+                    break;
+                case LanChatStartKind.WaitingForPeer:
+                    await DisplayAlert("LAN", result.Message ?? "", "OK").ConfigureAwait(true);
+                    break;
+                case LanChatStartKind.Failed:
+                    await DisplayAlert("LAN", result.Message ?? "Error", "OK").ConfigureAwait(true);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlert("LAN", ex.Message, "OK").ConfigureAwait(true);
         }
     }
 }

@@ -182,8 +182,16 @@ public sealed class MainChatsForm : Form
 
     private void OnLanScan(object? sender, EventArgs e)
     {
-        using var f = new LocalNetworkScanForm(_p2p);
+        var u = _auth.CurrentUser;
+        if (u == null)
+            return;
+        using var f = new LocalNetworkScanForm(_p2p, _auth, _chats, chat =>
+        {
+            using var win = new ChatForm(chat, u, _auth, _chats, _p2p);
+            win.ShowDialog(this);
+        });
         f.ShowDialog(this);
+        _ = RefreshAsync();
     }
 
     private void OnRoutingSettings(object? sender, EventArgs e)
