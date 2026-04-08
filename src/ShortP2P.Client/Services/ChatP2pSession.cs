@@ -106,7 +106,7 @@ public sealed class ChatP2pSession(
 
         try
         {
-            await SendChatInviteAsync(cancellationToken).ConfigureAwait(false);
+            await SendChatInviteWithRetryAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -133,7 +133,7 @@ public sealed class ChatP2pSession(
         await ResetCryptoStateAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await SendChatInviteAsync(cancellationToken).ConfigureAwait(false);
+            await SendChatInviteWithRetryAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -148,6 +148,27 @@ public sealed class ChatP2pSession(
         var invite = ChatInviteCodec.Build(user.Nickname, nid,
             RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), host, user.DataUdpPort);
         await SendRouteRawAsync(invite, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task SendChatInviteWithRetryAsync(CancellationToken cancellationToken)
+    {
+        const int fallbackAttempts = 3;
+        var attempts = Math.Max(1, _routing?.SendFailureSearchAttempts ?? fallbackAttempts);
+        var delay = _routing?.SendFailureRetryDelay ?? TimeSpan.FromMilliseconds(350);
+
+        for (var i = 0; i < attempts; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await SendChatInviteAsync(cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            catch when (i < attempts - 1)
+            {
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     public async ValueTask SendTextAsync(string text, CancellationToken cancellationToken = default)

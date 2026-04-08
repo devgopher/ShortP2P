@@ -10,9 +10,12 @@ public sealed class MainChatsForm : Form
     private readonly ChatRepository _chats;
     private readonly UserP2pRuntime _p2p;
     private readonly Label _profile = new() { AutoSize = true };
-    private readonly ListBox _list = new() { IntegralHeight = false };
+    private readonly ListBox _list = new() { IntegralHeight = false, DrawMode = DrawMode.OwnerDrawFixed };
     private readonly P2pRoutingSettingsStore _routingStore;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly HashSet<int> _knownChatIds = new();
+    private readonly HashSet<int> _newChatIds = new();
+    private bool _knownChatsInitialized;
 
     public MainChatsForm(AuthService auth, ChatRepository chats, UserP2pRuntime p2p, P2pRoutingSettingsStore routingStore)
     {
@@ -65,6 +68,7 @@ public sealed class MainChatsForm : Form
         _list.DisplayMember = nameof(ChatEntity.PeerNickname);
         _list.ValueMember = nameof(ChatEntity.Id);
         _list.DoubleClick += async (_, _) => await OpenSelectedChatAsync().ConfigureAwait(true);
+        _list.DrawItem += OnDrawChatItem;
 
         root.Controls.Add(_profile, 0, 0);
         root.Controls.Add(hint, 0, 1);
@@ -125,6 +129,27 @@ public sealed class MainChatsForm : Form
 
         _profile.Text = $"You: {u.Nickname} · id {u.NetworkIdShort} · local UDP {u.DataUdpPort}";
         var list = await _chats.ListChatsAsync(u.Id).ConfigureAwait(true);
+        var idsNow = list.Select(c => c.Id).ToHashSet();
+        if (!_knownChatsInitialized)
+        {
+            _knownChatIds.Clear();
+            foreach (var id in idsNow)
+                _knownChatIds.Add(id);
+            _knownChatsInitialized = true;
+        }
+        else
+        {
+            foreach (var id in idsNow)
+                if (!_knownChatIds.Contains(id))
+                    _newChatIds.Add(id);
+
+            _knownChatIds.Clear();
+            foreach (var id in idsNow)
+                _knownChatIds.Add(id);
+
+            _newChatIds.RemoveWhere(id => !idsNow.Contains(id));
+        }
+
         _list.BeginUpdate();
         _list.Items.Clear();
         foreach (var c in list)
@@ -225,6 +250,8 @@ public sealed class MainChatsForm : Form
     {
         if (_list.SelectedItem is not ChatEntity chat)
             return;
+        _newChatIds.Remove(chat.Id);
+        _list.Invalidate();
 
         var u = _auth.CurrentUser;
         if (u == null) return;
@@ -232,5 +259,22 @@ public sealed class MainChatsForm : Form
         using var win = new ChatForm(chat, u, _auth, _chats, _p2p);
         win.ShowDialog(this);
         await RefreshAsync().ConfigureAwait(true);
+    }
+
+    private void OnDrawChatItem(object? sender, DrawItemEventArgs e)
+    {
+        e.DrawBackground();
+        if (e.Index < 0 || e.Index >= _list.Items.Count)
+            return;
+
+        if (_list.Items[e.Index] is not ChatEntity chat)
+            return;
+
+        var isNew = _newChatIds.Contains(chat.Id);
+        var text = isNew ? $"● {chat.PeerNickname}" : chat.PeerNickname;
+        var color = isNew ? Color.DodgerBlue : e.ForeColor;
+        TextRenderer.DrawText(e.Graphics, text, e.Font, e.Bounds, color,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        e.DrawFocusRectangle();
     }
 }
