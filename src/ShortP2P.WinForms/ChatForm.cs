@@ -36,7 +36,7 @@ public sealed class ChatForm : Form
         Padding = new Padding(8, 5, 8, 4),
         DrawMode = DrawMode.OwnerDrawVariable,
     };
-    private readonly TextBox _input = new() { Dock = DockStyle.Fill };
+    private readonly TextBox _input = new() { Dock = DockStyle.Fill, MaxLength = ChatP2pSession.MaxMessageChars };
     private readonly Button _send = new() { Text = "Send", Dock = DockStyle.Right, AutoSize = true };
     private ChatP2pSession? _p2PSession;
 

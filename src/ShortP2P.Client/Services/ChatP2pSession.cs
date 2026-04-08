@@ -27,6 +27,7 @@ public sealed class ChatP2pSession(
 {
     private const byte FrameHandshake = 0x01;
     private const byte FrameCipher = 0x02;
+    public const int MaxMessageChars = 32768;
 
     private readonly P2pRoutingSettings? _routing = routingSettings ?? (sharedGateway != null ? new P2pRoutingSettings() : null);
     private readonly GuaranteedDeliveryPolicy _guaranteedDelivery = new();
@@ -153,6 +154,9 @@ public sealed class ChatP2pSession(
     {
         if (string.IsNullOrEmpty(text))
             return;
+        if (text.Length > MaxMessageChars)
+            throw new ArgumentException($"Message is too long. Max length is {MaxMessageChars} characters.",
+                nameof(text));
         var bytes = Encoding.UTF8.GetBytes(text);
         var shouldRetry = sharedGateway != null && _routing != null;
 
