@@ -1,6 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
-using System.Text.Unicode;
 using System.Threading.Channels;
 using ShortP2P.Crypto;
 using ShortP2P.Transport.Abstractions;
@@ -12,7 +10,8 @@ namespace ShortP2P.Messenger;
 ///     <see cref="P2PSession" />)
 ///     и собирает входящие фрагменты обратно.
 /// </summary>
-public sealed class MessengerService(ITransport transport, P2PSession session, MessengerOptions? options = null)
+public sealed class MessengerService(ITransport transport, P2PSession session, MessengerOptions? options = null,
+    Func<ValueTask>? onDecryptFailure = null)
     : IAsyncDisposable
 {
     private readonly Channel<IncomingBinaryMessage> _incoming = Channel.CreateUnbounded<IncomingBinaryMessage>();
@@ -70,14 +69,7 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
         try
         {
             await foreach (var msg in _transport.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-                try
-                {
-                    ProcessIncomingPacket(msg);
-                }
-                catch (CryptographicException)
-                {
-                    // повреждённый или чужой пакет — отбрасываем
-                }
+                ProcessIncomingPacket(msg);
         }
         catch (OperationCanceledException)
         {
@@ -91,8 +83,21 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
 
     private void ProcessIncomingPacket(TransportReceiveMessage msg)
     {
-        var decrypted = _session.Decrypt(msg.Payload.ToArray());
-        ChunkCodec.ParseChunk(decrypted, out var messageId, out var chunkIndex, out var totalChunks, out var payload);
+        Guid messageId;
+        int chunkIndex;
+        int totalChunks;
+        byte[] payloadBytes;
+        try
+        {
+            var decrypted = _session.Decrypt(msg.Payload.ToArray());
+            ChunkCodec.ParseChunk(decrypted, out messageId, out chunkIndex, out totalChunks, out var payload);
+            payloadBytes = payload.ToArray();
+        }
+        catch (CryptographicException)
+        {
+            ScheduleDecryptRecovery();
+            return;
+        }
 
         lock (_sync)
         {
@@ -111,7 +116,7 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
             if (state.Parts[chunkIndex] != null)
                 return;
 
-            state.Parts[chunkIndex] = payload.ToArray();
+            state.Parts[chunkIndex] = payloadBytes;
             state.Received++;
 
             if (state.Received != state.TotalChunks)
@@ -134,9 +139,27 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
 
             if (buffer.Length > _options.MaxBinaryMessageBytes)
                 return;
- var TT = (Encoding.UTF8.GetString(buffer));
             _incoming.Writer.TryWrite(new IncomingBinaryMessage(buffer, msg.RemoteAddress));
         }
+    }
+
+    /// <summary>Вне потока приёма: иначе StopAsync мессенджера может взаимно заблокироваться с ReceiveLoop.</summary>
+    private void ScheduleDecryptRecovery()
+    {
+        var cb = onDecryptFailure;
+        if (cb == null)
+            return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await cb().ConfigureAwait(false);
+            }
+            catch
+            {
+                // сбой восстановления — игнорируем
+            }
+        });
     }
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)

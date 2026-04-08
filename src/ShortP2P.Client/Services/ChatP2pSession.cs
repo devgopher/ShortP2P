@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Threading;
 using System.Threading.Channels;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
@@ -35,6 +36,7 @@ public sealed class ChatP2pSession(
 
     private readonly object _sync = new();
     private readonly SemaphoreSlim _sessionSetup = new(1, 1);
+    private int _decryptRecoveryGate;
     private UdpTransport? _udp;
     private Channel<TransportReceiveMessage> _bridge = Channel.CreateUnbounded<TransportReceiveMessage>();
     private PrefixedCipherTransport? _prefixed;
@@ -266,6 +268,34 @@ public sealed class ChatP2pSession(
         }
     }
 
+    /// <summary>Сброс AES-сессии и повторный обмен ключами после ошибки дешифровки входящего пакета.</summary>
+    private async ValueTask OnDecryptFailureAsync()
+    {
+        if (Interlocked.CompareExchange(ref _decryptRecoveryGate, 1, 0) != 0)
+            return;
+        try
+        {
+            var token = _cts?.Token ?? CancellationToken.None;
+            if (token.IsCancellationRequested)
+                return;
+
+            await ResetCryptoStateAsync(token).ConfigureAwait(false);
+            await SendChatInviteWithRetryAsync(token).ConfigureAwait(false);
+            await EnsureSessionAsInitiatorAsync(token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            // сеть, таймауты
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _decryptRecoveryGate, 0);
+        }
+    }
+
     private async Task ResetCryptoStateAsync(CancellationToken cancellationToken)
     {
         if (_messenger != null)
@@ -322,7 +352,7 @@ public sealed class ChatP2pSession(
                 if (_session != null && _messenger != null)
                     return;
                 _session = hs.Session;
-                _messenger = new MessengerService(_prefixed!, _session);
+                _messenger = new MessengerService(_prefixed!, _session, null, OnDecryptFailureAsync);
                 ms = _messenger;
             }
 
@@ -393,7 +423,7 @@ public sealed class ChatP2pSession(
 
                 var localPrivate = auth.GetCurrentPrivateKey();
                 _session = P2PCrypto.CreateSession(localPrivate, handshakePacket);
-                _messenger = new MessengerService(_prefixed!, _session);
+                _messenger = new MessengerService(_prefixed!, _session, null, OnDecryptFailureAsync);
                 created = _messenger;
             }
 
