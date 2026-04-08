@@ -17,15 +17,17 @@ public static class LocalIPv4Resolver
             if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
                 continue;
 
-            foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+            foreach (var ua in ni.GetIPProperties()
+                         .UnicastAddresses
+                         .Select(u => u.Address))
             {
-                if (ua.Address.AddressFamily != AddressFamily.InterNetwork)
+                if (ua.AddressFamily != AddressFamily.InterNetwork)
                     continue;
-                if (IPAddress.IsLoopback(ua.Address))
+                if (IPAddress.IsLoopback(ua))
                     continue;
 
-                var ip = ua.Address.ToString();
-                var score = Score(ua.Address);
+                var ip = ua.ToString();
+                var score = Score(ua);
                 scored.Add((ip, score));
             }
         }
