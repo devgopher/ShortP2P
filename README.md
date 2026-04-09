@@ -44,22 +44,6 @@ src/
 
 В каждом проекте есть свой **`README.md`** с краткой структурой папок и файлов.
 
-### Android (git submodule)
-
-Каталог **`android/`** — отдельный репозиторий **ShortP2P-Android** (Kotlin, minSdk **24** / Android **7.0**), подключённый как [submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules). При клонировании ShortP2P подтяните его:
-
-```bash
-git clone --recurse-submodules <url-ShortP2P>
-```
-
-или после обычного клона:
-
-```bash
-git submodule update --init --recursive
-```
-
-URL субмодуля в `.gitmodules` задан как `../ShortP2P-Android`: относительно репозитория на GitHub это соседний репозиторий того же владельца (например `ShortP2P-Android`). Его нужно создать отдельно и запушить туда историю из локального `ShortP2P-Android` (см. `android/README.md`).
-
 ## Сборка и запуск (кратко)
 
 - Решение: `ShortP2P.sln`.
