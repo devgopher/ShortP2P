@@ -103,6 +103,7 @@ public sealed class LocalNetworkScanForm : Form
         }
         catch (ObjectDisposedException)
         {
+            // ignore
         }
     }
 

@@ -28,7 +28,7 @@ internal static class LocalEndpointHelper
         }
         catch
         {
-            // ignored
+            // ignore
         }
 
         return "127.0.0.1";

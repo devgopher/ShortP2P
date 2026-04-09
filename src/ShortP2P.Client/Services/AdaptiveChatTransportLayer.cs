@@ -73,6 +73,7 @@ public sealed class AdaptiveChatTransportLayer(
             }
             catch (OperationCanceledException)
             {
+                // ignore
             }
         }
 
@@ -119,6 +120,7 @@ public sealed class AdaptiveChatTransportLayer(
         }
         catch (OperationCanceledException)
         {
+            // ignore
         }
     }
 }

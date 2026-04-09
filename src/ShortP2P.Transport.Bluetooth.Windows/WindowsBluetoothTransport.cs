@@ -117,6 +117,7 @@ public sealed class WindowsBluetoothTransport : ITransport
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // ignore
         }
         catch
         {
@@ -199,6 +200,7 @@ public sealed class WindowsBluetoothTransport : ITransport
         }
         catch (ObjectDisposedException)
         {
+            // ignore
         }
 
         foreach (var kv in _outbound)

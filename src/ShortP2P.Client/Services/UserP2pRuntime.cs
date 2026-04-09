@@ -87,6 +87,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             }
             catch
             {
+                // ignore
             }
         }
     }
@@ -174,6 +175,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             }
             catch
             {
+                // ignore
             }
         }
 
@@ -188,6 +190,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             }
             catch
             {
+                // ignore
             }
 
             _discovery = null;

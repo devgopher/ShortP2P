@@ -2,26 +2,25 @@ using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
 
-using System.Threading;
-
 namespace ShortP2P.WinForms;
 
 public sealed class MainChatsForm : Form
 {
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
+    private readonly HashSet<int> _knownChatIds = new();
+    private readonly ListBox _list = new() { IntegralHeight = false, DrawMode = DrawMode.OwnerDrawFixed };
+    private readonly HashSet<int> _newChatIds = new();
     private readonly UserP2pRuntime _p2p;
     private readonly Label _profile = new() { AutoSize = true };
-    private readonly ListBox _list = new() { IntegralHeight = false, DrawMode = DrawMode.OwnerDrawFixed };
-    private readonly P2pRoutingSettingsStore _routingStore;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
-    private readonly HashSet<int> _knownChatIds = new();
-    private readonly HashSet<int> _newChatIds = new();
+    private readonly P2pRoutingSettingsStore _routingStore;
     private readonly HashSet<int> _unreadChatIds = new();
     private int? _focusedChatId;
     private bool _knownChatsInitialized;
 
-    public MainChatsForm(AuthService auth, ChatRepository chats, UserP2pRuntime p2p, P2pRoutingSettingsStore routingStore)
+    public MainChatsForm(AuthService auth, ChatRepository chats, UserP2pRuntime p2p,
+        P2pRoutingSettingsStore routingStore)
     {
         _auth = auth;
         _chats = chats;
@@ -37,7 +36,7 @@ public sealed class MainChatsForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 4,
-            Padding = new Padding(12),
+            Padding = new Padding(12)
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -46,9 +45,10 @@ public sealed class MainChatsForm : Form
 
         var hint = new Label
         {
-            Text = "P2P chats (UDP). Add a peer manually, or use My QR / QR from file or clipboard in Add chat. Delete chat removes it only on this PC.",
+            Text =
+                "P2P chats (UDP). Add a peer manually, or use My QR / QR from file or clipboard in Add chat. Delete chat removes it only on this PC.",
             AutoSize = true,
-            ForeColor = SystemColors.GrayText,
+            ForeColor = SystemColors.GrayText
         };
 
         var toolbar = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
@@ -91,7 +91,6 @@ public sealed class MainChatsForm : Form
         {
             var u = _auth.CurrentUser;
             if (u != null)
-            {
                 try
                 {
                     await _p2p.EnsureStartedAsync(u).ConfigureAwait(true);
@@ -100,8 +99,8 @@ public sealed class MainChatsForm : Form
                 }
                 catch
                 {
+                    // ignore
                 }
-            }
 
             await RefreshAsync().ConfigureAwait(true);
         };
@@ -123,14 +122,15 @@ public sealed class MainChatsForm : Form
             return;
         try
         {
-            BeginInvoke(new Action(() =>
+            BeginInvoke(() =>
             {
                 _unreadChatIds.Add(e.ChatId);
                 _list.Invalidate();
-            }));
+            });
         }
         catch (ObjectDisposedException)
         {
+            // ignore
         }
     }
 
@@ -140,10 +140,11 @@ public sealed class MainChatsForm : Form
             return;
         try
         {
-            BeginInvoke(new Action(() => _ = OnChatListChangedAsync()));
+            BeginInvoke(() => _ = OnChatListChangedAsync());
         }
         catch (ObjectDisposedException)
         {
+            // ignore
         }
     }
 
@@ -160,6 +161,7 @@ public sealed class MainChatsForm : Form
         }
         catch
         {
+            // ignore
         }
     }
 
@@ -168,61 +170,61 @@ public sealed class MainChatsForm : Form
         await _refreshGate.WaitAsync().ConfigureAwait(true);
         try
         {
-        var u = _auth.CurrentUser;
-        if (u == null)
-        {
-            DialogResult = DialogResult.Abort;
-            Close();
-            return;
+            var u = _auth.CurrentUser;
+            if (u == null)
+            {
+                DialogResult = DialogResult.Abort;
+                Close();
+                return;
+            }
+
+            var prevTop = _list.Items.Count > 0 ? _list.TopIndex : 0;
+            var prevSelectedId = (_list.SelectedItem as ChatEntity)?.Id;
+
+            _profile.Text = $"You: {u.Nickname} · id {u.NetworkIdShort} · local UDP {u.DataUdpPort}";
+            var list = await _chats.ListChatsAsync(u.Id).ConfigureAwait(true);
+            var idsNow = list.Select(c => c.Id).ToHashSet();
+            if (!_knownChatsInitialized)
+            {
+                _knownChatIds.Clear();
+                foreach (var id in idsNow)
+                    _knownChatIds.Add(id);
+                _knownChatsInitialized = true;
+            }
+            else
+            {
+                foreach (var id in idsNow)
+                    if (!_knownChatIds.Contains(id))
+                        _newChatIds.Add(id);
+
+                _knownChatIds.Clear();
+                foreach (var id in idsNow)
+                    _knownChatIds.Add(id);
+
+                _newChatIds.RemoveWhere(id => !idsNow.Contains(id));
+            }
+
+            _list.BeginUpdate();
+            _list.Items.Clear();
+            foreach (var c in list)
+                _list.Items.Add(c);
+
+            if (prevSelectedId.HasValue)
+                foreach (var item in _list.Items)
+                    if (item is ChatEntity chat && chat.Id == prevSelectedId.Value)
+                    {
+                        _list.SelectedItem = item;
+                        break;
+                    }
+
+            if (_list.Items.Count > 0)
+            {
+                var safeTop = Math.Clamp(prevTop, 0, _list.Items.Count - 1);
+                _list.TopIndex = safeTop;
+            }
+
+            _list.EndUpdate();
         }
-
-        var prevTop = _list.Items.Count > 0 ? _list.TopIndex : 0;
-        var prevSelectedId = (_list.SelectedItem as ChatEntity)?.Id;
-
-        _profile.Text = $"You: {u.Nickname} · id {u.NetworkIdShort} · local UDP {u.DataUdpPort}";
-        var list = await _chats.ListChatsAsync(u.Id).ConfigureAwait(true);
-        var idsNow = list.Select(c => c.Id).ToHashSet();
-        if (!_knownChatsInitialized)
-        {
-            _knownChatIds.Clear();
-            foreach (var id in idsNow)
-                _knownChatIds.Add(id);
-            _knownChatsInitialized = true;
-        }
-        else
-        {
-            foreach (var id in idsNow)
-                if (!_knownChatIds.Contains(id))
-                    _newChatIds.Add(id);
-
-            _knownChatIds.Clear();
-            foreach (var id in idsNow)
-                _knownChatIds.Add(id);
-
-            _newChatIds.RemoveWhere(id => !idsNow.Contains(id));
-        }
-
-        _list.BeginUpdate();
-        _list.Items.Clear();
-        foreach (var c in list)
-            _list.Items.Add(c);
-
-        if (prevSelectedId.HasValue)
-            foreach (var item in _list.Items)
-                if (item is ChatEntity chat && chat.Id == prevSelectedId.Value)
-                {
-                    _list.SelectedItem = item;
-                    break;
-                }
-
-        if (_list.Items.Count > 0)
-        {
-            var safeTop = Math.Clamp(prevTop, 0, _list.Items.Count - 1);
-            _list.TopIndex = safeTop;
-        }
-
-        _list.EndUpdate();
-    }
         finally
         {
             _refreshGate.Release();
@@ -289,7 +291,8 @@ public sealed class MainChatsForm : Form
     {
         if (_list.SelectedItem is not ChatEntity chat)
         {
-            MessageBox.Show(this, "Выберите чат в списке.", "Удаление", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "Выберите чат в списке.", "Удаление", MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
             return;
         }
 
@@ -346,6 +349,7 @@ public sealed class MainChatsForm : Form
         }
         catch
         {
+            // ignore
         }
 
         await _auth.LogoutAsync().ConfigureAwait(true);

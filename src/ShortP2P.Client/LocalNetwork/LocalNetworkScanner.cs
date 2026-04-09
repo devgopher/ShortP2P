@@ -69,6 +69,7 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
         }
         catch
         {
+            // ignore
         }
 
         var loops = new[] { _broadcastLoop, _staleLoop }.Where(t => t != null).ToArray();
@@ -82,6 +83,7 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
             }
             catch (OperationCanceledException)
             {
+                // ignore
             }
         }
 

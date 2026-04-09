@@ -35,6 +35,7 @@ public partial class ChatsPage : ContentPage
         }
         catch
         {
+            // ignore
         }
     }
 
@@ -157,6 +158,7 @@ public partial class ChatsPage : ContentPage
         }
         catch
         {
+            // ignore
         }
 
         await _auth.LogoutAsync().ConfigureAwait(true);

@@ -76,6 +76,7 @@ public sealed class UdpPeerDiscoveryService : IPeerDiscoveryService
         }
         catch (OperationCanceledException)
         {
+            // ignore
         }
 
         _receiveTask = _announceTask = _staleTask = null;

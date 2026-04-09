@@ -69,6 +69,7 @@ public sealed class InfraredSerialTransport : ITransport
             }
             catch (OperationCanceledException)
             {
+                // ignore
             }
 
             _readTask = null;

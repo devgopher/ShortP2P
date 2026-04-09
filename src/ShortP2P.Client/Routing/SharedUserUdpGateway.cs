@@ -277,6 +277,7 @@ public sealed class SharedUserUdpGateway(
         }
         catch (OperationCanceledException)
         {
+            // ignore
         }
     }
 
@@ -294,6 +295,7 @@ public sealed class SharedUserUdpGateway(
         }
         catch (OperationCanceledException)
         {
+            // ignore
         }
     }
 
@@ -394,6 +396,7 @@ public sealed class SharedUserUdpGateway(
         }
         catch (OperationCanceledException)
         {
+            // ignore
         }
     }
 
@@ -504,6 +507,7 @@ public sealed class SharedUserUdpGateway(
             }
             catch
             {
+                // ignore
             }
 
             return;
@@ -555,6 +559,7 @@ public sealed class SharedUserUdpGateway(
             }
             catch
             {
+                // ignore
             }
         }
 
@@ -590,6 +595,7 @@ public sealed class SharedUserUdpGateway(
             }
             catch
             {
+                // ignore
             }
         }
     }

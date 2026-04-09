@@ -173,7 +173,7 @@ public sealed class ChatP2pSession(
         }
         catch
         {
-            // ignored
+            // ignore
         }
     }
 
@@ -285,6 +285,7 @@ public sealed class ChatP2pSession(
         }
         catch (OperationCanceledException)
         {
+            // ignore
         }
         catch
         {

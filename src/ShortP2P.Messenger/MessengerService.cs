@@ -181,6 +181,7 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
             }
             catch (OperationCanceledException)
             {
+                // ignore
             }
 
         _receiveTask = null;
