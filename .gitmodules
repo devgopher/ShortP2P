@@ -1,0 +1,3 @@
+[submodule "android"]
+	path = android
+	url = ../ShortP2P-Android
