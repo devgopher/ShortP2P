@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using ShortP2P.Client;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
 using ShortP2P.Discovery;
@@ -253,14 +254,17 @@ public sealed class SharedUserUdpGateway(
 
         foreach (var c in await chats.ListChatsAsync(user.Id).ConfigureAwait(false))
         {
-            try
+            foreach (var h in PeerHostList.ParseCandidates(c.PeerHost))
             {
-                var ep = new IPEndPoint(IPAddress.Parse(c.PeerHost), c.PeerPort);
-                Add(UdpTransportAddress.FromIPEndPoint(ep));
-            }
-            catch
-            {
-                // skip bad chat row
+                try
+                {
+                    var ep = new IPEndPoint(IPAddress.Parse(h), c.PeerPort);
+                    Add(UdpTransportAddress.FromIPEndPoint(ep));
+                }
+                catch
+                {
+                    // skip bad chat row
+                }
             }
         }
 
@@ -557,16 +561,19 @@ public sealed class SharedUserUdpGateway(
 
         foreach (var c in await chats.ListChatsAsync(user.Id).ConfigureAwait(false))
         {
-            try
+            foreach (var h in PeerHostList.ParseCandidates(c.PeerHost))
             {
-                var ep = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(c.PeerHost), c.PeerPort));
-                if (!AddrEquals(ep, nb))
-                    continue;
-                return CompressedNetworkId.FromShortString(c.PeerNetworkIdShort).Value;
-            }
-            catch
-            {
-                // ignore
+                try
+                {
+                    var ep = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(h), c.PeerPort));
+                    if (!AddrEquals(ep, nb))
+                        continue;
+                    return CompressedNetworkId.FromShortString(c.PeerNetworkIdShort).Value;
+                }
+                catch
+                {
+                    // ignore
+                }
             }
         }
 
@@ -688,15 +695,18 @@ public sealed class SharedUserUdpGateway(
         var peers = await chats.ListChatsAsync(user.Id).ConfigureAwait(false);
         foreach (var c in peers)
         {
-            try
+            foreach (var h in PeerHostList.ParseCandidates(c.PeerHost))
             {
-                var ep = UdpTransportAddress.FromIPEndPoint(
-                    new IPEndPoint(IPAddress.Parse(c.PeerHost), PresencePingCodec.UdpPort));
-                await presenceUdp.SendAsync(payload, ep, cancellationToken).ConfigureAwait(false);
-            }
-            catch
-            {
-                // bad endpoint or temporary send issue
+                try
+                {
+                    var ep = UdpTransportAddress.FromIPEndPoint(
+                        new IPEndPoint(IPAddress.Parse(h), PresencePingCodec.UdpPort));
+                    await presenceUdp.SendAsync(payload, ep, cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // bad endpoint or temporary send issue
+                }
             }
         }
     }

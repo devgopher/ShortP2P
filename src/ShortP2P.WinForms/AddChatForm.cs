@@ -74,7 +74,7 @@ public sealed class AddChatForm : Form
         _nick.Text = payload.N;
         _id.Text = payload.Id;
         _pub.Text = payload.K;
-        _host.Text = payload.H;
+        _host.Text = payload.GetCommaSeparatedHosts();
         _port.Text = payload.P.ToString();
     }
 

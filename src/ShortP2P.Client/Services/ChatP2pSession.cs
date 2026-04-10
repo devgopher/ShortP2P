@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using ShortP2P.Client;
 using System.Threading;
 using System.Threading.Channels;
 using ShortP2P.Client.Data;
@@ -65,7 +66,8 @@ public sealed class ChatP2pSession(
     private void RebuildRouteFromChat()
     {
         _peerPublicKey = RsaKeySerializer.DeserializePublic(chat.PeerRsaPublicJson);
-        _peerAddress = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(chat.PeerHost), chat.PeerPort));
+        var primary = PeerHostList.PrimaryHost(chat.PeerHost);
+        _peerAddress = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(primary), chat.PeerPort));
         _route = ChatRelayRoute.FromChat(_peerAddress, chat.RelayRouteBlob);
     }
 
@@ -89,8 +91,15 @@ public sealed class ChatP2pSession(
         try
         {
             var ep = UdpTransportAddress.ToIPEndPoint(from);
-            if (IPAddress.TryParse(chat.PeerHost, out var ip) && ep.Port == chat.PeerPort && ep.Address.Equals(ip))
-                return true;
+            if (ep.Port == chat.PeerPort)
+            {
+                foreach (var h in PeerHostList.ParseCandidates(chat.PeerHost))
+                {
+                    if (IPAddress.TryParse(h, out var ip) && ep.Address.Equals(ip))
+                        return true;
+                }
+            }
+
             if (!string.IsNullOrEmpty(chat.RelayRouteBlob))
                 return true;
         }

@@ -27,7 +27,7 @@ public sealed class MyQrForm : Form
         var hint = new Label
         {
             Text =
-                "Show this code to a peer so they can add you. The IP is guessed from this PC; they may need to fix the host if you use VPN or multiple NICs.",
+                "Show this code to a peer so they can add you. All detected IPv4 addresses on this PC are included (best first); the peer can edit the list after scanning if needed.",
             AutoSize = true,
             MaximumSize = new Size(360, 0),
             Dock = DockStyle.Top,

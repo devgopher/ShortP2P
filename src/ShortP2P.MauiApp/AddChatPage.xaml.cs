@@ -45,7 +45,7 @@ public partial class AddChatPage : ContentPage
         PeerNickEntry.Text = payload.N;
         PeerIdEntry.Text = payload.Id;
         PeerPubKeyEditor.Text = payload.K;
-        PeerHostEntry.Text = payload.H;
+        PeerHostEntry.Text = payload.GetCommaSeparatedHosts();
         PeerPortEntry.Text = payload.P.ToString();
     }
 

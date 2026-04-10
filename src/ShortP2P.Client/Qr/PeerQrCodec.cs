@@ -1,4 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ShortP2P.Client.Services;
@@ -49,12 +51,20 @@ public static class PeerQrCodec
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(p.N) || string.IsNullOrWhiteSpace(p.H) || string.IsNullOrWhiteSpace(p.Id) ||
-            string.IsNullOrWhiteSpace(p.K))
+        if (string.IsNullOrWhiteSpace(p.N) || string.IsNullOrWhiteSpace(p.Id) || string.IsNullOrWhiteSpace(p.K))
         {
-            error = "QR is missing nickname, host, id, or public key.";
+            error = "QR is missing nickname, id, or public key.";
             return false;
         }
+
+        if (!TryMergeQrHosts(p, out var mergedHosts, out var hostErr))
+        {
+            error = hostErr;
+            return false;
+        }
+
+        p.H = mergedHosts[0];
+        p.Ha = mergedHosts.Count > 1 ? mergedHosts.Skip(1).ToList() : null;
 
         if (p.P is < 1 or > 65535)
         {
@@ -74,5 +84,39 @@ public static class PeerQrCodec
 
         payload = p;
         return true;
+    }
+
+    private static bool TryMergeQrHosts(PeerQrPayload p, out List<string> merged, out string? error)
+    {
+        merged = [];
+        error = null;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        TryAddQrHost(merged, seen, p.H);
+        if (p.Ha != null)
+        {
+            foreach (var x in p.Ha)
+                TryAddQrHost(merged, seen, x);
+        }
+
+        if (merged.Count == 0)
+        {
+            error = "QR is missing a valid host IP (h / ha).";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static void TryAddQrHost(List<string> merged, HashSet<string> seen, string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s))
+            return;
+        var t = s.Trim();
+        if (!IPAddress.TryParse(t, out _))
+            return;
+        if (!seen.Add(t))
+            return;
+        merged.Add(t);
     }
 }

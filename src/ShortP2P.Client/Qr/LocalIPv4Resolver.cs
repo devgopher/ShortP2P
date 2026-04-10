@@ -35,6 +35,35 @@ public static class LocalIPv4Resolver
         return scored.OrderByDescending(x => x.Score).Select(x => x.Ip).FirstOrDefault();
     }
 
+    /// <summary>Все поднятые unicast IPv4 (без loopback), от лучшего к худшему по эвристике <see cref="Score"/>.</summary>
+    public static List<string> GetAllUnicastIpv4Ordered()
+    {
+        var scored = new List<(string Ip, int Score)>();
+        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (ni.OperationalStatus != OperationalStatus.Up)
+                continue;
+            if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                continue;
+
+            foreach (var ua in ni.GetIPProperties().UnicastAddresses.Select(u => u.Address))
+            {
+                if (ua.AddressFamily != AddressFamily.InterNetwork)
+                    continue;
+                if (IPAddress.IsLoopback(ua))
+                    continue;
+
+                scored.Add((ua.ToString(), Score(ua)));
+            }
+        }
+
+        return scored
+            .OrderByDescending(x => x.Score)
+            .Select(x => x.Ip)
+            .Distinct()
+            .ToList();
+    }
+
     private static int Score(IPAddress a)
     {
         var b = a.GetAddressBytes();

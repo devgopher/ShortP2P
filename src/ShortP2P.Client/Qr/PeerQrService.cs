@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using QRCoder;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -10,18 +11,26 @@ namespace ShortP2P.Client.Qr;
 
 public static class PeerQrService
 {
-    /// <summary>Builds the v1 payload for the logged-in user. Host is auto-detected unless <paramref name="hostOverride"/> is set.</summary>
+    /// <summary>Собирает v1 пейлоад: все обнаруженные IPv4 в <see cref="PeerQrPayload.H"/> (лучший) и <see cref="PeerQrPayload.Ha"/> (остальные), либо один хост из <paramref name="hostOverride"/>.</summary>
     public static PeerQrPayload BuildPayload(UserEntity user, string rsaPublicKeyJson, string? hostOverride = null)
     {
-        var host = hostOverride?.Trim();
-        if (string.IsNullOrEmpty(host))
-            host = LocalIPv4Resolver.TryGetPreferredUnicastIpv4() ?? "127.0.0.1";
+        List<string> hosts;
+        var single = hostOverride?.Trim();
+        if (!string.IsNullOrEmpty(single))
+            hosts = [single];
+        else
+        {
+            hosts = LocalIPv4Resolver.GetAllUnicastIpv4Ordered();
+            if (hosts.Count == 0)
+                hosts = ["127.0.0.1"];
+        }
 
         return new PeerQrPayload
         {
             V = 1,
             N = user.Nickname.Trim(),
-            H = host,
+            H = hosts[0],
+            Ha = hosts.Count > 1 ? hosts.Skip(1).ToList() : null,
             P = user.DataUdpPort,
             Id = user.NetworkIdShort.Trim(),
             K = rsaPublicKeyJson.Trim(),
