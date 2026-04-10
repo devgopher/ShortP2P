@@ -124,18 +124,18 @@ public sealed class ChatP2pSession(
         if (sharedGateway != null)
         {
             await sharedGateway.EnsureStartedAsync(user, cancellationToken).ConfigureAwait(false);
-            _prefixed = new PrefixedCipherTransport(_bridge, async (mem, ct) =>
+            _prefixed = new PrefixedCipherTransport(_bridge, async (mem, dest, ct) =>
             {
-                await SendRouteRawAsync(mem, ct).ConfigureAwait(false);
+                await SendRouteRawToAsync(mem, dest, ct).ConfigureAwait(false);
             });
         }
         else
         {
             _udp = new UdpTransport(user.DataUdpPort);
             await _udp.StartAsync(cancellationToken).ConfigureAwait(false);
-            _prefixed = new PrefixedCipherTransport(_bridge, async (mem, ct) =>
+            _prefixed = new PrefixedCipherTransport(_bridge, async (mem, dest, ct) =>
             {
-                await _udp!.SendAsync(mem, _peerAddress!, ct).ConfigureAwait(false);
+                await _udp!.SendAsync(mem, dest, ct).ConfigureAwait(false);
             });
         }
 
@@ -226,11 +226,19 @@ public sealed class ChatP2pSession(
         var bytes = Encoding.UTF8.GetBytes(text);
         var shouldRetry = sharedGateway != null && _routing != null;
 
+        var ackTimeout = (_routing?.LinkTechnology ?? LinkTechnologyPreset.Unlimited).GetMessageAckTimeout();
+
         await _guaranteedDelivery.ExecuteAsync(
             async ct =>
             {
                 await EnsureSessionAsInitiatorAsync(ct).ConfigureAwait(false);
-                await _messenger!.SendBinaryAsync(bytes, _peerAddress!, ct).ConfigureAwait(false);
+                if (string.IsNullOrEmpty(chat.RelayRouteBlob))
+                {
+                    var dests = BuildOrderedDirectPeerAddresses();
+                    await _messenger!.SendBinaryAsyncExpectAck(bytes, dests, ackTimeout, ct).ConfigureAwait(false);
+                }
+                else
+                    await _messenger!.SendBinaryAsync(bytes, _peerAddress!, ct).ConfigureAwait(false);
             },
             async ct =>
             {
@@ -337,6 +345,42 @@ public sealed class ChatP2pSession(
     {
         var layer = _transportLayer ?? throw new InvalidOperationException("Transport layer is not initialized.");
         await layer.SendPacketAsync(packet, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Прямая отправка кадра на указанный транспортный адрес (для мульти-IP и ack); при ретрансляции — общий маршрут.</summary>
+    private async ValueTask SendRouteRawToAsync(ReadOnlyMemory<byte> packet, TransportAddress destination,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrEmpty(chat.RelayRouteBlob))
+        {
+            await SendRouteRawAsync(packet, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (sharedGateway != null)
+            await sharedGateway.SendRawToAsync(packet, destination, cancellationToken).ConfigureAwait(false);
+        else
+            await _udp!.SendAsync(packet, destination, cancellationToken).ConfigureAwait(false);
+    }
+
+    private List<TransportAddress> BuildOrderedDirectPeerAddresses()
+    {
+        var list = new List<TransportAddress>();
+        foreach (var h in PeerHostList.ParseCandidates(chat.PeerHost))
+        {
+            try
+            {
+                list.Add(UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(h), chat.PeerPort)));
+            }
+            catch
+            {
+                // skip
+            }
+        }
+
+        if (list.Count == 0 && _peerAddress != null)
+            list.Add(_peerAddress);
+        return list;
     }
 
     private async Task EnsureSessionAsInitiatorAsync(CancellationToken cancellationToken)
@@ -542,7 +586,7 @@ public sealed class ChatP2pSession(
 
     private sealed class PrefixedCipherTransport(
         Channel<TransportReceiveMessage> bridge,
-        Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> sendRaw)
+        Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> sendRaw)
         : ITransport
     {
         public TransportKind Kind => TransportKind.Udp;
@@ -556,11 +600,10 @@ public sealed class ChatP2pSession(
         public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, TransportAddress destination,
             CancellationToken cancellationToken = default)
         {
-            _ = destination;
             var buf = new byte[payload.Length + 1];
             buf[0] = FrameCipher;
             payload.CopyTo(buf.AsMemory(1));
-            await sendRaw(buf, cancellationToken).ConfigureAwait(false);
+            await sendRaw(buf.AsMemory(0, buf.Length), destination, cancellationToken).ConfigureAwait(false);
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;

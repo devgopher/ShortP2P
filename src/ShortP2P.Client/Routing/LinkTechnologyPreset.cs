@@ -66,8 +66,15 @@ public static class LinkTechnologyPresetExtensions
     public static TimeSpan GetPresencePingPeriod(this LinkTechnologyPreset preset)
     {
         var bps = preset.GetSimulatedMinBitsPerSecond();
-        
+
         return TimeSpan.FromSeconds(bps is > 0 and <= 32_000 ? 30 : 10);
+    }
+
+    /// <summary>Ожидание квитанции доставки сообщения: канал ≤32 kbit/s — 10 с, иначе 3 с; безлимит — 3 с.</summary>
+    public static TimeSpan GetMessageAckTimeout(this LinkTechnologyPreset preset)
+    {
+        var bps = preset.GetSimulatedMinBitsPerSecond();
+        return TimeSpan.FromSeconds(bps is > 0 and <= 32_000 ? 10 : 3);
     }
 
     public static readonly LinkTechnologyPreset[] AllPresets =

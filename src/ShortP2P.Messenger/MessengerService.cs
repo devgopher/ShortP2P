@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.IO;
 using System.Security.Cryptography;
 using System.Threading.Channels;
 using ShortP2P.Crypto;
@@ -8,18 +10,22 @@ namespace ShortP2P.Messenger;
 /// <summary>
 ///     Бэкенд мессенджера на устройстве пользователя: шифрует бинарные сообщения (с фрагментацией под лимит
 ///     <see cref="P2PSession" />)
-///     и собирает входящие фрагменты обратно.
+///     и собирает входящие фрагменты обратно. Поддерживает квитанции доставки и дедупликацию по id сообщения.
 /// </summary>
 public sealed class MessengerService(ITransport transport, P2PSession session, MessengerOptions? options = null,
     Func<ValueTask>? onDecryptFailure = null)
     : IAsyncDisposable
 {
+    private const int MaxTrackedDeliveredIds = 8192;
+
     private readonly Channel<IncomingBinaryMessage> _incoming = Channel.CreateUnbounded<IncomingBinaryMessage>();
     private readonly MessengerOptions _options = options ?? new MessengerOptions();
     private readonly Dictionary<Guid, Reassembly> _pending = new();
     private readonly P2PSession _session = session ?? throw new ArgumentNullException(nameof(session));
     private readonly object _sync = new();
     private readonly ITransport _transport = transport ?? throw new ArgumentNullException(nameof(transport));
+    private readonly ConcurrentDictionary<Guid, TaskCompletionSource> _ackWaiters = new();
+    private readonly HashSet<Guid> _deliveredMessageIds = new();
 
     private CancellationTokenSource? _cts;
     private Task? _receiveTask;
@@ -43,12 +49,63 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(data);
+        var messageId = Guid.NewGuid();
+        await SendChunksForMessageAsync(data, messageId, destination, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    ///     Отправляет по очереди на каждый адрес, пока не придёт квитанция <paramref name="ackTimeout" /> или не
+    ///     закончатся адреса.
+    /// </summary>
+    public async ValueTask SendBinaryAsyncExpectAck(byte[] data, IReadOnlyList<TransportAddress> destinationsInOrder,
+        TimeSpan ackTimeout, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        if (destinationsInOrder.Count == 0)
+            throw new ArgumentException("At least one destination is required.", nameof(destinationsInOrder));
+
+        if (data.Length > _options.MaxBinaryMessageBytes)
+            throw new ArgumentException($"Message exceeds MaxBinaryMessageBytes ({_options.MaxBinaryMessageBytes}).",
+                nameof(data));
+
+        Exception? last = null;
+        foreach (var dest in destinationsInOrder)
+        {
+            var messageId = Guid.NewGuid();
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(ackTimeout);
+            var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _ackWaiters[messageId] = tcs;
+            try
+            {
+                await SendChunksForMessageAsync(data, messageId, dest, cancellationToken).ConfigureAwait(false);
+                await tcs.Task.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+                return;
+            }
+            catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested &&
+                                                         !cancellationToken.IsCancellationRequested)
+            {
+                last = ex;
+                _ackWaiters.TryRemove(messageId, out _);
+            }
+            catch
+            {
+                _ackWaiters.TryRemove(messageId, out _);
+                throw;
+            }
+        }
+
+        throw new IOException("Peer did not acknowledge message delivery on any address.", last);
+    }
+
+    private async ValueTask SendChunksForMessageAsync(byte[] data, Guid messageId, TransportAddress destination,
+        CancellationToken cancellationToken)
+    {
         if (data.Length > _options.MaxBinaryMessageBytes)
             throw new ArgumentException($"Message exceeds MaxBinaryMessageBytes ({_options.MaxBinaryMessageBytes}).",
                 nameof(data));
 
         var maxPayload = ChunkCodec.MaxPayloadPerChunk(_session);
-        var messageId = Guid.NewGuid();
         var totalChunks = data.Length == 0 ? 1 : (data.Length + maxPayload - 1) / maxPayload;
 
         for (var i = 0; i < totalChunks; i++)
@@ -83,15 +140,10 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
 
     private void ProcessIncomingPacket(TransportReceiveMessage msg)
     {
-        Guid messageId;
-        int chunkIndex;
-        int totalChunks;
-        byte[] payloadBytes;
+        byte[] decrypted;
         try
         {
-            var decrypted = _session.Decrypt(msg.Payload.ToArray());
-            ChunkCodec.ParseChunk(decrypted, out messageId, out chunkIndex, out totalChunks, out var payload);
-            payloadBytes = payload.ToArray();
+            decrypted = _session.Decrypt(msg.Payload.ToArray());
         }
         catch (CryptographicException)
         {
@@ -99,6 +151,28 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
             return;
         }
 
+        if (DeliveryAckCodec.TryParse(decrypted, out var ackId))
+        {
+            if (_ackWaiters.TryRemove(ackId, out var w))
+                w.TrySetResult();
+            return;
+        }
+
+        Guid messageId;
+        int chunkIndex;
+        int totalChunks;
+        byte[] payloadBytes;
+        try
+        {
+            ChunkCodec.ParseChunk(decrypted, out messageId, out chunkIndex, out totalChunks, out var payload);
+            payloadBytes = payload.ToArray();
+        }
+        catch (CryptographicException)
+        {
+            return;
+        }
+
+        bool shouldEnqueue;
         lock (_sync)
         {
             if (!_pending.TryGetValue(messageId, out var state))
@@ -139,7 +213,36 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
 
             if (buffer.Length > _options.MaxBinaryMessageBytes)
                 return;
-            _incoming.Writer.TryWrite(new IncomingBinaryMessage(buffer, msg.RemoteAddress));
+
+            shouldEnqueue = TrackDeliverOnce(messageId);
+            if (shouldEnqueue)
+                _incoming.Writer.TryWrite(new IncomingBinaryMessage(buffer, msg.RemoteAddress));
+        }
+
+        _ = SendDeliveryAckAsync(messageId, msg.RemoteAddress);
+    }
+
+    private bool TrackDeliverOnce(Guid messageId)
+    {
+        if (_deliveredMessageIds.Contains(messageId))
+            return false;
+        if (_deliveredMessageIds.Count >= MaxTrackedDeliveredIds)
+            _deliveredMessageIds.Clear();
+        _deliveredMessageIds.Add(messageId);
+        return true;
+    }
+
+    private async Task SendDeliveryAckAsync(Guid messageId, TransportAddress replyTo)
+    {
+        try
+        {
+            var plain = DeliveryAckCodec.Build(messageId);
+            var encrypted = _session.Encrypt(plain);
+            await _transport.SendAsync(encrypted, replyTo, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // ignore: доставка ack best-effort
         }
     }
 
@@ -187,6 +290,10 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
         _receiveTask = null;
         _cts.Dispose();
         _cts = null;
+
+        foreach (var kv in _ackWaiters.ToArray())
+            kv.Value.TrySetCanceled();
+        _ackWaiters.Clear();
     }
 
     private sealed class Reassembly(int totalChunks)
