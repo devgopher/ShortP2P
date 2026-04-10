@@ -14,4 +14,7 @@ public sealed class P2pRoutingSettings
 
     /// <summary>Ожидание ответа на FIND.</summary>
     public TimeSpan SearchWaitTimeout { get; set; } = TimeSpan.FromSeconds(4);
+
+    /// <summary>Пресет скорости для симуляции канала (data UDP / Bluetooth), не влияет на порт presence.</summary>
+    public LinkTechnologyPreset LinkTechnology { get; set; } = LinkTechnologyPreset.Unlimited;
 }

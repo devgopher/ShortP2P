@@ -9,6 +9,7 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
     private const string KAttempts = "p2p_send_search_attempts";
     private const string KDelayMs = "p2p_send_retry_delay_ms";
     private const string KSearchTimeoutMs = "p2p_search_timeout_ms";
+    private const string KLinkTechnology = "p2p_link_technology";
 
     private readonly ISessionStorage _storage = storage ?? throw new ArgumentNullException(nameof(storage));
 
@@ -23,6 +24,9 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
             s.SendFailureRetryDelay = TimeSpan.FromMilliseconds(dm);
         if (int.TryParse(await _storage.GetAsync(KSearchTimeoutMs).ConfigureAwait(false), out var st) && st >= 500)
             s.SearchWaitTimeout = TimeSpan.FromMilliseconds(st);
+        if (int.TryParse(await _storage.GetAsync(KLinkTechnology).ConfigureAwait(false), out var lt) &&
+            Enum.IsDefined(typeof(LinkTechnologyPreset), lt))
+            s.LinkTechnology = (LinkTechnologyPreset)lt;
         return s;
     }
 
@@ -34,5 +38,6 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
             .ConfigureAwait(false);
         await _storage.SetAsync(KSearchTimeoutMs, ((int)settings.SearchWaitTimeout.TotalMilliseconds).ToString())
             .ConfigureAwait(false);
+        await _storage.SetAsync(KLinkTechnology, ((int)settings.LinkTechnology).ToString()).ConfigureAwait(false);
     }
 }

@@ -16,7 +16,7 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
     private static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(45);
 
     /// <summary>Длительность приёма пингов при ручном сканировании по умолчанию.</summary>
-    public static readonly TimeSpan DefaultScanListenDuration = TimeSpan.FromSeconds(20);
+    public static readonly TimeSpan DefaultScanListenDuration = TimeSpan.FromSeconds(45);
 
     private readonly SharedUserUdpGateway _gateway;
 
@@ -168,7 +168,7 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
     {
         var u = _user;
         if (u == null) return;
-        var payload = PresencePingCodec.Build(
+        var payload = _gateway.BuildPresencePingDatagram(
             CompressedNetworkId.FromShortString(u.NetworkIdShort).Value,
             u.Nickname,
             u.DataUdpPort);

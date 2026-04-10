@@ -19,9 +19,6 @@ public sealed class SharedUserUdpGateway(
     ITransport? bluetoothTransport = null)
     : IAsyncDisposable
 {
-    private static readonly TimeSpan PresencePingInterval = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan PresenceStaleTimeout = TimeSpan.FromSeconds(25);
-
     private IPeerDiscoveryService? _discovery;
 
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<PeerSearchResult>> _searchWaits = new();
@@ -43,6 +40,13 @@ public sealed class SharedUserUdpGateway(
     private readonly ConcurrentDictionary<Guid, TransportAddress> _presenceAddress = new();
 
     public event EventHandler<PeerPresenceChangedEventArgs>? PeerPresenceChanged;
+
+    /// <summary>Таймаут «пир офлайн» после последнего пинга: период пингов + запас (см. <see cref="LinkTechnologyPresetExtensions.GetPresencePingPeriod"/>).</summary>
+    private TimeSpan PresenceStaleGrace =>
+        settings.LinkTechnology.GetPresencePingPeriod() + TimeSpan.FromSeconds(35);
+
+    public byte[] BuildPresencePingDatagram(Guid networkId, string nickname, int dataUdpPort) =>
+        PresencePingCodec.Build(networkId, nickname, dataUdpPort, settings.LinkTechnology);
 
     /// <summary>
     ///     Входящий discovery/presence ping (порт 565 или тот же кадр по Bluetooth).
@@ -322,9 +326,10 @@ public sealed class SharedUserUdpGateway(
             return;
 
         if (buf.Length >= 17 && buf[0] == PresencePingCodec.FramePresencePing &&
-            PresencePingCodec.TryParse(buf, out var pingId, out var pingNick, out var peerDataPort))
+            PresencePingCodec.TryParse(buf, out var pingId, out var pingNick, out var peerDataPort,
+                out var advLink))
         {
-            await HandleDiscoveryPingAsync(pingId, pingNick, peerDataPort, remoteAddress).ConfigureAwait(false);
+            await HandleDiscoveryPingAsync(pingId, pingNick, peerDataPort, advLink, remoteAddress).ConfigureAwait(false);
             return;
         }
 
@@ -389,9 +394,11 @@ public sealed class SharedUserUdpGateway(
             await foreach (var msg in presenceUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 var buf = msg.Payload.ToArray();
-                if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick, out var dataPort))
+                if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick, out var dataPort,
+                        out var advLink))
                     continue;
-                await HandleDiscoveryPingAsync(pingSender, nick, dataPort, msg.RemoteAddress).ConfigureAwait(false);
+                await HandleDiscoveryPingAsync(pingSender, nick, dataPort, advLink, msg.RemoteAddress)
+                    .ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -401,10 +408,10 @@ public sealed class SharedUserUdpGateway(
     }
 
     private async Task HandleDiscoveryPingAsync(Guid networkId, string nickname, int peerDataUdpPort,
-        TransportAddress remote)
+        LinkTechnologyPreset advertisedLink, TransportAddress remote)
     {
         var peer = new DiscoveredLocalPeer(networkId, nickname, remote, remote.Kind, DateTimeOffset.UtcNow,
-            peerDataUdpPort);
+            peerDataUdpPort, advertisedLink);
         DiscoveryPingReceived?.Invoke(this, new DiscoveryPingReceivedEventArgs(peer));
 
         var user = _user;
@@ -609,7 +616,7 @@ public sealed class SharedUserUdpGateway(
     {
         if (!_presenceSeenUtc.TryGetValue(peerNetworkId, out var seen))
             return false;
-        return DateTimeOffset.UtcNow - seen <= PresenceStaleTimeout;
+        return DateTimeOffset.UtcNow - seen <= PresenceStaleGrace;
     }
 
     public bool TryGetPeerLastSeenAddress(Guid peerNetworkId, out TransportAddress address)
@@ -651,7 +658,8 @@ public sealed class SharedUserUdpGateway(
             try
             {
                 await BroadcastPresencePingAsync(cancellationToken).ConfigureAwait(false);
-                await Task.Delay(PresencePingInterval, cancellationToken).ConfigureAwait(false);
+                var period = settings.LinkTechnology.GetPresencePingPeriod();
+                await Task.Delay(period, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -675,7 +683,7 @@ public sealed class SharedUserUdpGateway(
         if (presenceUdp == null || user == null)
             return;
 
-        var payload = PresencePingCodec.Build(CompressedNetworkId.FromShortString(user.NetworkIdShort).Value,
+        var payload = BuildPresencePingDatagram(CompressedNetworkId.FromShortString(user.NetworkIdShort).Value,
             user.Nickname, user.DataUdpPort);
         var peers = await chats.ListChatsAsync(user.Id).ConfigureAwait(false);
         foreach (var c in peers)
@@ -709,7 +717,7 @@ public sealed class SharedUserUdpGateway(
             var now = DateTimeOffset.UtcNow;
             foreach (var kv in _presenceSeenUtc.ToArray())
             {
-                if (now - kv.Value <= PresenceStaleTimeout)
+                if (now - kv.Value <= PresenceStaleGrace)
                     continue;
                 if (_presenceSeenUtc.TryRemove(kv.Key, out _))
                 {

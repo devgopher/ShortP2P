@@ -11,11 +11,14 @@ public class RoutingSettingsPage : ContentPage
     private readonly Entry _attempts = new() { Keyboard = Keyboard.Numeric };
     private readonly Entry _delayMs = new() { Keyboard = Keyboard.Numeric };
     private readonly Entry _searchTimeoutMs = new() { Keyboard = Keyboard.Numeric };
+    private readonly Picker _linkTechnology = new();
 
     public RoutingSettingsPage(P2pRoutingSettingsStore store, UserP2pRuntime runtime)
     {
         _store = store;
         _runtime = runtime;
+        foreach (var p in LinkTechnologyPresetExtensions.AllPresets)
+            _linkTechnology.Items.Add(p.GetDisplayLabel());
         Title = "P2P routing";
         Content = new ScrollView
         {
@@ -33,6 +36,8 @@ public class RoutingSettingsPage : ContentPage
                     _delayMs,
                     new Label { Text = "FIND wait timeout (ms)" },
                     _searchTimeoutMs,
+                    new Label { Text = "Simulated link (min bitrate, TX/RX)" },
+                    _linkTechnology,
                     new Button { Text = "Save", Command = new Command(async () => await SaveAsync()) },
                 },
             },
@@ -47,6 +52,8 @@ public class RoutingSettingsPage : ContentPage
         _attempts.Text = s.SendFailureSearchAttempts.ToString();
         _delayMs.Text = ((int)s.SendFailureRetryDelay.TotalMilliseconds).ToString();
         _searchTimeoutMs.Text = ((int)s.SearchWaitTimeout.TotalMilliseconds).ToString();
+        var idx = Array.IndexOf(LinkTechnologyPresetExtensions.AllPresets, s.LinkTechnology);
+        _linkTechnology.SelectedIndex = idx >= 0 ? idx : 0;
     }
 
     private async Task SaveAsync()
@@ -75,18 +82,24 @@ public class RoutingSettingsPage : ContentPage
             return;
         }
 
+        var li = _linkTechnology.SelectedIndex;
+        if (li < 0 || li >= LinkTechnologyPresetExtensions.AllPresets.Length)
+            li = 0;
+
         var settings = new P2pRoutingSettings
         {
             MaxSearchHops = mh,
             SendFailureSearchAttempts = at,
             SendFailureRetryDelay = TimeSpan.FromMilliseconds(dm),
             SearchWaitTimeout = TimeSpan.FromMilliseconds(st),
+            LinkTechnology = LinkTechnologyPresetExtensions.AllPresets[li],
         };
         await _store.SaveAsync(settings).ConfigureAwait(true);
         _runtime.Settings.MaxSearchHops = settings.MaxSearchHops;
         _runtime.Settings.SendFailureSearchAttempts = settings.SendFailureSearchAttempts;
         _runtime.Settings.SendFailureRetryDelay = settings.SendFailureRetryDelay;
         _runtime.Settings.SearchWaitTimeout = settings.SearchWaitTimeout;
+        _runtime.Settings.LinkTechnology = settings.LinkTechnology;
         await Navigation.PopAsync().ConfigureAwait(true);
     }
 }

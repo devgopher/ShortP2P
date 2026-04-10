@@ -140,6 +140,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         Settings.SendFailureSearchAttempts = persisted.SendFailureSearchAttempts;
         Settings.SendFailureRetryDelay = persisted.SendFailureRetryDelay;
         Settings.SearchWaitTimeout = persisted.SearchWaitTimeout;
+        Settings.LinkTechnology = persisted.LinkTechnology;
 
         await Gateway.EnsureStartedAsync(user, cancellationToken).ConfigureAwait(false);
         await LocalScan.StartAsync(user, cancellationToken).ConfigureAwait(false);

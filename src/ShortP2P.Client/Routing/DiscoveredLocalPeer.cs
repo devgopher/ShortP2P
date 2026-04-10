@@ -6,13 +6,15 @@ namespace ShortP2P.Client.Routing;
 ///     Узел, обнаруженный по discovery-пингу (порт <see cref="PresencePingCodec.UdpPort" /> или Bluetooth).
 /// </summary>
 /// <param name="PeerDataUdpPort">Порт пира для data/чата (из пинга или <see cref="PresencePingCodec.DefaultDataUdpPort" />).</param>
+/// <param name="AdvertisedLinkTechnology">Пресет канала из пинга отправителя.</param>
 public sealed record DiscoveredLocalPeer(
     Guid NetworkId,
     string Nickname,
     TransportAddress SourceAddress,
     TransportKind TransportKind,
     DateTimeOffset LastSeenUtc,
-    int PeerDataUdpPort);
+    int PeerDataUdpPort,
+    LinkTechnologyPreset AdvertisedLinkTechnology = LinkTechnologyPreset.Unlimited);
 
 public sealed class DiscoveryPingReceivedEventArgs(DiscoveredLocalPeer peer) : EventArgs
 {
