@@ -11,15 +11,23 @@ internal sealed class RoutingSettingsForm : Form
     private readonly NumericUpDown _attempts = new() { Minimum = 1, Maximum = 20, Width = 80 };
     private readonly NumericUpDown _delayMs = new() { Minimum = 0, Maximum = 120_000, Width = 100 };
     private readonly NumericUpDown _searchTimeoutMs = new() { Minimum = 500, Maximum = 120_000, Width = 100 };
+    private readonly ComboBox _linkTechnology = new()
+    {
+        DropDownStyle = ComboBoxStyle.DropDownList,
+        Width = 360,
+        Anchor = AnchorStyles.Left,
+    };
 
     public RoutingSettingsForm(P2pRoutingSettingsStore store, UserP2pRuntime runtime)
     {
         _store = store;
         _runtime = runtime;
+        foreach (var p in LinkTechnologyPresetExtensions.AllPresets)
+            _linkTechnology.Items.Add(p.GetDisplayLabel());
         Text = "P2P routing";
         StartPosition = FormStartPosition.CenterParent;
-        Width = 420;
-        Height = 260;
+        Width = 520;
+        Height = 320;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -28,7 +36,7 @@ internal sealed class RoutingSettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 5,
+            RowCount = 6,
             Padding = new Padding(12),
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
@@ -44,6 +52,7 @@ internal sealed class RoutingSettingsForm : Form
         Row(1, "Send failure: search attempts", _attempts);
         Row(2, "Pause between attempts (ms)", _delayMs);
         Row(3, "FIND wait timeout (ms)", _searchTimeoutMs);
+        Row(4, "Connection speed (presence ping, min bitrate)", _linkTechnology);
 
         var buttons = new FlowLayoutPanel
         {
@@ -75,21 +84,29 @@ internal sealed class RoutingSettingsForm : Form
         _attempts.Value = s.SendFailureSearchAttempts;
         _delayMs.Value = (decimal)s.SendFailureRetryDelay.TotalMilliseconds;
         _searchTimeoutMs.Value = (decimal)s.SearchWaitTimeout.TotalMilliseconds;
+        var li = Array.IndexOf(LinkTechnologyPresetExtensions.AllPresets, s.LinkTechnology);
+        _linkTechnology.SelectedIndex = li >= 0 ? li : 0;
     }
 
     private async Task SaveAsync()
     {
+        var li = _linkTechnology.SelectedIndex;
+        if (li < 0 || li >= LinkTechnologyPresetExtensions.AllPresets.Length)
+            li = 0;
+
         var s = new P2pRoutingSettings
         {
             MaxSearchHops = (int)_maxHops.Value,
             SendFailureSearchAttempts = (int)_attempts.Value,
             SendFailureRetryDelay = TimeSpan.FromMilliseconds((double)_delayMs.Value),
             SearchWaitTimeout = TimeSpan.FromMilliseconds((double)_searchTimeoutMs.Value),
+            LinkTechnology = LinkTechnologyPresetExtensions.AllPresets[li],
         };
         await _store.SaveAsync(s).ConfigureAwait(true);
         _runtime.Settings.MaxSearchHops = s.MaxSearchHops;
         _runtime.Settings.SendFailureSearchAttempts = s.SendFailureSearchAttempts;
         _runtime.Settings.SendFailureRetryDelay = s.SendFailureRetryDelay;
         _runtime.Settings.SearchWaitTimeout = s.SearchWaitTimeout;
+        _runtime.Settings.LinkTechnology = s.LinkTechnology;
     }
 }

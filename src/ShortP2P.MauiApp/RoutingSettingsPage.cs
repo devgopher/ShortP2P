@@ -36,7 +36,7 @@ public class RoutingSettingsPage : ContentPage
                     _delayMs,
                     new Label { Text = "FIND wait timeout (ms)" },
                     _searchTimeoutMs,
-                    new Label { Text = "Simulated link (min bitrate, TX/RX)" },
+                    new Label { Text = "Connection speed (in presence ping; affects ping interval)" },
                     _linkTechnology,
                     new Button { Text = "Save", Command = new Command(async () => await SaveAsync()) },
                 },
