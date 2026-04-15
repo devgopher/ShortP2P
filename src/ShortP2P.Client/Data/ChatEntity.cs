@@ -17,6 +17,7 @@ public class ChatEntity
 
     public string PeerRsaPublicJson { get; set; } = "";
 
+    /// <summary>Один или несколько IPv4/IPv6 через запятую; пополняется при новых контактах с пиром (приглашение, поиск, ручной ввод).</summary>
     public string PeerHost { get; set; } = "127.0.0.1";
 
     public int PeerPort { get; set; } = 17201;

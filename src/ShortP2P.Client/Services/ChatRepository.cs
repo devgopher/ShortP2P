@@ -1,4 +1,5 @@
 using ShortP2P.Client.Data;
+using ShortP2P.Client;
 
 namespace ShortP2P.Client.Services;
 
@@ -55,8 +56,15 @@ public sealed class ChatRepository
             var existing = await FindChatByPeerNetworkIdAsync(userId, peerNetworkIdShort).ConfigureAwait(false);
             if (existing != null)
             {
-                await UpdateChatP2pRouteAsync(existing.Id, peerHost, peerPort, relayRouteBlob: null, peerRsaPublicJson)
+                var mergedHost = PeerHostList.MergeAppend(existing.PeerHost, peerHost);
+                await UpdateChatP2pRouteAsync(existing.Id, mergedHost, peerPort, relayRouteBlob: null, peerRsaPublicJson)
                     .ConfigureAwait(false);
+                existing.PeerHost = mergedHost;
+                existing.PeerPort = peerPort;
+                if (peerRsaPublicJson != null)
+                    existing.PeerRsaPublicJson = peerRsaPublicJson.Trim();
+                existing.RelayRouteBlob = null;
+                existing.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
                 NotifyChatListChanged();
                 return existing;
             }

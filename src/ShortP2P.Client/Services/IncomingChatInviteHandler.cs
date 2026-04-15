@@ -1,4 +1,5 @@
 using System.Net;
+using ShortP2P.Client;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Crypto;
@@ -43,7 +44,12 @@ public static class IncomingChatInviteHandler
         var existing = await repo.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);
         if (existing != null)
         {
-            await repo.UpdateChatP2pRouteAsync(existing.Id, host, port, relayRouteBlob: null).ConfigureAwait(false);
+            var mergedHost = PeerHostList.MergeAppend(existing.PeerHost, host);
+            await repo.UpdateChatP2pRouteAsync(existing.Id, mergedHost, port, relayRouteBlob: null).ConfigureAwait(false);
+            existing.PeerHost = mergedHost;
+            existing.PeerPort = port;
+            existing.RelayRouteBlob = null;
+            existing.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
             repo.NotifyChatListChanged();
             return;
         }

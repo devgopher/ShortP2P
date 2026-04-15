@@ -170,8 +170,9 @@ public sealed class ChatP2pSession(
         if (peerPort is < 1 or > 65535)
             throw new ArgumentOutOfRangeException(nameof(peerPort));
 
-        await repo.UpdateChatP2pRouteAsync(chat.Id, peerHost, peerPort, null).ConfigureAwait(false);
-        chat.PeerHost = peerHost;
+        var mergedHost = PeerHostList.WithPrimaryFirst(chat.PeerHost, peerHost);
+        await repo.UpdateChatP2pRouteAsync(chat.Id, mergedHost, peerPort, null).ConfigureAwait(false);
+        chat.PeerHost = mergedHost;
         chat.PeerPort = peerPort;
         chat.RelayRouteBlob = null;
         RebuildRouteFromChat();
@@ -274,7 +275,8 @@ public sealed class ChatP2pSession(
             });
         }
 
-        await repo.UpdateChatP2pRouteAsync(chat.Id, found.PeerHost, found.PeerPort, blob).ConfigureAwait(false);
+        var mergedHost = PeerHostList.MergeAppend(chat.PeerHost, found.PeerHost);
+        await repo.UpdateChatP2pRouteAsync(chat.Id, mergedHost, found.PeerPort, blob).ConfigureAwait(false);
         var fresh = await repo.GetChatAsync(chat.Id).ConfigureAwait(false);
         if (fresh != null)
         {

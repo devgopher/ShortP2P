@@ -1,4 +1,5 @@
 using System.Net;
+using ShortP2P.Client;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Crypto;
@@ -28,7 +29,20 @@ public static class LanChatStartFromDiscovery
         var idShort = CompressedNetworkId.FromGuid(peer.NetworkId).ToShortString();
         var existing = await chats.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);
         if (existing != null)
+        {
+            var seenIp = UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address.ToString();
+            var mergedHost = PeerHostList.MergeAppend(existing.PeerHost, seenIp);
+            if (!string.Equals(mergedHost, existing.PeerHost, StringComparison.Ordinal))
+            {
+                await chats.UpdateChatP2pRouteAsync(existing.Id, mergedHost, existing.PeerPort, existing.RelayRouteBlob)
+                    .ConfigureAwait(false);
+                chats.NotifyChatListChanged();
+                var fresh = await chats.GetChatAsync(existing.Id).ConfigureAwait(false);
+                return LanChatStartResult.AlreadyExists(fresh ?? existing);
+            }
+
             return LanChatStartResult.AlreadyExists(existing);
+        }
 
         var ip = UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address;
         var ep = new IPEndPoint(ip, peer.PeerDataUdpPort);

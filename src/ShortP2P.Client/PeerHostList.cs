@@ -33,4 +33,53 @@ public static class PeerHostList
         var c = ParseCandidates(peerHost);
         return c.Count > 0 ? c[0] : fallback;
     }
+
+    /// <summary>Добавляет новые IP в конец списка без дубликатов (регистр не важен).</summary>
+    public static string MergeAppend(string? existingPeerHost, params string?[] additionalHostTexts)
+    {
+        var list = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var x in ParseCandidates(existingPeerHost))
+        {
+            if (seen.Add(x))
+                list.Add(x);
+        }
+
+        foreach (var raw in additionalHostTexts)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                continue;
+            foreach (var part in raw.Split(Separators,
+                         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (!IPAddress.TryParse(part, out _))
+                    continue;
+                if (seen.Add(part))
+                    list.Add(part);
+            }
+        }
+
+        return string.Join(", ", list);
+    }
+
+    /// <summary>Указанный адрес становится первым (основной для доставки), остальные прежние кандидаты сохраняются.</summary>
+    public static string WithPrimaryFirst(string? existingPeerHost, string primaryHost)
+    {
+        primaryHost = primaryHost.Trim();
+        if (!IPAddress.TryParse(primaryHost, out _))
+            throw new ArgumentException("Invalid IP address.", nameof(primaryHost));
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var list = new List<string>();
+        if (seen.Add(primaryHost))
+            list.Add(primaryHost);
+
+        foreach (var x in ParseCandidates(existingPeerHost))
+        {
+            if (seen.Add(x))
+                list.Add(x);
+        }
+
+        return string.Join(", ", list);
+    }
 }
