@@ -5,7 +5,7 @@ using System.Net.Sockets;
 namespace ShortP2P.Client.LocalNetwork;
 
 /// <summary>
-///     IPv4 broadcast-адреса по локальным интерфейсам + 255.255.255.255.
+///     IPv4 directed broadcast по локальным интерфейсам (адрес «.255» подсети) + limited broadcast 255.255.255.255.
 /// </summary>
 internal static class LanBroadcastHelper
 {

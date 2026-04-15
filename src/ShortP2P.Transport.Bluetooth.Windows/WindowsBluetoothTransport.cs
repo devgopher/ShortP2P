@@ -7,6 +7,7 @@ using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Rfcomm;
 using Windows.Networking.Sockets;
 using Windows.Storage.Streams;
+using Microsoft.Extensions.Logging;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
 
@@ -29,6 +30,7 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     private readonly ConcurrentDictionary<ulong, StreamSocket> _outbound = new();
     private readonly ConcurrentDictionary<ulong, SemaphoreSlim> _sendLocks = new();
+    private readonly ILogger<WindowsBluetoothTransport> _logger;
 
     private RfcommServiceProvider? _rfcommProvider;
     private StreamSocketListener? _socketListener;
@@ -54,8 +56,9 @@ public sealed class WindowsBluetoothTransport : ITransport
         }
         catch (Exception ex) when ((uint)ex.HResult == 0x800710DF)
         {
-            throw new InvalidOperationException(
-                "Bluetooth is unavailable (radio off or no adapter). Turn Bluetooth on and retry.", ex);
+            //_logger.LogError("Bluetooth is unavailable (radio off or no adapter). Turn Bluetooth on and retry.", ex);
+            
+            return;
         }
 
         _rfcommProvider = provider;
@@ -232,6 +235,7 @@ public sealed class WindowsBluetoothTransport : ITransport
     }
 
     private bool _disposed;
+
 
     public async ValueTask DisposeAsync()
     {

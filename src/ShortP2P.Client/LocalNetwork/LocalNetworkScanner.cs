@@ -7,13 +7,18 @@ using ShortP2P.Transport;
 namespace ShortP2P.Client.LocalNetwork;
 
 /// <summary>
-///     Сканирование локальной сети по discovery-пингам (UDP broadcast на порт 565 и приём на том же порту;
-///     при наличии Bluetooth — те же кадры по RFCOMM). Список клиентов обновляется по входящим пингам.
+///     Сканирование локальной сети по discovery-пингам: UDP на broadcast-адрес каждой локальной IPv4-подсети
+///     и на 255.255.255.255, порт <see cref="PresencePingCodec.UdpPort" />; раунд повторяется в фоне каждые 5 минут,
+///     дополнительно по запросу UI (<see cref="ScanAsync" />, <see cref="TriggerScanAsync" />). Приём на том же порту;
+///     при наличии Bluetooth — те же кадры по RFCOMM.
 /// </summary>
 public sealed class LocalNetworkScanner : IAsyncDisposable
 {
-    private static readonly TimeSpan BroadcastInterval = TimeSpan.FromSeconds(4);
-    private static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(45);
+    /// <summary>Интервал фоновой рассылки discovery (broadcast по подсетям).</summary>
+    private static readonly TimeSpan PeriodicLanScanInterval = TimeSpan.FromMinutes(5);
+
+    /// <summary>Удалять пира из списка, если не было пинга дольше этого (чуть больше периода сканирования).</summary>
+    private static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(6);
 
     /// <summary>Длительность приёма пингов при ручном сканировании по умолчанию.</summary>
     public static readonly TimeSpan DefaultScanListenDuration = TimeSpan.FromSeconds(45);
@@ -27,7 +32,7 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
     private IReadOnlyList<DiscoveredLocalPeer> _snapshot = [];
 
     private CancellationTokenSource? _cts;
-    private Task? _broadcastLoop;
+    private Task? _periodicScanLoop;
     private Task? _staleLoop;
     private UserEntity? _user;
 
@@ -53,7 +58,7 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
         _gateway.DiscoveryPingReceived += OnDiscoveryPingReceived;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _cts.Token;
-        _broadcastLoop = Task.Run(() => BroadcastLoopAsync(token), token);
+        _periodicScanLoop = Task.Run(() => PeriodicScanLoopAsync(token), token);
         _staleLoop = Task.Run(() => StaleLoopAsync(token), token);
         await Task.CompletedTask.ConfigureAwait(false);
     }
@@ -65,15 +70,15 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
         _gateway.DiscoveryPingReceived -= OnDiscoveryPingReceived;
         try
         {
-            _cts?.Cancel();
+            await _cts.CancelAsync();
         }
         catch
         {
             // ignore
         }
 
-        var loops = new[] { _broadcastLoop, _staleLoop }.Where(t => t != null).ToArray();
-        _broadcastLoop = null;
+        var loops = new[] { _periodicScanLoop, _staleLoop }.Where(t => t != null).ToArray();
+        _periodicScanLoop = null;
         _staleLoop = null;
         if (loops.Length > 0)
         {
@@ -106,18 +111,17 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
             ClientsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>Один раунд broadcast discovery-пингов на порт <see cref="PresencePingCodec.UdpPort" />.</summary>
+    /// <summary>Один раунд discovery: UDP broadcast по каждой подсети (+ limited broadcast).</summary>
     public Task TriggerScanAsync(CancellationToken cancellationToken = default) =>
         SendDiscoveryBroadcastRoundAsync(cancellationToken);
 
     /// <summary>
-    ///     Ручное сканирование: очистка списка, один broadcast, приём пингов <paramref name="listenDuration" />,
+    ///     Ручное сканирование: очистка списка, раунд broadcast discovery, приём пингов <paramref name="listenDuration" />,
     ///     затем одно обновление <see cref="Clients" /> и событие <see cref="ClientsChanged" />.
     /// </summary>
     public async Task ScanAsync(TimeSpan listenDuration, CancellationToken cancellationToken = default)
     {
-        if (listenDuration < TimeSpan.Zero)
-            throw new ArgumentOutOfRangeException(nameof(listenDuration));
+        ArgumentOutOfRangeException.ThrowIfLessThan(listenDuration, TimeSpan.Zero);
 
         _scanSessionActive = true;
         try
@@ -186,14 +190,14 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
         }
     }
 
-    private async Task BroadcastLoopAsync(CancellationToken cancellationToken)
+    private async Task PeriodicScanLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
                 await SendDiscoveryBroadcastRoundAsync(cancellationToken).ConfigureAwait(false);
-                await Task.Delay(BroadcastInterval, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(PeriodicLanScanInterval, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -203,7 +207,7 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
             {
                 try
                 {
-                    await Task.Delay(BroadcastInterval, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(PeriodicLanScanInterval, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
