@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
 
@@ -9,14 +10,16 @@ public partial class ChatDetailPage : ContentPage
     private readonly AuthService _auth;
     private readonly ChatRepository _repo;
     private readonly UserP2pRuntime _p2p;
+    private readonly ILogger<ChatDetailPage> _logger;
     private ChatP2pSession? _p2pSession;
 
-    public ChatDetailPage(AuthService auth, ChatRepository repo, UserP2pRuntime p2p)
+    public ChatDetailPage(AuthService auth, ChatRepository repo, UserP2pRuntime p2p, ILogger<ChatDetailPage> logger)
     {
         InitializeComponent();
         _auth = auth;
         _repo = repo;
         _p2p = p2p;
+        _logger = logger;
     }
 
     public int ChatId { get; set; }
@@ -57,6 +60,7 @@ public partial class ChatDetailPage : ContentPage
             }
             catch (Exception ex)
             {
+                _logger.LogWarning(ex, "Could not start UDP for chat {ChatId}", chat.Id);
                 await DisplayAlert("P2P", $"Could not start UDP: {ex.Message}", "OK").ConfigureAwait(true);
             }
         }
@@ -117,8 +121,9 @@ public partial class ChatDetailPage : ContentPage
         {
             _ = IPAddress.Parse(host);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Invalid IP for peer endpoint");
             await DisplayAlert("Адрес", "Некорректный IP или hostname.", "OK").ConfigureAwait(true);
             return;
         }
@@ -129,6 +134,7 @@ public partial class ChatDetailPage : ContentPage
         }
         catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Apply peer endpoint failed");
             await DisplayAlert("Адрес", ex.Message, "OK").ConfigureAwait(true);
         }
     }
@@ -147,6 +153,7 @@ public partial class ChatDetailPage : ContentPage
         }
         catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Send message failed");
             await DisplayAlert("Send failed", ex.Message, "OK").ConfigureAwait(true);
         }
     }

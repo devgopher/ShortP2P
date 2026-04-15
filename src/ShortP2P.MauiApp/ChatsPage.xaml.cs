@@ -1,5 +1,6 @@
 using System.Threading;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
 
@@ -10,13 +11,15 @@ public partial class ChatsPage : ContentPage
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
     private readonly UserP2pRuntime _p2p;
+    private readonly ILogger<ChatsPage> _logger;
 
-    public ChatsPage(AuthService auth, ChatRepository chats, UserP2pRuntime p2p)
+    public ChatsPage(AuthService auth, ChatRepository chats, UserP2pRuntime p2p, ILogger<ChatsPage> logger)
     {
         InitializeComponent();
         _auth = auth;
         _chats = chats;
         _p2p = p2p;
+        _logger = logger;
     }
 
     private void OnChatListChangedFromInvite(object? sender, EventArgs e) =>
@@ -33,9 +36,9 @@ public partial class ChatsPage : ContentPage
             await _p2p.EnsureAllChatSessionsStartedAsync(u, _auth, _chats, SynchronizationContext.Current)
                 .ConfigureAwait(true);
         }
-        catch
+        catch (Exception ex)
         {
-            // ignore
+            _logger.LogWarning(ex, "Ensure chat sessions after list change");
         }
     }
 
@@ -65,9 +68,9 @@ public partial class ChatsPage : ContentPage
                 await _p2p.EnsureAllChatSessionsStartedAsync(u, _auth, _chats, SynchronizationContext.Current)
                     .ConfigureAwait(true);
             }
-            catch
+            catch (Exception ex)
             {
-                // UDP/discovery may fail on some devices; chat may still work for direct hosts
+                _logger.LogWarning(ex, "Ensure P2P on chats page appearing");
             }
         }
 
@@ -156,9 +159,9 @@ public partial class ChatsPage : ContentPage
         {
             await _p2p.StopAsync().ConfigureAwait(true);
         }
-        catch
+        catch (Exception ex)
         {
-            // ignore
+            _logger.LogWarning(ex, "Stop P2P on logout");
         }
 
         await _auth.LogoutAsync().ConfigureAwait(true);

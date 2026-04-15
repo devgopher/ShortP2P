@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
 
@@ -11,6 +12,8 @@ public sealed class ChatForm : Form
     private readonly AuthService _auth;
     private readonly ChatRepository _repo;
     private readonly UserP2pRuntime _p2PRuntime;
+    private readonly ILogger<ChatForm> _logger;
+    private readonly ILogger<UserAction> _userActions;
     private readonly Label _peerIdLabel = new()
     {
         AutoSize = true,
@@ -47,13 +50,16 @@ public sealed class ChatForm : Form
     private readonly Button _send = new() { Text = "Send", Dock = DockStyle.Right, AutoSize = true };
     private ChatP2pSession? _p2PSession;
 
-    public ChatForm(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo, UserP2pRuntime p2PRuntime)
+    public ChatForm(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo, UserP2pRuntime p2PRuntime,
+        ILogger<ChatForm> logger, ILogger<UserAction> userActions)
     {
         _chat = chat;
         _user = user;
         _auth = auth;
         _repo = repo;
         _p2PRuntime = p2PRuntime;
+        _logger = logger;
+        _userActions = userActions;
         Text = chat.PeerNickname;
         StartPosition = FormStartPosition.CenterParent;
         Width = 520;
@@ -110,6 +116,7 @@ public sealed class ChatForm : Form
 
     private async Task OnShownAsync()
     {
+        _userActions.LogInformation("Chat {Peer}: window opened (chat id {ChatId})", _chat.PeerNickname, _chat.Id);
         var uiSync = SynchronizationContext.Current;
         var fresh = await _repo.GetChatAsync(_chat.Id).ConfigureAwait(true) ?? _chat;
         _p2PSession = _p2PRuntime.GetOrCreateSession(fresh, _user, _auth, _repo, uiSync);
@@ -124,6 +131,7 @@ public sealed class ChatForm : Form
             }
             catch (Exception ex)
             {
+                _logger.LogWarning(ex, "Could not start UDP for chat {ChatId}", _chat.Id);
                 MessageBox.Show(this, $"Could not start UDP: {ex.Message}", "P2P", MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
             }
@@ -170,10 +178,15 @@ public sealed class ChatForm : Form
         }
         catch (Exception ex)
         {
+            _userActions.LogInformation(
+                "Chat {Peer}: apply peer endpoint failed ({Host}:{Port}, {Message})",
+                _chat.PeerNickname, host, port, ex.Message);
             MessageBox.Show(this, ex.Message, "Адрес", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
+        _userActions.LogInformation("Chat {Peer}: peer endpoint set to {Host}:{Port}",
+            _chat.PeerNickname, host, port);
         _peerHostEntry.Text = _chat.PeerHost;
         _peerPortEntry.Text = _chat.PeerPort.ToString();
     }
@@ -225,11 +238,14 @@ public sealed class ChatForm : Form
         try
         {
             await _p2PSession.SendTextAsync(text).ConfigureAwait(true);
+            _userActions.LogInformation("Chat {Peer}: sent message ({Length} chars)", _chat.PeerNickname, text.Length);
             _input.Clear();
             await ReloadMessagesAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Send message failed in chat {ChatId}", _chat.Id);
+            _userActions.LogInformation("Chat {Peer}: send message failed ({Message})", _chat.PeerNickname, ex.Message);
             MessageBox.Show(this, ex.Message, "Send failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
@@ -258,6 +274,7 @@ public sealed class ChatForm : Form
         if (line.Text.Length <= 64)
             return;
 
+        _userActions.LogInformation("Chat {Peer}: open long message viewer", _chat.PeerNickname);
         using var dlg = new MessageViewForm("Сообщение", line.Text);
         dlg.ShowDialog(this);
     }

@@ -1,14 +1,20 @@
 using System.Drawing;
 using System.Drawing.Imaging;
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Qr;
 
 namespace ShortP2P.WinForms;
 
 public sealed class AddChatForm : Form
 {
+    private readonly ILogger<AddChatForm> _logger;
+    private readonly ILogger<UserAction> _userActions;
     private readonly TextBox _nick = new() { PlaceholderText = "Peer nickname" };
     private readonly TextBox _id = new() { PlaceholderText = "Peer network id" };
-    private readonly TextBox _pub = new() { PlaceholderText = "Peer RSA public key JSON", Multiline = true, Height = 80, ScrollBars = ScrollBars.Vertical };
+    private readonly TextBox _pub = new()
+    {
+        PlaceholderText = "Peer RSA public key JSON", Multiline = true, Height = 80, ScrollBars = ScrollBars.Vertical
+    };
     private readonly TextBox _host = new() { PlaceholderText = "Peer IP / host" };
     private readonly TextBox _port = new() { PlaceholderText = "UDP port" };
     private readonly Button _btnOk = new() { Text = "Save" };
@@ -20,8 +26,10 @@ public sealed class AddChatForm : Form
     public string PeerHost => _host.Text.Trim();
     public int PeerPort => int.TryParse(_port.Text, out var p) ? p : 0;
 
-    public AddChatForm()
+    public AddChatForm(ILogger<AddChatForm> logger, ILogger<UserAction> userActions)
     {
+        _logger = logger;
+        _userActions = userActions;
         Text = "Add chat";
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -95,17 +103,20 @@ public sealed class AddChatForm : Form
         }
         catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Read QR image file");
             MessageBox.Show(this, ex.Message, "File", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
         if (!PeerQrService.TryDecodeImage(bytes, out var payload, out var err))
         {
+            _logger.LogWarning("QR decode failed from file {File}: {Error}", dlg.FileName, err);
             MessageBox.Show(this, err ?? "Could not read QR code.", "QR", MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
             return;
         }
 
+        _userActions.LogInformation("Add chat: QR decoded from file {FileName}", Path.GetFileName(dlg.FileName));
         ApplyPayload(payload);
     }
 
@@ -135,11 +146,13 @@ public sealed class AddChatForm : Form
 
         if (!PeerQrService.TryDecodeImage(bytes, out var payload, out var err))
         {
+            _logger.LogWarning("QR decode failed from clipboard: {Error}", err);
             MessageBox.Show(this, err ?? "Could not read QR code.", "QR", MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
             return;
         }
 
+        _userActions.LogInformation("Add chat: QR decoded from clipboard");
         ApplyPayload(payload);
     }
 
@@ -158,6 +171,9 @@ public sealed class AddChatForm : Form
             return;
         }
 
+        _userActions.LogInformation(
+            "Add chat: save (peer {Peer}, network id {NetworkId}, host {Host}:{Port})",
+            PeerNickname, PeerNetworkIdShort, PeerHost, PeerPort);
         DialogResult = DialogResult.OK;
         Close();
     }

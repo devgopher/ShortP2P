@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.LocalNetwork;
 using ShortP2P.Client.Routing;
@@ -13,6 +14,8 @@ public sealed class LocalNetworkScanForm : Form
     private readonly UserP2pRuntime _p2p;
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
+    private readonly ILogger<LocalNetworkScanForm> _logger;
+    private readonly ILogger<UserAction> _userActions;
     private readonly Action<ChatEntity, IWin32Window> _openChat;
     private readonly Func<Task>? _refreshMainChatsAsync;
     private readonly ListView _list = new()
@@ -29,11 +32,14 @@ public sealed class LocalNetworkScanForm : Form
     private readonly Button _close = new() { Text = "Закрыть", DialogResult = DialogResult.OK };
 
     public LocalNetworkScanForm(UserP2pRuntime p2p, AuthService auth, ChatRepository chats,
+        ILogger<LocalNetworkScanForm> logger, ILogger<UserAction> userActions,
         Action<ChatEntity, IWin32Window> openChat, Func<Task>? refreshMainChatsAsync = null)
     {
         _p2p = p2p;
         _auth = auth;
         _chats = chats;
+        _logger = logger;
+        _userActions = userActions;
         _openChat = openChat;
         _refreshMainChatsAsync = refreshMainChatsAsync;
         Text = "Локальная сеть";
@@ -156,27 +162,38 @@ public sealed class LocalNetworkScanForm : Form
             {
                 case LanChatStartKind.AlreadyExists:
                 case LanChatStartKind.Created:
+                    _userActions.LogInformation(
+                        "LAN scan: start chat from peer {Nickname} (network id {NetworkId}, kind {Kind})",
+                        peer.Nickname, CompressedNetworkId.FromGuid(peer.NetworkId).ToShortString(), result.Kind);
                     if (_refreshMainChatsAsync != null)
                         await _refreshMainChatsAsync().ConfigureAwait(true);
                     if (result.Chat != null)
                         _openChat(result.Chat, this);
                     break;
                 case LanChatStartKind.WaitingForPeer:
+                    _userActions.LogInformation(
+                        "LAN scan: waiting for peer {Nickname} (network id {NetworkId})",
+                        peer.Nickname, CompressedNetworkId.FromGuid(peer.NetworkId).ToShortString());
                     MessageBox.Show(this, result.Message ?? "", "LAN", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     break;
                 case LanChatStartKind.Failed:
+                    _userActions.LogInformation(
+                        "LAN scan: start chat failed for {Nickname} ({Message})",
+                        peer.Nickname, result.Message ?? "unknown");
                     MessageBox.Show(this, result.Message ?? "Ошибка", "LAN", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     break;
             }
         }
         catch (Exception ex)
         {
+            _logger.LogWarning(ex, "LAN scan item activate");
             MessageBox.Show(this, ex.Message, "LAN", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 
     private async Task OnScanAsync()
     {
+        _userActions.LogInformation("LAN scan: scan started");
         _scan.Enabled = false;
         var sec = (int)Math.Round(LocalNetworkScanner.DefaultScanListenDuration.TotalSeconds);
         _status.Text = $"Слушаем пинги {sec} с…";
@@ -184,6 +201,7 @@ public sealed class LocalNetworkScanForm : Form
         {
             await _p2p.LocalScan.ScanAsync(LocalNetworkScanner.DefaultScanListenDuration).ConfigureAwait(true);
             RefreshList();
+            _userActions.LogInformation("LAN scan: scan finished ({Count} peers in list)", _list.Items.Count);
         }
         finally
         {

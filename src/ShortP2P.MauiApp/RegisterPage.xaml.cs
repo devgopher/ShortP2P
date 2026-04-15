@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Services;
 
 namespace ShortP2P.MauiApp;
@@ -6,11 +7,13 @@ namespace ShortP2P.MauiApp;
 public partial class RegisterPage : ContentPage
 {
     private readonly AuthService _auth;
+    private readonly ILogger<RegisterPage> _logger;
 
-    public RegisterPage(AuthService auth)
+    public RegisterPage(AuthService auth, ILogger<RegisterPage> logger)
     {
         InitializeComponent();
         _auth = auth;
+        _logger = logger;
     }
 
     private async void OnRegisterClicked(object? sender, EventArgs e)
@@ -20,6 +23,7 @@ public partial class RegisterPage : ContentPage
         var (ok, err) = await _auth.RegisterAsync(nick, pass).ConfigureAwait(true);
         if (!ok)
         {
+            _logger.LogWarning("Registration failed for {Nickname}: {Reason}", nick, err);
             await DisplayAlert("Register", err ?? "Failed", "OK").ConfigureAwait(true);
             return;
         }

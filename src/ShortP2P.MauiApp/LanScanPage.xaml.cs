@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.LocalNetwork;
 using ShortP2P.Client.Routing;
@@ -42,14 +43,16 @@ public partial class LanScanPage : ContentPage
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
     private readonly UserP2pRuntime _p2p;
+    private readonly ILogger<LanScanPage> _logger;
     private readonly ObservableCollection<LanScanRow> _rows = [];
 
-    public LanScanPage(AuthService auth, ChatRepository chats, UserP2pRuntime p2p)
+    public LanScanPage(AuthService auth, ChatRepository chats, UserP2pRuntime p2p, ILogger<LanScanPage> logger)
     {
         InitializeComponent();
         _auth = auth;
         _chats = chats;
         _p2p = p2p;
+        _logger = logger;
         PeerCollection.ItemsSource = _rows;
     }
 
@@ -128,6 +131,7 @@ public partial class LanScanPage : ContentPage
         }
         catch (Exception ex)
         {
+            _logger.LogWarning(ex, "LAN scan peer activation");
             await DisplayAlert("LAN", ex.Message, "OK").ConfigureAwait(true);
         }
     }

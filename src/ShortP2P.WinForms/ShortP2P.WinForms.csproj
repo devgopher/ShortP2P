@@ -10,7 +10,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Update="nlog.config">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
     <PackageReference Include="NLog" Version="5.3.4" />
+    <PackageReference Include="NLog.Extensions.Logging" Version="5.3.11" />
     <ProjectReference Include="..\ShortP2P.Client\ShortP2P.Client.csproj" />
     <ProjectReference Include="..\ShortP2P.Transport.Bluetooth.Windows\ShortP2P.Transport.Bluetooth.Windows.csproj" />
   </ItemGroup>

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
 
@@ -13,11 +14,14 @@ public class RoutingSettingsPage : ContentPage
     private readonly UserP2pRuntime _runtime;
     private readonly Entry _searchTimeoutMs = new() { Keyboard = Keyboard.Numeric };
     private readonly P2pRoutingSettingsStore _store;
+    private readonly ILogger<RoutingSettingsPage> _logger;
 
-    public RoutingSettingsPage(P2pRoutingSettingsStore store, UserP2pRuntime runtime)
+    public RoutingSettingsPage(P2pRoutingSettingsStore store, UserP2pRuntime runtime,
+        ILogger<RoutingSettingsPage> logger)
     {
         _store = store;
         _runtime = runtime;
+        _logger = logger;
         foreach (var p in LinkTechnologyPresetExtensions.AllPresets)
             _linkTechnology.Items.Add(p.GetDisplayLabel());
         Title = "P2P routing";
@@ -58,9 +62,9 @@ public class RoutingSettingsPage : ContentPage
             var idx = Array.IndexOf(LinkTechnologyPresetExtensions.AllPresets, s.LinkTechnology);
             _linkTechnology.SelectedIndex = idx >= 0 ? idx : 0;
         }
-        catch (Exception e)
+        catch (Exception ex)
         {
-           // TODO handle exception
+            _logger.LogWarning(ex, "Load P2P routing settings");
         }
     }
 

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Services;
 
 namespace ShortP2P.WinForms;
@@ -5,14 +6,18 @@ namespace ShortP2P.WinForms;
 public sealed class RegisterForm : Form
 {
     private readonly AuthService _auth;
+    private readonly ILogger<RegisterForm> _logger;
+    private readonly ILogger<UserAction> _userActions;
     private readonly TextBox _nick = new() { PlaceholderText = "Nickname" };
     private readonly TextBox _pass = new() { PlaceholderText = "Password", UseSystemPasswordChar = true };
     private readonly Button _btnOk = new() { Text = "Create account" };
     private readonly Button _btnCancel = new() { Text = "Cancel", DialogResult = DialogResult.Cancel };
 
-    public RegisterForm(AuthService auth)
+    public RegisterForm(AuthService auth, ILogger<RegisterForm> logger, ILogger<UserAction> userActions)
     {
         _auth = auth;
+        _logger = logger;
+        _userActions = userActions;
         Text = "ShortP2P — Register";
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -35,6 +40,11 @@ public sealed class RegisterForm : Form
 
         _btnOk.Click += async (_, _) => await OnRegisterAsync().ConfigureAwait(true);
         CancelButton = _btnCancel;
+        FormClosing += (_, e) =>
+        {
+            if (e.CloseReason == CloseReason.UserClosing && DialogResult != DialogResult.OK)
+                _userActions.LogInformation("Register: cancelled");
+        };
     }
 
     private async Task OnRegisterAsync()
@@ -44,11 +54,14 @@ public sealed class RegisterForm : Form
         var (ok, err) = await _auth.RegisterAsync(nick, pass).ConfigureAwait(true);
         if (!ok)
         {
+            _userActions.LogInformation("Register: failed for nickname {Nickname}", nick);
+            _logger.LogWarning("Registration failed for {Nickname}: {Reason}", nick, err);
             MessageBox.Show(this, err ?? "Registration failed.", "Register", MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
             return;
         }
 
+        _userActions.LogInformation("Register: success for nickname {Nickname}", nick);
         var id = _auth.CurrentUser?.NetworkIdShort ?? "";
         MessageBox.Show(this, $"Your network id:\n{id}", "Account created", MessageBoxButtons.OK,
             MessageBoxIcon.Information);

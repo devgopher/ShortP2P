@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
 
@@ -7,6 +8,8 @@ internal sealed class RoutingSettingsForm : Form
 {
     private readonly P2pRoutingSettingsStore _store;
     private readonly UserP2pRuntime _runtime;
+    private readonly ILogger<RoutingSettingsForm> _logger;
+    private readonly ILogger<UserAction> _userActions;
     private readonly NumericUpDown _maxHops = new() { Minimum = 1, Maximum = 3, Width = 80 };
     private readonly NumericUpDown _attempts = new() { Minimum = 1, Maximum = 20, Width = 80 };
     private readonly NumericUpDown _delayMs = new() { Minimum = 0, Maximum = 120_000, Width = 100 };
@@ -18,10 +21,14 @@ internal sealed class RoutingSettingsForm : Form
         Anchor = AnchorStyles.Left,
     };
 
-    public RoutingSettingsForm(P2pRoutingSettingsStore store, UserP2pRuntime runtime)
+    public RoutingSettingsForm(P2pRoutingSettingsStore store, UserP2pRuntime runtime,
+        ILogger<RoutingSettingsForm> logger,
+        ILogger<UserAction> userActions)
     {
         _store = store;
         _runtime = runtime;
+        _logger = logger;
+        _userActions = userActions;
         foreach (var p in LinkTechnologyPresetExtensions.AllPresets)
             _linkTechnology.Items.Add(p.GetDisplayLabel());
         Text = "P2P routing";
@@ -63,7 +70,11 @@ internal sealed class RoutingSettingsForm : Form
         };
         var ok = new Button { Text = "Save", AutoSize = true };
         var cancel = new Button { Text = "Cancel", AutoSize = true };
-        cancel.Click += (_, _) => Close();
+        cancel.Click += (_, _) =>
+        {
+            _userActions.LogInformation("P2P routing: cancelled without save");
+            Close();
+        };
         ok.Click += async (_, _) =>
         {
             await SaveAsync().ConfigureAwait(true);
@@ -75,6 +86,7 @@ internal sealed class RoutingSettingsForm : Form
         Controls.Add(root);
         Controls.Add(buttons);
         Load += async (_, _) => await LoadAsync().ConfigureAwait(true);
+        _logger.LogInformation("P2P routing settings dialog opened");
     }
 
     private async Task LoadAsync()
@@ -103,6 +115,10 @@ internal sealed class RoutingSettingsForm : Form
             LinkTechnology = LinkTechnologyPresetExtensions.AllPresets[li],
         };
         await _store.SaveAsync(s).ConfigureAwait(true);
+        _userActions.LogInformation(
+            "P2P routing: saved (max hops {MaxHops}, attempts {Attempts}, delay ms {DelayMs}, find timeout ms {TimeoutMs}, link {Link})",
+            s.MaxSearchHops, s.SendFailureSearchAttempts, s.SendFailureRetryDelay.TotalMilliseconds,
+            s.SearchWaitTimeout.TotalMilliseconds, s.LinkTechnology);
         _runtime.Settings.MaxSearchHops = s.MaxSearchHops;
         _runtime.Settings.SendFailureSearchAttempts = s.SendFailureSearchAttempts;
         _runtime.Settings.SendFailureRetryDelay = s.SendFailureRetryDelay;

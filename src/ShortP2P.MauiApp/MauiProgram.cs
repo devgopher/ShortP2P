@@ -4,19 +4,16 @@ using Microsoft.Maui.Storage;
 using NLog.Extensions.Logging;
 using NLog;
 using NLog.Config;
-using NLog.Targets;
 using ShortP2P.Client;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
 using ShortP2P.MauiApp.Services;
-using System.Text;
 
 namespace ShortP2P.MauiApp;
 
 public static class MauiProgram
 {
-    private static readonly Logger StartupLogger = LogManager.GetCurrentClassLogger();
     public static IServiceProvider Services { get; private set; } = null!;
 
     public static global::Microsoft.Maui.Hosting.MauiApp CreateMauiApp()
@@ -58,7 +55,7 @@ public static class MauiProgram
 
         var app = builder.Build();
         Services = app.Services;
-        StartupLogger.Info("GUI application started");
+        Services.GetRequiredService<ILogger<MauiHost>>().LogInformation("GUI application started");
 
         AppDomain.CurrentDomain.ProcessExit += (_, _) => LogManager.Shutdown();
         return app;
@@ -66,20 +63,7 @@ public static class MauiProgram
 
     private static void ConfigureNLog()
     {
-        var logsDirectory = Path.Combine(AppContext.BaseDirectory, "logs");
-        Directory.CreateDirectory(logsDirectory);
-
-        var config = new LoggingConfiguration();
-        var fileTarget = new FileTarget("gui-logfile")
-        {
-            FileName = Path.Combine(logsDirectory, "${date:format=dd.MM.yyyy}.log"),
-            Layout = "${longdate}|${uppercase:${level}}|${logger}|${message}${onexception:inner=|${exception:format=tostring}}",
-            KeepFileOpen = false,
-            ConcurrentWrites = true,
-            Encoding = Encoding.UTF8
-        };
-
-        config.AddRule(NLog.LogLevel.Info, NLog.LogLevel.Fatal, fileTarget);
-        LogManager.Configuration = config;
+        var path = Path.Combine(AppContext.BaseDirectory, "nlog.config");
+        LogManager.Configuration = new XmlLoggingConfiguration(path);
     }
 }

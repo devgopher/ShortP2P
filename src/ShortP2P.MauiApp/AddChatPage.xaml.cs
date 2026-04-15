@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Services;
 
@@ -7,12 +8,14 @@ public partial class AddChatPage : ContentPage
 {
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
+    private readonly ILogger<AddChatPage> _logger;
 
-    public AddChatPage(AuthService auth, ChatRepository chats)
+    public AddChatPage(AuthService auth, ChatRepository chats, ILogger<AddChatPage> logger)
     {
         InitializeComponent();
         _auth = auth;
         _chats = chats;
+        _logger = logger;
     }
 
     private async void OnCancelClicked(object? sender, EventArgs e)
@@ -38,6 +41,7 @@ public partial class AddChatPage : ContentPage
 
         if (!PeerQrService.TryDecodeImage(bytes, out var payload, out var err))
         {
+            _logger.LogWarning("QR decode failed from file: {Error}", err);
             await DisplayAlert("QR", err ?? "Could not read QR code.", "OK").ConfigureAwait(true);
             return;
         }
@@ -78,8 +82,9 @@ public partial class AddChatPage : ContentPage
         {
             _ = RsaKeySerializer.DeserializePublic(pub);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Invalid public key when saving chat");
             await DisplayAlert("Error", "Invalid public key JSON.", "OK").ConfigureAwait(true);
             return;
         }

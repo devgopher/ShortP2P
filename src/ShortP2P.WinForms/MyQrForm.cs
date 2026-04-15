@@ -1,4 +1,5 @@
 using System.Drawing;
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Services;
 
@@ -6,7 +7,7 @@ namespace ShortP2P.WinForms;
 
 public sealed class MyQrForm : Form
 {
-    public MyQrForm(AuthService auth)
+    public MyQrForm(AuthService auth, ILogger<MyQrForm> log, ILogger<UserAction> userActions)
     {
         Text = "My QR code";
         StartPosition = FormStartPosition.CenterParent;
@@ -20,6 +21,7 @@ public sealed class MyQrForm : Form
         var u = auth.CurrentUser;
         if (u == null)
         {
+            log.LogWarning("My QR opened but user is not logged in");
             Controls.Add(new Label { Text = "Not logged in.", AutoSize = true, Dock = DockStyle.Fill });
             return;
         }
@@ -54,5 +56,8 @@ public sealed class MyQrForm : Form
         panel.Controls.Add(hint);
         panel.Controls.Add(picture);
         Controls.Add(panel);
+
+        userActions.LogInformation("My QR: opened (user {Nickname}, network id {NetworkId})",
+            u.Nickname, u.NetworkIdShort);
     }
 }

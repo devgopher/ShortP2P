@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
@@ -16,16 +18,27 @@ public sealed class MainChatsForm : Form
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly P2pRoutingSettingsStore _routingStore;
     private readonly HashSet<int> _unreadChatIds = [];
+    private readonly IServiceProvider _services;
+    private readonly ILogger<MainChatsForm> _logger;
+    private readonly ILogger<ChatForm> _chatLog;
+    private readonly ILogger<LocalNetworkScanForm> _lanScanLog;
+    private readonly ILogger<UserAction> _userActions;
     private int? _focusedChatId;
     private bool _knownChatsInitialized;
 
     public MainChatsForm(AuthService auth, ChatRepository chats, UserP2pRuntime p2P,
-        P2pRoutingSettingsStore routingStore)
+        P2pRoutingSettingsStore routingStore, IServiceProvider services, ILogger<MainChatsForm> logger,
+        ILogger<ChatForm> chatLog, ILogger<LocalNetworkScanForm> lanScanLog, ILogger<UserAction> userActions)
     {
         _auth = auth;
         _chats = chats;
         _p2P = p2P;
         _routingStore = routingStore;
+        _services = services;
+        _logger = logger;
+        _chatLog = chatLog;
+        _lanScanLog = lanScanLog;
+        _userActions = userActions;
         Text = "ShortP2P — Chats";
         StartPosition = FormStartPosition.CenterScreen;
         Width = 560;
@@ -91,16 +104,21 @@ public sealed class MainChatsForm : Form
         {
             var u = _auth.CurrentUser;
             if (u != null)
+            {
+                _userActions.LogInformation(
+                    "Chats: main window opened (user {Nickname}, network id {NetworkId})",
+                    u.Nickname, u.NetworkIdShort);
                 try
                 {
                     await _p2P.EnsureStartedAsync(u).ConfigureAwait(true);
                     await _p2P.EnsureAllChatSessionsStartedAsync(u, _auth, _chats, SynchronizationContext.Current)
                         .ConfigureAwait(true);
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // ignore
+                    _logger.LogWarning(ex, "Ensure P2P sessions on main window shown");
                 }
+            }
 
             await RefreshAsync().ConfigureAwait(true);
         };
@@ -159,9 +177,9 @@ public sealed class MainChatsForm : Form
             await _p2P.EnsureAllChatSessionsStartedAsync(u, _auth, _chats, SynchronizationContext.Current)
                 .ConfigureAwait(true);
         }
-        catch
+        catch (Exception ex)
         {
-            // ignore
+            _logger.LogWarning(ex, "Ensure all chat sessions after list change");
         }
     }
 
@@ -173,6 +191,7 @@ public sealed class MainChatsForm : Form
             var u = _auth.CurrentUser;
             if (u == null)
             {
+                _userActions.LogInformation("Chats: session lost, closing main window");
                 DialogResult = DialogResult.Abort;
                 Close();
                 return;
@@ -236,13 +255,16 @@ public sealed class MainChatsForm : Form
         var u = _auth.CurrentUser;
         if (u == null)
             return;
-        using var f = new LocalNetworkScanForm(_p2P, _auth, _chats,
+        _userActions.LogInformation("Chats: open LAN scan");
+        using var f = new LocalNetworkScanForm(_p2P, _auth, _chats, _lanScanLog, _userActions,
             (chat, owner) =>
             {
+                _userActions.LogInformation("Chats: open chat from LAN scan (peer {Peer}, id {ChatId})",
+                    chat.PeerNickname, chat.Id);
                 _focusedChatId = chat.Id;
                 _unreadChatIds.Remove(chat.Id);
                 _list.Invalidate();
-                using var win = new ChatForm(chat, u, _auth, _chats, _p2P);
+                using var win = new ChatForm(chat, u, _auth, _chats, _p2P, _chatLog, _userActions);
                 win.ShowDialog(owner);
                 _focusedChatId = null;
             },
@@ -253,21 +275,27 @@ public sealed class MainChatsForm : Form
 
     private void OnRoutingSettings(object? sender, EventArgs e)
     {
-        using var f = new RoutingSettingsForm(_routingStore, _p2P);
+        _userActions.LogInformation("Chats: open P2P routing settings");
+        using var f = _services.GetRequiredService<RoutingSettingsForm>();
         f.ShowDialog(this);
     }
 
     private void OnMyQr(object? sender, EventArgs e)
     {
-        using var f = new MyQrForm(_auth);
+        _userActions.LogInformation("Chats: open My QR");
+        using var f = _services.GetRequiredService<MyQrForm>();
         f.ShowDialog(this);
     }
 
     private async Task OnAddChatAsync()
     {
-        using var dlg = new AddChatForm();
+        _userActions.LogInformation("Chats: open add chat");
+        using var dlg = _services.GetRequiredService<AddChatForm>();
         if (dlg.ShowDialog(this) != DialogResult.OK)
+        {
+            _userActions.LogInformation("Chats: add chat cancelled");
             return;
+        }
 
         var u = _auth.CurrentUser;
         if (u == null) return;
@@ -276,19 +304,24 @@ public sealed class MainChatsForm : Form
         {
             RsaKeySerializer.DeserializePublic(dlg.PeerPublicKeyJson);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Invalid public key JSON when adding chat");
             MessageBox.Show(this, "Invalid public key JSON.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
         await _chats.AddChatAsync(u.Id, dlg.PeerNickname, dlg.PeerNetworkIdShort, dlg.PeerPublicKeyJson.Trim(),
             dlg.PeerHost, dlg.PeerPort).ConfigureAwait(true);
+        _userActions.LogInformation(
+            "Chats: chat added (peer {Peer}, network id {NetworkId}, host {Host}:{Port})",
+            dlg.PeerNickname, dlg.PeerNetworkIdShort, dlg.PeerHost, dlg.PeerPort);
         await RefreshAsync().ConfigureAwait(true);
     }
 
     private async Task OnDeleteChatAsync()
     {
+        _userActions.LogInformation("Chats: delete chat requested");
         if (_list.SelectedItem is not ChatEntity chat)
         {
             MessageBox.Show(this, "Выберите чат в списке.", "Удаление", MessageBoxButtons.OK,
@@ -313,10 +346,13 @@ public sealed class MainChatsForm : Form
         var removed = await _chats.DeleteChatAsync(chat.Id, u.Id).ConfigureAwait(true);
         if (!removed)
         {
+            _userActions.LogInformation("Chats: delete chat failed (peer {Peer}, id {ChatId})",
+                chat.PeerNickname, chat.Id);
             MessageBox.Show(this, "Не удалось удалить чат.", "Удаление", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
+        _userActions.LogInformation("Chats: chat deleted (peer {Peer}, id {ChatId})", chat.PeerNickname, chat.Id);
         _newChatIds.Remove(chat.Id);
         _unreadChatIds.Remove(chat.Id);
         _knownChatIds.Remove(chat.Id);
@@ -327,6 +363,7 @@ public sealed class MainChatsForm : Form
     {
         var u = _auth.CurrentUser;
         if (u == null) return;
+        _userActions.LogInformation("Chats: copy keys to clipboard");
         var pub = RsaKeySerializer.SerializePublic(_auth.GetCurrentPublicKey());
         var text = $"Network id: {u.NetworkIdShort}\r\nPublic key JSON:\r\n{pub}";
         try
@@ -334,22 +371,25 @@ public sealed class MainChatsForm : Form
             Clipboard.SetText(text);
             MessageBox.Show(this, "Network id and public key JSON copied to clipboard.", "Copied",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
+            _userActions.LogInformation("Chats: keys copied successfully");
         }
         catch (Exception ex)
         {
+            _userActions.LogInformation("Chats: copy keys failed ({Message})", ex.Message);
             MessageBox.Show(this, ex.Message, "Clipboard", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 
     private async void OnLogout(object? sender, EventArgs e)
     {
+        _userActions.LogInformation("Chats: logout");
         try
         {
             await _p2P.StopAsync().ConfigureAwait(true);
         }
-        catch
+        catch (Exception ex)
         {
-            // ignore
+            _logger.LogWarning(ex, "Stop P2P on logout");
         }
 
         await _auth.LogoutAsync().ConfigureAwait(true);
@@ -361,6 +401,7 @@ public sealed class MainChatsForm : Form
     {
         if (_list.SelectedItem is not ChatEntity chat)
             return;
+        _userActions.LogInformation("Chats: open chat (peer {Peer}, id {ChatId})", chat.PeerNickname, chat.Id);
         _newChatIds.Remove(chat.Id);
         _unreadChatIds.Remove(chat.Id);
         _list.Invalidate();
@@ -369,7 +410,7 @@ public sealed class MainChatsForm : Form
         if (u == null) return;
 
         _focusedChatId = chat.Id;
-        using var win = new ChatForm(chat, u, _auth, _chats, _p2P);
+        using var win = new ChatForm(chat, u, _auth, _chats, _p2P, _chatLog, _userActions);
         win.ShowDialog(this);
         _focusedChatId = null;
         await RefreshAsync().ConfigureAwait(true);

@@ -55,4 +55,11 @@
 		<ProjectReference Include="..\ShortP2P.Client\ShortP2P.Client.csproj" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<None Update="nlog.config">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</None>
+	</ItemGroup>
+
 </Project>
