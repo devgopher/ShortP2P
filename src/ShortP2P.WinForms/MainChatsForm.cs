@@ -8,23 +8,23 @@ public sealed class MainChatsForm : Form
 {
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
-    private readonly HashSet<int> _knownChatIds = new();
+    private readonly HashSet<int> _knownChatIds = [];
     private readonly ListBox _list = new() { IntegralHeight = false, DrawMode = DrawMode.OwnerDrawFixed };
-    private readonly HashSet<int> _newChatIds = new();
-    private readonly UserP2pRuntime _p2p;
+    private readonly HashSet<int> _newChatIds = [];
+    private readonly UserP2pRuntime _p2P;
     private readonly Label _profile = new() { AutoSize = true };
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly P2pRoutingSettingsStore _routingStore;
-    private readonly HashSet<int> _unreadChatIds = new();
+    private readonly HashSet<int> _unreadChatIds = [];
     private int? _focusedChatId;
     private bool _knownChatsInitialized;
 
-    public MainChatsForm(AuthService auth, ChatRepository chats, UserP2pRuntime p2p,
+    public MainChatsForm(AuthService auth, ChatRepository chats, UserP2pRuntime p2P,
         P2pRoutingSettingsStore routingStore)
     {
         _auth = auth;
         _chats = chats;
-        _p2p = p2p;
+        _p2P = p2P;
         _routingStore = routingStore;
         Text = "ShortP2P — Chats";
         StartPosition = FormStartPosition.CenterScreen;
@@ -93,8 +93,8 @@ public sealed class MainChatsForm : Form
             if (u != null)
                 try
                 {
-                    await _p2p.EnsureStartedAsync(u).ConfigureAwait(true);
-                    await _p2p.EnsureAllChatSessionsStartedAsync(u, _auth, _chats, SynchronizationContext.Current)
+                    await _p2P.EnsureStartedAsync(u).ConfigureAwait(true);
+                    await _p2P.EnsureAllChatSessionsStartedAsync(u, _auth, _chats, SynchronizationContext.Current)
                         .ConfigureAwait(true);
                 }
                 catch
@@ -156,7 +156,7 @@ public sealed class MainChatsForm : Form
             return;
         try
         {
-            await _p2p.EnsureAllChatSessionsStartedAsync(u, _auth, _chats, SynchronizationContext.Current)
+            await _p2P.EnsureAllChatSessionsStartedAsync(u, _auth, _chats, SynchronizationContext.Current)
                 .ConfigureAwait(true);
         }
         catch
@@ -236,13 +236,13 @@ public sealed class MainChatsForm : Form
         var u = _auth.CurrentUser;
         if (u == null)
             return;
-        using var f = new LocalNetworkScanForm(_p2p, _auth, _chats,
+        using var f = new LocalNetworkScanForm(_p2P, _auth, _chats,
             (chat, owner) =>
             {
                 _focusedChatId = chat.Id;
                 _unreadChatIds.Remove(chat.Id);
                 _list.Invalidate();
-                using var win = new ChatForm(chat, u, _auth, _chats, _p2p);
+                using var win = new ChatForm(chat, u, _auth, _chats, _p2P);
                 win.ShowDialog(owner);
                 _focusedChatId = null;
             },
@@ -253,7 +253,7 @@ public sealed class MainChatsForm : Form
 
     private void OnRoutingSettings(object? sender, EventArgs e)
     {
-        using var f = new RoutingSettingsForm(_routingStore, _p2p);
+        using var f = new RoutingSettingsForm(_routingStore, _p2P);
         f.ShowDialog(this);
     }
 
@@ -309,7 +309,7 @@ public sealed class MainChatsForm : Form
         if (ok != DialogResult.Yes)
             return;
 
-        await _p2p.RemoveChatSessionAsync(chat.Id).ConfigureAwait(true);
+        await _p2P.RemoveChatSessionAsync(chat.Id).ConfigureAwait(true);
         var removed = await _chats.DeleteChatAsync(chat.Id, u.Id).ConfigureAwait(true);
         if (!removed)
         {
@@ -345,7 +345,7 @@ public sealed class MainChatsForm : Form
     {
         try
         {
-            await _p2p.StopAsync().ConfigureAwait(true);
+            await _p2P.StopAsync().ConfigureAwait(true);
         }
         catch
         {
@@ -369,7 +369,7 @@ public sealed class MainChatsForm : Form
         if (u == null) return;
 
         _focusedChatId = chat.Id;
-        using var win = new ChatForm(chat, u, _auth, _chats, _p2p);
+        using var win = new ChatForm(chat, u, _auth, _chats, _p2P);
         win.ShowDialog(this);
         _focusedChatId = null;
         await RefreshAsync().ConfigureAwait(true);

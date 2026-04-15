@@ -12,5 +12,5 @@ public sealed class PeerSearchResult
 
     public TransportAddress? FirstRelayHop { get; init; }
 
-    public IReadOnlyList<TransportAddress> RelayStrip { get; init; } = Array.Empty<TransportAddress>();
+    public IReadOnlyList<TransportAddress> RelayStrip { get; init; } = [];
 }

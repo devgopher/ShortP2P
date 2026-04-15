@@ -35,7 +35,7 @@ public sealed class SharedUserUdpGateway(
     private Task? _presenceAnnounceLoop;
     private Task? _presenceStaleLoop;
     private readonly object _chatSinkLock = new();
-    private readonly List<Func<ReadOnlyMemory<byte>, TransportAddress, Task>> _chatSinks = new();
+    private readonly List<Func<ReadOnlyMemory<byte>, TransportAddress, Task>> _chatSinks = [];
     private readonly object _startSync = new();
     private readonly ConcurrentDictionary<Guid, DateTimeOffset> _presenceSeenUtc = new();
     private readonly ConcurrentDictionary<Guid, TransportAddress> _presenceAddress = new();
@@ -501,7 +501,7 @@ public sealed class SharedUserUdpGateway(
             var host = LocalEndpointHelper.GetPreferredLanIPv4String();
             var selfAddr = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(host), user.DataUdpPort));
             TransportAddress? first = null;
-            List<TransportAddress> strip = new();
+            List<TransportAddress> strip = [];
             if (path.Count > 0)
             {
                 first = path[0];

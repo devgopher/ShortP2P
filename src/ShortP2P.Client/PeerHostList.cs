@@ -11,7 +11,7 @@ public static class PeerHostList
     public static IReadOnlyList<string> ParseCandidates(string? peerHost)
     {
         if (string.IsNullOrWhiteSpace(peerHost))
-            return Array.Empty<string>();
+            return [];
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var list = new List<string>();

@@ -5,13 +5,14 @@ namespace ShortP2P.MauiApp;
 
 public class RoutingSettingsPage : ContentPage
 {
-    private readonly P2pRoutingSettingsStore _store;
-    private readonly UserP2pRuntime _runtime;
-    private readonly Entry _maxHops = new() { Keyboard = Keyboard.Numeric, Placeholder = "1–3" };
+    private const string ErrorHeader = "Error";
     private readonly Entry _attempts = new() { Keyboard = Keyboard.Numeric };
     private readonly Entry _delayMs = new() { Keyboard = Keyboard.Numeric };
-    private readonly Entry _searchTimeoutMs = new() { Keyboard = Keyboard.Numeric };
     private readonly Picker _linkTechnology = new();
+    private readonly Entry _maxHops = new() { Keyboard = Keyboard.Numeric, Placeholder = "1–3" };
+    private readonly UserP2pRuntime _runtime;
+    private readonly Entry _searchTimeoutMs = new() { Keyboard = Keyboard.Numeric };
+    private readonly P2pRoutingSettingsStore _store;
 
     public RoutingSettingsPage(P2pRoutingSettingsStore store, UserP2pRuntime runtime)
     {
@@ -38,47 +39,54 @@ public class RoutingSettingsPage : ContentPage
                     _searchTimeoutMs,
                     new Label { Text = "Connection speed (in presence ping; affects ping interval)" },
                     _linkTechnology,
-                    new Button { Text = "Save", Command = new Command(async () => await SaveAsync()) },
-                },
-            },
+                    new Button { Text = "Save", Command = new Command(async () => await SaveAsync()) }
+                }
+            }
         };
     }
 
     protected override async void OnAppearing()
     {
-        base.OnAppearing();
-        var s = await _store.LoadAsync().ConfigureAwait(true);
-        _maxHops.Text = s.MaxSearchHops.ToString();
-        _attempts.Text = s.SendFailureSearchAttempts.ToString();
-        _delayMs.Text = ((int)s.SendFailureRetryDelay.TotalMilliseconds).ToString();
-        _searchTimeoutMs.Text = ((int)s.SearchWaitTimeout.TotalMilliseconds).ToString();
-        var idx = Array.IndexOf(LinkTechnologyPresetExtensions.AllPresets, s.LinkTechnology);
-        _linkTechnology.SelectedIndex = idx >= 0 ? idx : 0;
+        try
+        {
+            base.OnAppearing();
+            var s = await _store.LoadAsync().ConfigureAwait(true);
+            _maxHops.Text = s.MaxSearchHops.ToString();
+            _attempts.Text = s.SendFailureSearchAttempts.ToString();
+            _delayMs.Text = ((int)s.SendFailureRetryDelay.TotalMilliseconds).ToString();
+            _searchTimeoutMs.Text = ((int)s.SearchWaitTimeout.TotalMilliseconds).ToString();
+            var idx = Array.IndexOf(LinkTechnologyPresetExtensions.AllPresets, s.LinkTechnology);
+            _linkTechnology.SelectedIndex = idx >= 0 ? idx : 0;
+        }
+        catch (Exception e)
+        {
+           // TODO handle exception
+        }
     }
 
     private async Task SaveAsync()
     {
         if (!int.TryParse(_maxHops.Text, out var mh) || mh is < 1 or > 3)
         {
-            await DisplayAlert("Error", "Max depth must be 1–3.", "OK").ConfigureAwait(true);
+            await DisplayAlert(ErrorHeader, "Max depth must be 1–3.", "OK").ConfigureAwait(true);
             return;
         }
 
         if (!int.TryParse(_attempts.Text, out var at) || at < 1)
         {
-            await DisplayAlert("Error", "Attempts must be ≥ 1.", "OK").ConfigureAwait(true);
+            await DisplayAlert(ErrorHeader, "Attempts must be ≥ 1.", "OK").ConfigureAwait(true);
             return;
         }
 
         if (!int.TryParse(_delayMs.Text, out var dm) || dm < 0)
         {
-            await DisplayAlert("Error", "Delay must be ≥ 0 ms.", "OK").ConfigureAwait(true);
+            await DisplayAlert(ErrorHeader, "Delay must be ≥ 0 ms.", "OK").ConfigureAwait(true);
             return;
         }
 
         if (!int.TryParse(_searchTimeoutMs.Text, out var st) || st < 500)
         {
-            await DisplayAlert("Error", "Search timeout must be ≥ 500 ms.", "OK").ConfigureAwait(true);
+            await DisplayAlert(ErrorHeader, "Search timeout must be ≥ 500 ms.", "OK").ConfigureAwait(true);
             return;
         }
 
@@ -92,7 +100,7 @@ public class RoutingSettingsPage : ContentPage
             SendFailureSearchAttempts = at,
             SendFailureRetryDelay = TimeSpan.FromMilliseconds(dm),
             SearchWaitTimeout = TimeSpan.FromMilliseconds(st),
-            LinkTechnology = LinkTechnologyPresetExtensions.AllPresets[li],
+            LinkTechnology = LinkTechnologyPresetExtensions.AllPresets[li]
         };
         await _store.SaveAsync(settings).ConfigureAwait(true);
         _runtime.Settings.MaxSearchHops = settings.MaxSearchHops;

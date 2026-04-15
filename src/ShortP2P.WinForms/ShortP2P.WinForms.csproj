@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="NLog" Version="5.3.4" />
     <ProjectReference Include="..\ShortP2P.Client\ShortP2P.Client.csproj" />
     <ProjectReference Include="..\ShortP2P.Transport.Bluetooth.Windows\ShortP2P.Transport.Bluetooth.Windows.csproj" />
   </ItemGroup>

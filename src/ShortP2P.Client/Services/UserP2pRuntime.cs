@@ -16,7 +16,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
     private readonly object _sessionLock = new();
     private readonly Dictionary<int, ChatP2pSession> _chatSessions = new();
-    private readonly HashSet<int> _sessionsStarted = new();
+    private readonly HashSet<int> _sessionsStarted = [];
 
     public P2pRoutingSettings Settings { get; } = new();
 

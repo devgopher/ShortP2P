@@ -127,7 +127,7 @@ public sealed class InfraredSerialTransport : ITransport
             var body = new byte[len];
             await ReadExactAsync(stream, body.AsMemory(0, len), cancellationToken).ConfigureAwait(false);
 
-            var remote = new TransportAddress(TransportKind.Infrared, Array.Empty<byte>());
+            var remote = new TransportAddress(TransportKind.Infrared, []);
             await _channel.Writer.WriteAsync(new TransportReceiveMessage(body, remote), cancellationToken)
                 .ConfigureAwait(false);
         }

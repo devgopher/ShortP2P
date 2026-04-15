@@ -42,7 +42,7 @@ public partial class LanScanPage : ContentPage
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
     private readonly UserP2pRuntime _p2p;
-    private readonly ObservableCollection<LanScanRow> _rows = new();
+    private readonly ObservableCollection<LanScanRow> _rows = [];
 
     public LanScanPage(AuthService auth, ChatRepository chats, UserP2pRuntime p2p)
     {

@@ -82,8 +82,8 @@ public static class LanRoutingCodec
         targetNetworkId = default;
         targetNickname = "";
         ttl = 0;
-        visited = new List<Guid>();
-        pathDataHops = new List<TransportAddress>();
+        visited = [];
+        pathDataHops = [];
         if (datagram.Length == 0 || datagram[0] != FrameFind)
             return false;
         var d = datagram.Slice(1);
@@ -211,7 +211,7 @@ public static class LanRoutingCodec
         peerHost = "";
         peerPort = 0;
         firstRelayHop = null;
-        relayStripPath = new List<TransportAddress>();
+        relayStripPath = [];
         if (datagram.Length == 0 || datagram[0] != FrameFound)
             return false;
         var d = datagram.Slice(1);

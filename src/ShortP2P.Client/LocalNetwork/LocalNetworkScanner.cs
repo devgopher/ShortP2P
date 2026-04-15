@@ -24,7 +24,7 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
 
     private readonly ConcurrentDictionary<Guid, DiscoveredLocalPeer> _entries = new();
     private readonly object _snapshotSync = new();
-    private IReadOnlyList<DiscoveredLocalPeer> _snapshot = Array.Empty<DiscoveredLocalPeer>();
+    private IReadOnlyList<DiscoveredLocalPeer> _snapshot = [];
 
     private CancellationTokenSource? _cts;
     private Task? _broadcastLoop;
@@ -92,7 +92,7 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
         _user = null;
         _entries.Clear();
         lock (_snapshotSync)
-            _snapshot = Array.Empty<DiscoveredLocalPeer>();
+            _snapshot = [];
     }
 
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);

@@ -25,7 +25,7 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
     private readonly object _sync = new();
     private readonly ITransport _transport = transport ?? throw new ArgumentNullException(nameof(transport));
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource> _ackWaiters = new();
-    private readonly HashSet<Guid> _deliveredMessageIds = new();
+    private readonly HashSet<Guid> _deliveredMessageIds = [];
 
     private CancellationTokenSource? _cts;
     private Task? _receiveTask;
