@@ -48,6 +48,7 @@ public sealed class ChatP2pSession(
     private Task? _incomingTask;
     private bool _incomingStarted;
     private AdaptiveChatTransportLayer? _transportLayer;
+    private EventHandler<PeerPresenceChangedEventArgs>? _peerPresenceHandshakeHandler;
 
     private TransportAddress? _peerAddress;
     private ChatRelayRoute _route = null!;
@@ -157,6 +158,8 @@ public sealed class ChatP2pSession(
         {
             // пир офлайн или сеть недоступна
         }
+
+        AttachHandshakeOnPeerOnline();
     }
 
     /// <summary>
@@ -184,6 +187,49 @@ public sealed class ChatP2pSession(
         catch
         {
             // ignore
+        }
+    }
+
+    private void AttachHandshakeOnPeerOnline()
+    {
+        if (sharedGateway == null)
+            return;
+        _peerPresenceHandshakeHandler ??= OnPeerPresenceChangedForHandshake;
+        sharedGateway.PeerPresenceChanged += _peerPresenceHandshakeHandler;
+        if (sharedGateway.IsPeerOnline(_peerNetworkId))
+            _ = KickHandshakeAfterPeerOnlineAsync();
+    }
+
+    private void DetachHandshakeOnPeerOnline()
+    {
+        if (sharedGateway == null || _peerPresenceHandshakeHandler == null)
+            return;
+        sharedGateway.PeerPresenceChanged -= _peerPresenceHandshakeHandler;
+    }
+
+    private void OnPeerPresenceChangedForHandshake(object? sender, PeerPresenceChangedEventArgs e)
+    {
+        if (e.PeerNetworkId != _peerNetworkId || !e.IsOnline)
+            return;
+        _ = KickHandshakeAfterPeerOnlineAsync();
+    }
+
+    private async Task KickHandshakeAfterPeerOnlineAsync()
+    {
+        var cts = _cts;
+        if (cts == null || cts.IsCancellationRequested)
+            return;
+        try
+        {
+            await EnsureSessionAsInitiatorAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // shutdown
+        }
+        catch
+        {
+            // пир или сеть недоступны
         }
     }
 
@@ -535,6 +581,8 @@ public sealed class ChatP2pSession(
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
+        DetachHandshakeOnPeerOnline();
+
         if (_cts != null)
             await _cts.CancelAsync();
 
