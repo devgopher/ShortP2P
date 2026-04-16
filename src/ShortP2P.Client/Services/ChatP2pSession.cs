@@ -38,6 +38,8 @@ public sealed class ChatP2pSession(
     private readonly object _sync = new();
     private readonly SemaphoreSlim _sessionSetup = new(1, 1);
     private int _decryptRecoveryGate;
+    private DateTimeOffset _lastDecryptRecoveryUtc = DateTimeOffset.MinValue;
+    private static readonly TimeSpan DecryptRecoveryCooldown = TimeSpan.FromSeconds(10);
     private UdpTransport? _udp;
     private Channel<TransportReceiveMessage> _bridge = Channel.CreateUnbounded<TransportReceiveMessage>();
     private PrefixedCipherTransport? _prefixed;
@@ -290,7 +292,6 @@ public sealed class ChatP2pSession(
             async ct =>
             {
                 await TryRefreshRouteViaSearchAsync(ct).ConfigureAwait(false);
-                await ResetCryptoStateAsync(ct).ConfigureAwait(false);
             },
             shouldRetry,
             _routing,
@@ -343,6 +344,11 @@ public sealed class ChatP2pSession(
             var token = _cts?.Token ?? CancellationToken.None;
             if (token.IsCancellationRequested)
                 return;
+
+            var now = DateTimeOffset.UtcNow;
+            if (now - _lastDecryptRecoveryUtc < DecryptRecoveryCooldown)
+                return;
+            _lastDecryptRecoveryUtc = now;
 
             await ResetCryptoStateAsync(token).ConfigureAwait(false);
             await SendChatInviteWithRetryAsync(token).ConfigureAwait(false);
