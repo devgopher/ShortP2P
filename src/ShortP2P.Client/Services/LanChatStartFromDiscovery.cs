@@ -16,7 +16,6 @@ public static class LanChatStartFromDiscovery
         DiscoveredLocalPeer peer,
         AuthService auth,
         ChatRepository chats,
-        SharedUserUdpGateway gateway,
         CancellationToken cancellationToken = default)
     {
         var user = auth.CurrentUser;
@@ -53,7 +52,23 @@ public static class LanChatStartFromDiscovery
         var invite = ChatInviteCodec.Build(user.Nickname, nid,
             RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), host, user.DataUdpPort);
 
-        await gateway.SendOnDataUdpAsync(invite, dest, cancellationToken).ConfigureAwait(false);
+        var udp = new UdpTransport(user.DataUdpPort);
+        try
+        {
+            await udp.StartAsync(cancellationToken).ConfigureAwait(false);
+            await udp.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            try
+            {
+                await udp.StopAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
 
         for (var i = 0; i < 50; i++)
         {

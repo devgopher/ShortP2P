@@ -6,21 +6,16 @@ using System.Threading.Channels;
 namespace ShortP2P.Client.Services;
 
 /// <summary>
-///     Транспортный слой чата, не привязанный к конкретному транспорту:
-///     выбирает доступный транспорт и адрес доставки на основании последних ping пакетов.
+///     Транспортный слой чата: приём с локального UDP и отправка на адрес пира из чата.
 /// </summary>
 public sealed class AdaptiveChatTransportLayer(
-    SharedUserUdpGateway? sharedGateway,
-    Func<ChatRelayRoute> currentRouteProvider,
     Func<TransportAddress?> directPeerAddressProvider,
     Func<UdpTransport?> udpProvider,
-    Guid peerNetworkId,
     Func<TransportAddress, bool>? shouldAcceptFrom = null)
 {
     private readonly Channel<TransportReceiveMessage> _inbound = Channel.CreateUnbounded<TransportReceiveMessage>();
     private CancellationTokenSource? _cts;
     private Task? _directReceiveTask;
-    private Func<ReadOnlyMemory<byte>, TransportAddress, Task>? _registeredGatewaySink;
 
     public ChannelReader<TransportReceiveMessage> Inbound => _inbound.Reader;
 
@@ -30,16 +25,8 @@ public sealed class AdaptiveChatTransportLayer(
             return ValueTask.CompletedTask;
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        if (sharedGateway != null)
-        {
-            _registeredGatewaySink = OnGatewayDatagramAsync;
-            sharedGateway.AddChatSink(_registeredGatewaySink);
-        }
-        else
-        {
-            var udp = udpProvider() ?? throw new InvalidOperationException("UDP transport is not started.");
-            _directReceiveTask = Task.Run(() => DirectReceiveLoopAsync(udp, _cts.Token), _cts.Token);
-        }
+        var udp = udpProvider() ?? throw new InvalidOperationException("UDP transport is not started.");
+        _directReceiveTask = Task.Run(() => DirectReceiveLoopAsync(udp, _cts.Token), _cts.Token);
 
         return ValueTask.CompletedTask;
     }
@@ -50,19 +37,13 @@ public sealed class AdaptiveChatTransportLayer(
         if (_cts == null)
             return;
 
-        if (sharedGateway != null && _registeredGatewaySink != null)
-        {
-            sharedGateway.RemoveChatSink(_registeredGatewaySink);
-            _registeredGatewaySink = null;
-        }
-
         try
         {
             await _cts.CancelAsync().ConfigureAwait(false);
         }
         catch
         {
-            _cts.Cancel();
+            await _cts.CancelAsync().ConfigureAwait(false);
         }
 
         if (_directReceiveTask != null)
@@ -85,30 +66,9 @@ public sealed class AdaptiveChatTransportLayer(
 
     public async ValueTask SendPacketAsync(ReadOnlyMemory<byte> packet, CancellationToken cancellationToken = default)
     {
-        if (sharedGateway != null)
-        {
-            if (sharedGateway.TryGetPeerLastSeenAddress(peerNetworkId, out var pingAddress) &&
-                sharedGateway.IsTransportAvailable(pingAddress.Kind))
-            {
-                await sharedGateway.SendRawToAsync(packet, pingAddress, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            await sharedGateway.SendP2pPayloadAsync(packet, currentRouteProvider(), cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
         var udp = udpProvider() ?? throw new InvalidOperationException("UDP transport is not started.");
         var peerAddress = directPeerAddressProvider() ?? throw new InvalidOperationException("Peer address is not set.");
         await udp.SendAsync(packet, peerAddress, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task OnGatewayDatagramAsync(ReadOnlyMemory<byte> payload, TransportAddress from)
-    {
-        if (shouldAcceptFrom != null && !shouldAcceptFrom(from))
-            return;
-        var token = _cts?.Token ?? CancellationToken.None;
-        await _inbound.Writer.WriteAsync(new TransportReceiveMessage(payload, from), token).ConfigureAwait(false);
     }
 
     private async Task DirectReceiveLoopAsync(UdpTransport udp, CancellationToken cancellationToken)
@@ -116,7 +76,14 @@ public sealed class AdaptiveChatTransportLayer(
         try
         {
             await foreach (var msg in udp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var payload = msg.Payload;
+                if (shouldAcceptFrom != null &&
+                    (payload.IsEmpty || payload.Span[0] != ChatInviteCodec.FrameChatInvite) &&
+                    !shouldAcceptFrom(msg.RemoteAddress))
+                    continue;
                 await _inbound.Writer.WriteAsync(msg, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException)
         {

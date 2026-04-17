@@ -34,11 +34,7 @@ internal static class Program
         services.AddSingleton<P2pRoutingSettingsStore>();
         services.AddSingleton<BluetoothTransportRegistration>();
         services.AddSingleton(sp =>
-            new UserP2pRuntime(
-                sp.GetRequiredService<AuthService>(),
-                sp.GetRequiredService<ChatRepository>(),
-                sp.GetRequiredService<P2pRoutingSettingsStore>(),
-                sp.GetRequiredService<BluetoothTransportRegistration>().Instance));
+            new UserP2pRuntime(sp.GetRequiredService<P2pRoutingSettingsStore>()));
 
         services.AddTransient<LoginForm>();
         services.AddTransient<RegisterForm>();

@@ -50,7 +50,6 @@ public partial class ChatDetailPage : ContentPage
         var uiSync = SynchronizationContext.Current;
         _p2pSession = _p2p.GetOrCreateSession(chat, user, _auth, _repo, uiSync);
         _p2pSession.MessagesChanged += OnP2PMessagesChanged;
-        _p2p.PeerPresenceChanged += OnPeerPresenceChanged;
         if (!_p2p.IsChatSessionStarted(chat.Id))
         {
             try
@@ -66,7 +65,7 @@ public partial class ChatDetailPage : ContentPage
         }
 
         await ReloadMessagesAsync().ConfigureAwait(true);
-        RefreshPeerPresenceLabel(chat.PeerNetworkIdShort);
+        RefreshPeerPresenceLabel();
     }
 
     protected override async void OnDisappearing()
@@ -77,7 +76,6 @@ public partial class ChatDetailPage : ContentPage
             _p2pSession.MessagesChanged -= OnP2PMessagesChanged;
             _p2pSession = null;
         }
-        _p2p.PeerPresenceChanged -= OnPeerPresenceChanged;
     }
 
     private void OnP2PMessagesChanged(object? sender, EventArgs e) =>
@@ -169,24 +167,9 @@ public partial class ChatDetailPage : ContentPage
         return Color.FromHsla(hue / 360.0f, 0.72f, 0.44f);
     }
 
-    private void OnPeerPresenceChanged(object? sender, ShortP2P.Client.Routing.PeerPresenceChangedEventArgs e)
+    private void RefreshPeerPresenceLabel()
     {
-        MainThread.BeginInvokeOnMainThread(async () =>
-        {
-            var chat = await _repo.GetChatAsync(ChatId).ConfigureAwait(true);
-            if (chat == null)
-                return;
-            var peerId = ShortP2P.Discovery.CompressedNetworkId.FromShortString(chat.PeerNetworkIdShort).Value;
-            if (e.PeerNetworkId != peerId)
-                return;
-            RefreshPeerPresenceLabel(chat.PeerNetworkIdShort);
-        });
-    }
-
-    private void RefreshPeerPresenceLabel(string peerNetworkIdShort)
-    {
-        var online = _p2p.IsPeerOnline(peerNetworkIdShort);
-        PeerStatusLabel.Text = online ? "Статус: онлайн" : "Статус: офлайн";
-        PeerStatusLabel.TextColor = online ? Colors.Green : Colors.Gray;
+        PeerStatusLabel.Text = "Статус: офлайн";
+        PeerStatusLabel.TextColor = Colors.Gray;
     }
 }

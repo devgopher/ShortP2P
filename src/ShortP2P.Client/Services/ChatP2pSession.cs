@@ -15,7 +15,6 @@ namespace ShortP2P.Client.Services;
 
 /// <summary>
 /// One chat: UDP transport, RSA handshake (0x01 + 128 bytes), encrypted messenger frames (0x02 + ciphertext).
-/// С опциональным <see cref="SharedUserUdpGateway"/> — поиск пира по графу (≤3 рёбер), ретрансляция и повторы при ошибке.
 /// </summary>
 public sealed class ChatP2pSession(
     ChatEntity chat,
@@ -23,7 +22,6 @@ public sealed class ChatP2pSession(
     AuthService auth,
     ChatRepository repo,
     SynchronizationContext? uiSynchronizationContext = null,
-    SharedUserUdpGateway? sharedGateway = null,
     P2pRoutingSettings? routingSettings = null)
     : IAsyncDisposable
 {
@@ -31,9 +29,8 @@ public sealed class ChatP2pSession(
     private const byte FrameCipher = 0x02;
     public const int MaxMessageChars = 32768;
 
-    private readonly P2pRoutingSettings? _routing = routingSettings ?? (sharedGateway != null ? new P2pRoutingSettings() : null);
+    private readonly P2pRoutingSettings? _routing = routingSettings;
     private readonly GuaranteedDeliveryPolicy _guaranteedDelivery = new();
-    private readonly Guid _peerNetworkId = CompressedNetworkId.FromShortString(chat.PeerNetworkIdShort).Value;
 
     private readonly object _sync = new();
     private readonly SemaphoreSlim _sessionSetup = new(1, 1);
@@ -50,7 +47,6 @@ public sealed class ChatP2pSession(
     private Task? _incomingTask;
     private bool _incomingStarted;
     private AdaptiveChatTransportLayer? _transportLayer;
-    private EventHandler<PeerPresenceChangedEventArgs>? _peerPresenceHandshakeHandler;
 
     private TransportAddress? _peerAddress;
     private ChatRelayRoute _route = null!;
@@ -124,30 +120,16 @@ public sealed class ChatP2pSession(
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        if (sharedGateway != null)
+        _udp = new UdpTransport(user.DataUdpPort);
+        await _udp.StartAsync(cancellationToken).ConfigureAwait(false);
+        _prefixed = new PrefixedCipherTransport(_bridge, async (mem, dest, ct) =>
         {
-            await sharedGateway.EnsureStartedAsync(user, cancellationToken).ConfigureAwait(false);
-            _prefixed = new PrefixedCipherTransport(_bridge, async (mem, dest, ct) =>
-            {
-                await SendRouteRawToAsync(mem, dest, ct).ConfigureAwait(false);
-            });
-        }
-        else
-        {
-            _udp = new UdpTransport(user.DataUdpPort);
-            await _udp.StartAsync(cancellationToken).ConfigureAwait(false);
-            _prefixed = new PrefixedCipherTransport(_bridge, async (mem, dest, ct) =>
-            {
-                await _udp!.SendAsync(mem, dest, ct).ConfigureAwait(false);
-            });
-        }
+            await _udp!.SendAsync(mem, dest, ct).ConfigureAwait(false);
+        });
 
         _transportLayer = new AdaptiveChatTransportLayer(
-            sharedGateway,
-            () => _route,
             () => _peerAddress,
             () => _udp,
-            _peerNetworkId,
             ShouldAcceptIncomingFrom);
         await _transportLayer.StartAsync(_cts.Token).ConfigureAwait(false);
         _transportReceiveTask = Task.Run(() => TransportReceiveLoopAsync(_cts.Token), _cts.Token);
@@ -161,7 +143,6 @@ public sealed class ChatP2pSession(
             // пир офлайн или сеть недоступна
         }
 
-        AttachHandshakeOnPeerOnline();
     }
 
     /// <summary>
@@ -189,49 +170,6 @@ public sealed class ChatP2pSession(
         catch
         {
             // ignore
-        }
-    }
-
-    private void AttachHandshakeOnPeerOnline()
-    {
-        if (sharedGateway == null)
-            return;
-        _peerPresenceHandshakeHandler ??= OnPeerPresenceChangedForHandshake;
-        sharedGateway.PeerPresenceChanged += _peerPresenceHandshakeHandler;
-        if (sharedGateway.IsPeerOnline(_peerNetworkId))
-            _ = KickHandshakeAfterPeerOnlineAsync();
-    }
-
-    private void DetachHandshakeOnPeerOnline()
-    {
-        if (sharedGateway == null || _peerPresenceHandshakeHandler == null)
-            return;
-        sharedGateway.PeerPresenceChanged -= _peerPresenceHandshakeHandler;
-    }
-
-    private void OnPeerPresenceChangedForHandshake(object? sender, PeerPresenceChangedEventArgs e)
-    {
-        if (e.PeerNetworkId != _peerNetworkId || !e.IsOnline)
-            return;
-        _ = KickHandshakeAfterPeerOnlineAsync();
-    }
-
-    private async Task KickHandshakeAfterPeerOnlineAsync()
-    {
-        var cts = _cts;
-        if (cts == null || cts.IsCancellationRequested)
-            return;
-        try
-        {
-            await EnsureSessionAsInitiatorAsync(cts.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // shutdown
-        }
-        catch
-        {
-            // пир или сеть недоступны
         }
     }
 
@@ -273,7 +211,7 @@ public sealed class ChatP2pSession(
             throw new ArgumentException($"Message is too long. Max length is {MaxMessageChars} characters.",
                 nameof(text));
         var bytes = Encoding.UTF8.GetBytes(text);
-        var shouldRetry = sharedGateway != null && _routing != null;
+        var shouldRetry = false;
 
         var ackTimeout = (_routing?.LinkTechnology ?? LinkTechnologyPreset.Unlimited).GetMessageAckTimeout();
 
@@ -289,49 +227,13 @@ public sealed class ChatP2pSession(
                 else
                     await _messenger!.SendBinaryAsync(bytes, _peerAddress!, ct).ConfigureAwait(false);
             },
-            async ct =>
-            {
-                await TryRefreshRouteViaSearchAsync(ct).ConfigureAwait(false);
-            },
+            null,
             shouldRetry,
             _routing,
             cancellationToken).ConfigureAwait(false);
 
         await repo.AddMessageAsync(chat.Id, true, text).ConfigureAwait(false);
         RaiseMessagesChanged();
-    }
-
-    private async Task TryRefreshRouteViaSearchAsync(CancellationToken cancellationToken)
-    {
-        if (sharedGateway == null) return;
-        var targetId = CompressedNetworkId.FromShortString(chat.PeerNetworkIdShort).Value;
-        var found = await sharedGateway.SearchPeerAsync(targetId, chat.PeerNickname, cancellationToken)
-            .ConfigureAwait(false);
-        if (found == null)
-            return;
-
-        var direct = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(found.PeerHost), found.PeerPort));
-        string? blob = null;
-        if (found is { FirstRelayHop: not null, RelayStrip.Count: > 0 })
-        {
-            blob = ChatRelayRoute.SerializeBlob(new ChatRelayRoute
-            {
-                Direct = direct,
-                FirstHop = found.FirstRelayHop,
-                RelayStrip = found.RelayStrip,
-            });
-        }
-
-        var mergedHost = PeerHostList.MergeAppend(chat.PeerHost, found.PeerHost);
-        await repo.UpdateChatP2pRouteAsync(chat.Id, mergedHost, found.PeerPort, blob).ConfigureAwait(false);
-        var fresh = await repo.GetChatAsync(chat.Id).ConfigureAwait(false);
-        if (fresh != null)
-        {
-            chat.PeerHost = fresh.PeerHost;
-            chat.PeerPort = fresh.PeerPort;
-            chat.RelayRouteBlob = fresh.RelayRouteBlob;
-            RebuildRouteFromChat();
-        }
     }
 
     /// <summary>Сброс AES-сессии и повторный обмен ключами после ошибки дешифровки входящего пакета.</summary>
@@ -399,22 +301,6 @@ public sealed class ChatP2pSession(
     {
         var layer = _transportLayer ?? throw new InvalidOperationException("Transport layer is not initialized.");
         await layer.SendPacketAsync(packet, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>Прямая отправка кадра на указанный транспортный адрес (для мульти-IP и ack); при ретрансляции — общий маршрут.</summary>
-    private async ValueTask SendRouteRawToAsync(ReadOnlyMemory<byte> packet, TransportAddress destination,
-        CancellationToken cancellationToken)
-    {
-        if (!string.IsNullOrEmpty(chat.RelayRouteBlob))
-        {
-            await SendRouteRawAsync(packet, cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
-        if (sharedGateway != null)
-            await sharedGateway.SendRawToAsync(packet, destination, cancellationToken).ConfigureAwait(false);
-        else
-            await _udp!.SendAsync(packet, destination, cancellationToken).ConfigureAwait(false);
     }
 
     private List<TransportAddress> BuildOrderedDirectPeerAddresses()
@@ -489,8 +375,11 @@ public sealed class ChatP2pSession(
 
                 if (buf[0] == ChatInviteCodec.FrameChatInvite)
                 {
-                    await IncomingChatInviteHandler.TryAcceptAsync(buf, auth, repo, null, cancellationToken)
-                        .ConfigureAwait(false);
+                    await IncomingChatInviteHandler.TryAcceptAsync(buf, auth, repo,
+                        async (payload, dest, ct) =>
+                        {
+                            await _udp!.SendAsync(payload, dest, ct).ConfigureAwait(false);
+                        }, cancellationToken).ConfigureAwait(false);
                     continue;
                 }
 
@@ -587,8 +476,6 @@ public sealed class ChatP2pSession(
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
-        DetachHandshakeOnPeerOnline();
-
         if (_cts != null)
             await _cts.CancelAsync();
 

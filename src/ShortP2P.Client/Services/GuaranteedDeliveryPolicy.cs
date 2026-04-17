@@ -19,12 +19,11 @@ public sealed class GuaranteedDeliveryPolicy
     {
         ArgumentNullException.ThrowIfNull(sendAttemptAsync);
 
-        var totalAttempts = enabled && settings != null ? Math.Max(1, settings.SendFailureSearchAttempts) : 1;
         var retryDelay = enabled && settings != null ? settings.SendFailureRetryDelay : TimeSpan.Zero;
 
         RetryStrategyOptions retryOptions = new()
         {
-            MaxRetryAttempts = Math.Max(0, totalAttempts - 1),
+            MaxRetryAttempts = 3,
             Delay = retryDelay,
             BackoffType = DelayBackoffType.Constant,
             ShouldHandle = new PredicateBuilder().Handle<Exception>(ex => ex is not OperationCanceledException),

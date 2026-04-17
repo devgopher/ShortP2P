@@ -111,7 +111,6 @@ public sealed class ChatForm : Form
         _messages.MeasureItem += OnMessagesMeasureItem;
         _messages.DoubleClick += OnMessageDoubleClick;
         Shown += async (_, _) => await OnShownAsync().ConfigureAwait(true);
-        FormClosed += (_, _) => _p2PRuntime.PeerPresenceChanged -= OnPeerPresenceChanged;
     }
 
     private async Task OnShownAsync()
@@ -121,7 +120,6 @@ public sealed class ChatForm : Form
         var fresh = await _repo.GetChatAsync(_chat.Id).ConfigureAwait(true) ?? _chat;
         _p2PSession = _p2PRuntime.GetOrCreateSession(fresh, _user, _auth, _repo, uiSync);
         _p2PSession.MessagesChanged += OnP2pMessagesChanged;
-        _p2PRuntime.PeerPresenceChanged += OnPeerPresenceChanged;
         if (!_p2PRuntime.IsChatSessionStarted(_chat.Id))
         {
             try
@@ -250,21 +248,10 @@ public sealed class ChatForm : Form
         }
     }
 
-    private void OnPeerPresenceChanged(object? sender, ShortP2P.Client.Routing.PeerPresenceChangedEventArgs e)
-    {
-        var current = ShortP2P.Discovery.CompressedNetworkId.FromShortString(_chat.PeerNetworkIdShort).Value;
-        if (e.PeerNetworkId != current)
-            return;
-        if (!IsHandleCreated || IsDisposed)
-            return;
-        BeginInvoke(RefreshPeerPresenceLabel);
-    }
-
     private void RefreshPeerPresenceLabel()
     {
-        var online = _p2PRuntime.IsPeerOnline(_chat.PeerNetworkIdShort);
-        _peerStatusLabel.Text = online ? "Статус: онлайн" : "Статус: офлайн";
-        _peerStatusLabel.ForeColor = online ? Color.SeaGreen : SystemColors.GrayText;
+        _peerStatusLabel.Text = "Статус: офлайн";
+        _peerStatusLabel.ForeColor = SystemColors.GrayText;
     }
 
     private void OnMessageDoubleClick(object? sender, EventArgs e)

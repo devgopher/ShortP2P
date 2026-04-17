@@ -10,8 +10,6 @@ namespace ShortP2P.Crypto
     /// </summary>
     public static class P2PHandshake
     {
-        public const int MaxEncryptedPacketBytes = 128;
-
         private const int RsaKeySizeBits = 1024;
         private const int SessionKeyBytes = 16 + 32; // aesKey(16) + macKey(32)
         private const int HandshakePacketBytes = RsaKeySizeBits / 8; // 1024 / 8 = 128

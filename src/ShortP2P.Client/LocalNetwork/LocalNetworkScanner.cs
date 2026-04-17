@@ -9,10 +9,9 @@ namespace ShortP2P.Client.LocalNetwork;
 /// <summary>
 ///     Сканирование локальной сети по discovery-пингам: UDP на broadcast-адрес каждой локальной IPv4-подсети
 ///     и на 255.255.255.255, порт <see cref="PresencePingCodec.UdpPort" />; раунд повторяется в фоне каждые 5 минут,
-///     дополнительно по запросу UI (<see cref="ScanAsync" />, <see cref="TriggerScanAsync" />). Приём на том же порту;
-///     при наличии Bluetooth — те же кадры по RFCOMM.
+///     дополнительно по запросу UI (<see cref="ScanAsync" />, <see cref="TriggerScanAsync" />). Приём на порту 565.
 /// </summary>
-public sealed class LocalNetworkScanner : IAsyncDisposable
+public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings) : IAsyncDisposable
 {
     /// <summary>Интервал фоновой рассылки discovery (broadcast по подсетям).</summary>
     private static readonly TimeSpan PeriodicLanScanInterval = TimeSpan.FromMinutes(5);
@@ -23,7 +22,7 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
     /// <summary>Длительность приёма пингов при ручном сканировании по умолчанию.</summary>
     public static readonly TimeSpan DefaultScanListenDuration = TimeSpan.FromSeconds(45);
 
-    private readonly SharedUserUdpGateway _gateway;
+    private readonly P2pRoutingSettings _routingSettings = routingSettings;
 
     private volatile bool _scanSessionActive;
 
@@ -32,11 +31,11 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
     private IReadOnlyList<DiscoveredLocalPeer> _snapshot = [];
 
     private CancellationTokenSource? _cts;
+    private UdpTransport? _presenceUdp;
+    private Task? _presenceReceiveLoop;
     private Task? _periodicScanLoop;
     private Task? _staleLoop;
     private UserEntity? _user;
-
-    public LocalNetworkScanner(SharedUserUdpGateway gateway) => _gateway = gateway;
 
     /// <summary>Снимок последних найденных пиров (кроме текущего пользователя).</summary>
     public IReadOnlyList<DiscoveredLocalPeer> Clients
@@ -55,29 +54,31 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
         if (_cts != null)
             return;
         _user = user;
-        _gateway.DiscoveryPingReceived += OnDiscoveryPingReceived;
+        _presenceUdp = new UdpTransport(PresencePingCodec.UdpPort, enableBroadcast: true);
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _cts.Token;
+        await _presenceUdp.StartAsync(cancellationToken).ConfigureAwait(false);
+        _presenceReceiveLoop = Task.Run(() => PresenceReceiveLoopAsync(token), token);
         _periodicScanLoop = Task.Run(() => PeriodicScanLoopAsync(token), token);
         _staleLoop = Task.Run(() => StaleLoopAsync(token), token);
-        await Task.CompletedTask.ConfigureAwait(false);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         if (_cts == null)
             return;
-        _gateway.DiscoveryPingReceived -= OnDiscoveryPingReceived;
+
         try
         {
-            await _cts.CancelAsync();
+            await _cts.CancelAsync().ConfigureAwait(false);
         }
         catch
         {
-            // ignore
+            await _cts.CancelAsync().ConfigureAwait(false);
         }
 
-        var loops = new[] { _periodicScanLoop, _staleLoop }.Where(t => t != null).ToArray();
+        var loops = new[] { _presenceReceiveLoop, _periodicScanLoop, _staleLoop }.Where(t => t != null).ToArray();
+        _presenceReceiveLoop = null;
         _periodicScanLoop = null;
         _staleLoop = null;
         if (loops.Length > 0)
@@ -92,7 +93,21 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
             }
         }
 
-        _cts?.Dispose();
+        if (_presenceUdp != null)
+        {
+            var p = _presenceUdp;
+            _presenceUdp = null;
+            try
+            {
+                await p.StopAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        _cts.Dispose();
         _cts = null;
         _user = null;
         _entries.Clear();
@@ -143,14 +158,36 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
         ClientsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private void OnDiscoveryPingReceived(object? sender, DiscoveryPingReceivedEventArgs e)
+    private async Task PresenceReceiveLoopAsync(CancellationToken cancellationToken)
+    {
+        var presenceUdp = _presenceUdp;
+        if (presenceUdp == null)
+            return;
+        try
+        {
+            await foreach (var msg in presenceUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var buf = msg.Payload.ToArray();
+                if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick, out var dataPort, out var advLink))
+                    continue;
+
+                OnDiscoveryPingReceived(new DiscoveredLocalPeer(pingSender, nick, msg.RemoteAddress,
+                    msg.RemoteAddress.Kind, DateTimeOffset.UtcNow, dataPort, advLink));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // ignore
+        }
+    }
+
+    private void OnDiscoveryPingReceived(DiscoveredLocalPeer peer)
     {
         var u = _user;
         if (u == null) return;
         var myId = CompressedNetworkId.FromShortString(u.NetworkIdShort).Value;
-        if (e.Peer.NetworkId == myId) return;
+        if (peer.NetworkId == myId) return;
 
-        var peer = e.Peer;
         _entries.AddOrUpdate(peer.NetworkId, peer, (_, _) => peer);
         if (_scanSessionActive)
             return;
@@ -171,17 +208,19 @@ public sealed class LocalNetworkScanner : IAsyncDisposable
     private async Task SendDiscoveryBroadcastRoundAsync(CancellationToken cancellationToken)
     {
         var u = _user;
-        if (u == null) return;
-        var payload = _gateway.BuildPresencePingDatagram(
+        var presenceUdp = _presenceUdp;
+        if (u == null || presenceUdp == null) return;
+        var payload = PresencePingCodec.Build(
             CompressedNetworkId.FromShortString(u.NetworkIdShort).Value,
             u.Nickname,
-            u.DataUdpPort);
+            u.DataUdpPort,
+            _routingSettings.LinkTechnology);
         foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(PresencePingCodec.UdpPort))
         {
             try
             {
                 var addr = UdpTransportAddress.FromIPEndPoint(ep);
-                await _gateway.SendOnPresencePortAsync(payload, addr, cancellationToken).ConfigureAwait(false);
+                await presenceUdp.SendAsync(payload, addr, cancellationToken).ConfigureAwait(false);
             }
             catch
             {
