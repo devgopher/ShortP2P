@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Data;
@@ -216,7 +217,8 @@ public sealed class ChatForm : Form
             {
                 var sender = m.Outgoing ? "You" : _chat.PeerNickname;
                 var color = m.Outgoing ? Color.DodgerBlue : GetPaletteColor(sender);
-                var full = $"{sender}: {m.Text}";
+                var sentLocal = new DateTimeOffset(m.SentUtcTicks, TimeSpan.Zero).ToLocalTime();
+                var full = $"[{sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture)}] {m.Text}";
                 _messages.Items.Add(new ChatLine(full, color));
             }
             _messages.EndUpdate();

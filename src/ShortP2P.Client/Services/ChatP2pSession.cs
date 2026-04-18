@@ -373,22 +373,22 @@ public sealed class ChatP2pSession(
                 if (buf.Length == 0)
                     continue;
 
-                if (buf[0] == ChatInviteCodec.FrameChatInvite)
+                switch (buf[0])
                 {
-                    await IncomingChatInviteHandler.TryAcceptAsync(buf, auth, repo,
-                        async (payload, dest, ct) =>
-                        {
-                            await _udp!.SendAsync(payload, dest, ct).ConfigureAwait(false);
-                        }, cancellationToken).ConfigureAwait(false);
-                    continue;
-                }
-
-                if (buf[0] == FrameHandshake && buf.Length == 129)
-                {
-                    var handshake = new byte[128];
-                    Buffer.BlockCopy(buf, 1, handshake, 0, 128);
-                    await HandleResponderHandshakeAsync(handshake, cancellationToken).ConfigureAwait(false);
-                    continue;
+                    case ChatInviteCodec.FrameChatInvite:
+                        await IncomingChatInviteHandler.TryAcceptAsync(buf, auth, repo,
+                            async (payload, dest, ct) =>
+                            {
+                                await _udp!.SendAsync(payload, dest, ct).ConfigureAwait(false);
+                            }, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    case FrameHandshake when buf.Length == 129:
+                    {
+                        var handshake = new byte[128];
+                        Buffer.BlockCopy(buf, 1, handshake, 0, 128);
+                        await HandleResponderHandshakeAsync(handshake, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
                 }
 
                 if (buf[0] != FrameCipher || buf.Length <= 1) 

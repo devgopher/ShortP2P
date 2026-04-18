@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Data;
@@ -89,7 +90,10 @@ public partial class ChatDetailPage : ContentPage
             {
                 var sender = m.Outgoing ? "You" : Title ?? "Peer";
                 var color = m.Outgoing ? Colors.DodgerBlue : GetPaletteColor(sender);
-                return new MessageRow(sender, m.Text, color);
+                var sentLocal = new DateTimeOffset(m.SentUtcTicks, TimeSpan.Zero).ToLocalTime();
+                var text =
+                    $"[{sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture)}] {m.Text}";
+                return new MessageRow(text, color);
             })
             .ToList();
     }
@@ -156,7 +160,7 @@ public partial class ChatDetailPage : ContentPage
         }
     }
 
-    private sealed record MessageRow(string DirectionLabel, string Text, Color MessageColor);
+    private sealed record MessageRow(string Text, Color MessageColor);
 
     private static Color GetPaletteColor(string key)
     {

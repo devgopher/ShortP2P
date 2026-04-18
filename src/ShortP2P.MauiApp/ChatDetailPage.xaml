@@ -18,9 +18,8 @@
         <CollectionView x:Name="MessagesCollection" Grid.Row="1">
             <CollectionView.ItemTemplate>
                 <DataTemplate>
-                    <Grid Padding="8" ColumnDefinitions="Auto,*">
-                        <Label Grid.Column="0" Text="{Binding DirectionLabel}" FontSize="12" TextColor="{Binding MessageColor}" VerticalOptions="Start" Margin="0,2,8,0" />
-                        <Label Grid.Column="1" Text="{Binding Text}" TextColor="{Binding MessageColor}" LineBreakMode="WordWrap" />
+                    <Grid Padding="8">
+                        <Label Text="{Binding Text}" TextColor="{Binding MessageColor}" LineBreakMode="WordWrap" />
                     </Grid>
                 </DataTemplate>
             </CollectionView.ItemTemplate>
