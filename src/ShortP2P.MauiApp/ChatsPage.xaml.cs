@@ -77,17 +77,12 @@ public partial class ChatsPage : ContentPage
         await RefreshAsync().ConfigureAwait(true);
     }
 
-    protected override void OnDisappearing()
-    {
-        _chats.ChatListChanged -= OnChatListChangedFromInvite;
-        base.OnDisappearing();
-    }
-
     private async Task RefreshAsync()
     {
         var u = _auth.CurrentUser;
         if (u == null)
         {
+            _chats.ChatListChanged -= OnChatListChangedFromInvite;
             Application.Current!.MainPage = new NavigationPage(MauiProgram.Services.GetRequiredService<LoginPage>());
             return;
         }
@@ -155,6 +150,7 @@ public partial class ChatsPage : ContentPage
 
     private async void OnLogoutClicked(object? sender, EventArgs e)
     {
+        _chats.ChatListChanged -= OnChatListChangedFromInvite;
         try
         {
             await _p2p.StopAsync().ConfigureAwait(true);

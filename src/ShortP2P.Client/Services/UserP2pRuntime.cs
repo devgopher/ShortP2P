@@ -22,6 +22,11 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private volatile bool _discoveryHooked;
     private CancellationTokenSource? _presencePingWorkCts;
 
+    private readonly SemaphoreSlim _inviteListenerGate = new(1, 1);
+    private CancellationTokenSource? _inviteCts;
+    private UdpTransport? _inviteUdp;
+    private Task? _inviteReceiveTask;
+
     public P2pRoutingSettings Settings { get; } = new();
 
     /// <summary>Сканирование LAN по discovery-пингам (UDP 565, broadcast).</summary>
@@ -87,6 +92,52 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    ///     Останавливает приёмник инвайтов на <see cref="ChatInviteCodec.InviteUdpPort" /> (перед временным bind
+    ///     из <see cref="LanChatStartFromDiscovery" /> на том же порту).
+    /// </summary>
+    public async Task StopInviteListenerAsync(CancellationToken cancellationToken = default)
+    {
+        await _inviteListenerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await StopInviteListenerCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _inviteListenerGate.Release();
+        }
+    }
+
+    /// <summary>
+    ///     Поднимает приёмник входящих <see cref="ChatInviteCodec" /> на <see cref="ChatInviteCodec.InviteUdpPort" />
+    ///     (отдельно от data/чата на <see cref="UserEntity.DataUdpPort" />).
+    /// </summary>
+    public async Task EnsureInviteListenerRunningAsync(UserEntity user, CancellationToken cancellationToken = default)
+    {
+        await _inviteListenerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_inviteUdp != null)
+                return;
+
+            _inviteCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var token = _inviteCts.Token;
+            _inviteUdp = new UdpTransport(ChatInviteCodec.InviteUdpPort);
+            await _inviteUdp.StartAsync(cancellationToken).ConfigureAwait(false);
+            _inviteReceiveTask = Task.Run(() => InviteReceiveLoopAsync(token), token);
+        }
+        catch
+        {
+            await StopInviteListenerCoreAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+        finally
+        {
+            _inviteListenerGate.Release();
+        }
+    }
+
     /// <summary>Запускает фоновые P2P-сессии для всех чатов из БД (ещё не стартовавшие).</summary>
     public async Task EnsureAllChatSessionsStartedAsync(UserEntity user, AuthService auth, ChatRepository repo,
         SynchronizationContext? uiSync, CancellationToken cancellationToken = default)
@@ -127,6 +178,77 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         }
     }
 
+    private async Task InviteReceiveLoopAsync(CancellationToken cancellationToken)
+    {
+        var udp = _inviteUdp;
+        if (udp == null)
+            return;
+        try
+        {
+            await foreach (var msg in udp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var buf = msg.Payload.ToArray();
+                if (buf.Length == 0 || buf[0] != ChatInviteCodec.FrameChatInvite)
+                    continue;
+                // Не проталкивать cancellationToken в TryAccept: при остановке слушателя иначе можно прервать AddChat по пути.
+                await IncomingChatInviteHandler.TryAcceptAsync(buf, _auth, _chats,
+                    async (payload, dest, _) => await udp.SendAsync(payload, dest, CancellationToken.None)
+                        .ConfigureAwait(false),
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // ignore
+        }
+    }
+
+    private async Task StopInviteListenerCoreAsync(CancellationToken cancellationToken)
+    {
+        if (_inviteCts != null)
+        {
+            try
+            {
+                await _inviteCts.CancelAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                await _inviteCts.CancelAsync().ConfigureAwait(false);
+            }
+        }
+
+        if (_inviteReceiveTask != null)
+        {
+            try
+            {
+                await _inviteReceiveTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // ignore
+            }
+        }
+
+        _inviteReceiveTask = null;
+
+        if (_inviteUdp != null)
+        {
+            var u = _inviteUdp;
+            _inviteUdp = null;
+            try
+            {
+                await u.StopAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        _inviteCts?.Dispose();
+        _inviteCts = null;
+    }
+
     public async Task EnsureStartedAsync(UserEntity user, CancellationToken cancellationToken = default)
     {
         var persisted = await _store.LoadAsync().ConfigureAwait(false);
@@ -144,6 +266,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             LocalScan.DiscoveryPingReceived += OnDiscoveryPingReceived;
             _discoveryHooked = true;
         }
+
+        await EnsureInviteListenerRunningAsync(user, cancellationToken).ConfigureAwait(false);
     }
 
     private void OnDiscoveryPingReceived(object? sender, DiscoveryPingReceivedEventArgs e)
@@ -223,6 +347,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
+        await StopInviteListenerAsync(cancellationToken).ConfigureAwait(false);
+
         if (_discoveryHooked)
         {
             LocalScan.DiscoveryPingReceived -= OnDiscoveryPingReceived;
