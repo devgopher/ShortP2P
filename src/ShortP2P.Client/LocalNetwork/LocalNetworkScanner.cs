@@ -8,17 +8,17 @@ namespace ShortP2P.Client.LocalNetwork;
 
 /// <summary>
 ///     Сканирование локальной сети по discovery-пингам: UDP на broadcast-адрес каждой локальной IPv4-подсети
-///     и на 255.255.255.255, порт <see cref="PresencePingCodec.UdpPort" />; фоновая рассылка своего пинга каждые 15 с,
+///     и на 255.255.255.255, порт <see cref="PresencePingCodec.UdpPort" />; фоновая рассылка по периоду
+///     <see cref="LinkTechnologyPresetExtensions.GetPresencePingPeriod" /> (5 или 15 с от пресета канала),
 ///     дополнительно по запросу UI (<see cref="ScanAsync" />, <see cref="TriggerScanAsync" />). Приём на порту 565;
 ///     сырые пинги чужих пиров — в <see cref="DiscoveryPingReceived" /> (подписчик не должен блокировать цикл приёма).
 /// </summary>
 public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings) : IAsyncDisposable
 {
-    /// <summary>Интервал фоновой рассылки discovery (broadcast по подсетям).</summary>
-    private static readonly TimeSpan PeriodicLanScanInterval = TimeSpan.FromSeconds(15);
-
     /// <summary>Удалять пира из списка, если не было пинга дольше этого (несколько периодов рассылки).</summary>
-    private static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(90);
+    private TimeSpan DiscoveryStaleAfter =>
+        TimeSpan.FromTicks(Math.Max(TimeSpan.FromSeconds(45).Ticks,
+            _routingSettings.LinkTechnology.GetPresencePingPeriod().Ticks * 6));
 
     /// <summary>Длительность приёма пингов при ручном сканировании по умолчанию.</summary>
     public static readonly TimeSpan DefaultScanListenDuration = TimeSpan.FromSeconds(45);
@@ -65,7 +65,7 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings) : IA
             return false;
         }
 
-        var cutoff = DateTimeOffset.UtcNow - StaleAfter;
+        var cutoff = DateTimeOffset.UtcNow - DiscoveryStaleAfter;
         return _entries.TryGetValue(id, out var p) && p.LastSeenUtc >= cutoff;
     }
 
@@ -263,10 +263,11 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings) : IA
     {
         while (!cancellationToken.IsCancellationRequested)
         {
+            var period = _routingSettings.LinkTechnology.GetPresencePingPeriod();
             try
             {
                 await SendDiscoveryBroadcastRoundAsync(cancellationToken).ConfigureAwait(false);
-                await Task.Delay(PeriodicLanScanInterval, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(period, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -276,7 +277,7 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings) : IA
             {
                 try
                 {
-                    await Task.Delay(PeriodicLanScanInterval, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(period, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -299,7 +300,7 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings) : IA
                 break;
             }
 
-            var cutoff = DateTimeOffset.UtcNow - StaleAfter;
+            var cutoff = DateTimeOffset.UtcNow - DiscoveryStaleAfter;
             var removed = false;
             foreach (var kv in _entries.ToArray())
             {

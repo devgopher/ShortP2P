@@ -62,12 +62,15 @@ public static class LinkTechnologyPresetExtensions
         _ => preset.ToString(),
     };
 
-    /// <summary>Период рассылки presence-пингов: &lt;16 kbit/s — 30 с, иначе 10 с; безлимит считается «быстрым».</summary>
+    /// <summary>
+    ///     Период UDP presence/discovery-пинга: EDGE, Bluetooth и сравнимые или более медленные каналы (до ~200 kbit/s) —
+    ///     15 с; быстрее (3G, LTE) и безлимит — 5 с.
+    /// </summary>
     public static TimeSpan GetPresencePingPeriod(this LinkTechnologyPreset preset)
     {
         var bps = preset.GetSimulatedMinBitsPerSecond();
-
-        return TimeSpan.FromSeconds(bps is > 0 and <= 32_000 ? 30 : 10);
+        // Порог по верхней границе «медленного» яруса (Bluetooth Classic ~200 kbit/s).
+        return TimeSpan.FromSeconds(bps is 0 or > 200_000 ? 5 : 15);
     }
 
     /// <summary>Ожидание квитанции доставки сообщения: канал ≤32 kbit/s — 10 с, иначе 3 с; безлимит — 3 с.</summary>
