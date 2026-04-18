@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Net;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
@@ -15,27 +14,16 @@ public sealed class ChatForm : Form
     private readonly UserP2pRuntime _p2PRuntime;
     private readonly ILogger<ChatForm> _logger;
     private readonly ILogger<UserAction> _userActions;
-    private readonly Label _peerIdLabel = new()
+    private readonly Label _peerInfoLabel = new()
     {
         AutoSize = true,
         ForeColor = SystemColors.GrayText,
-        Padding = new Padding(0, 0, 0, 4),
+        Padding = new Padding(0, 0, 0, 2),
     };
-    private readonly Label _peerStatusLabel = new()
-    {
-        AutoSize = true,
-        ForeColor = SystemColors.GrayText,
-        Padding = new Padding(0, 0, 0, 4),
-    };
-    
-    private readonly TextBox _peerHostEntry = new() { Width = 200 };
-    private readonly TextBox _peerPortEntry = new() { Width = 56 };
-    private readonly Button _applyPeerEndpoint = new() { Text = "Применить", AutoSize = true };
     private readonly ListBox _messages = new()
     {
-        Dock = DockStyle.Bottom,
+        Dock = DockStyle.Fill,
         IntegralHeight = false,
-        Height = 300,
         ScrollAlwaysVisible = true,
         Padding = new Padding(8, 5, 8, 4),
         DrawMode = DrawMode.OwnerDrawVariable,
@@ -67,34 +55,17 @@ public sealed class ChatForm : Form
         Height = 520;
         MaximizeBox = false;
 
-        _peerIdLabel.Text = $"Id: {chat.PeerNetworkIdShort}";
-        _peerStatusLabel.Text = "Статус: офлайн";
-        _peerHostEntry.Text = chat.PeerHost;
-        _peerPortEntry.Text = chat.PeerPort.ToString();
+        _peerInfoLabel.Text = PeerInfoText("Статус: офлайн");
 
         var top = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             AutoSize = true,
-            Padding = new Padding(8, 6, 8, 4),
+            Padding = new Padding(8, 6, 8, 2),
             ColumnCount = 1,
-            RowCount = 3
+            RowCount = 1,
         };
-        top.Controls.Add(_peerIdLabel, 0, 0);
-        top.Controls.Add(_peerStatusLabel, 0, 1);
-
-        var addrRow = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-        };
-        addrRow.Controls.Add(new Label { Text = "IP:", AutoSize = true, Padding = new Padding(0, 6, 4, 0) });
-        addrRow.Controls.Add(_peerHostEntry);
-        addrRow.Controls.Add(new Label { Text = "Порт:", AutoSize = true, Padding = new Padding(8, 6, 4, 0) });
-        addrRow.Controls.Add(_peerPortEntry);
-        addrRow.Controls.Add(_applyPeerEndpoint);
-        top.Controls.Add(addrRow, 0, 2);
+        top.Controls.Add(_peerInfoLabel, 0, 0);
 
         var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 88, ColumnCount = 2 };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -102,11 +73,11 @@ public sealed class ChatForm : Form
         bottom.Controls.Add(_input, 0, 0);
         bottom.Controls.Add(_send, 1, 0);
 
-        Controls.Add(top);
+        // Порядок: Fill сначала, затем Top/Bottom — иначе между шапкой и вводом остаётся пустая полоса.
         Controls.Add(_messages);
+        Controls.Add(top);
         Controls.Add(bottom);
 
-        _applyPeerEndpoint.Click += async (_, _) => await OnApplyPeerEndpointAsync().ConfigureAwait(true);
         _send.Click += async (_, _) => await OnSendAsync().ConfigureAwait(true);
         _messages.DrawItem += OnMessagesDrawItem;
         _messages.MeasureItem += OnMessagesMeasureItem;
@@ -140,56 +111,6 @@ public sealed class ChatForm : Form
         RefreshPeerPresenceLabel();
     }
 
-    private async Task OnApplyPeerEndpointAsync()
-    {
-        if (_p2PSession == null)
-        {
-            MessageBox.Show(this, "Сессия ещё не готова.", "Чат", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-
-        var host = _peerHostEntry.Text.Trim();
-        if (host.Length == 0)
-        {
-            MessageBox.Show(this, "Укажите IP.", "Адрес", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
-        if (!int.TryParse(_peerPortEntry.Text.Trim(), out var port) || port is < 1 or > 65535)
-        {
-            MessageBox.Show(this, "Порт должен быть 1–65535.", "Адрес", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
-        try
-        {
-            _ = IPAddress.Parse(host);
-        }
-        catch
-        {
-            MessageBox.Show(this, "Некорректный IP.", "Адрес", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
-        try
-        {
-            await _p2PSession.ApplyPeerEndpointAsync(host, port).ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            _userActions.LogInformation(
-                "Chat {Peer}: apply peer endpoint failed ({Host}:{Port}, {Message})",
-                _chat.PeerNickname, host, port, ex.Message);
-            MessageBox.Show(this, ex.Message, "Адрес", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
-        _userActions.LogInformation("Chat {Peer}: peer endpoint set to {Host}:{Port}",
-            _chat.PeerNickname, host, port);
-        _peerHostEntry.Text = _chat.PeerHost;
-        _peerPortEntry.Text = _chat.PeerPort.ToString();
-    }
-
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         if (_p2PSession != null)
@@ -197,7 +118,6 @@ public sealed class ChatForm : Form
             _p2PSession.MessagesChanged -= OnP2pMessagesChanged;
             _p2PSession = null;
         }
-
         base.OnFormClosed(e);
     }
 
@@ -234,7 +154,6 @@ public sealed class ChatForm : Form
         var text = _input.Text.Trim();
         if (text.Length == 0 || _p2PSession == null)
             return;
-
         try
         {
             await _p2PSession.SendTextAsync(text).ConfigureAwait(true);
@@ -252,9 +171,11 @@ public sealed class ChatForm : Form
 
     private void RefreshPeerPresenceLabel()
     {
-        _peerStatusLabel.Text = "Статус: офлайн";
-        _peerStatusLabel.ForeColor = SystemColors.GrayText;
+        _peerInfoLabel.Text = PeerInfoText("Статус: офлайн");
+        _peerInfoLabel.ForeColor = SystemColors.GrayText;
     }
+
+    private string PeerInfoText(string statusLine) => $"Id: {_chat.PeerNetworkIdShort}\r\n{statusLine}";
 
     private void OnMessageDoubleClick(object? sender, EventArgs e)
     {
@@ -262,7 +183,6 @@ public sealed class ChatForm : Form
             return;
         if (line.Text.Length <= 64)
             return;
-
         _userActions.LogInformation("Chat {Peer}: open long message viewer", _chat.PeerNickname);
         using var dlg = new MessageViewForm("Сообщение", line.Text);
         dlg.ShowDialog(this);
