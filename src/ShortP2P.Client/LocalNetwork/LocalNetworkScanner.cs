@@ -48,6 +48,27 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings) : IA
         }
     }
 
+    /// <summary>
+    ///     Есть недавний presence-пинг с данным short network id (тот же порог, что и для «протухания» списка LAN).
+    /// </summary>
+    public bool IsPeerSeenRecentlyOnLan(string peerNetworkIdShort)
+    {
+        if (string.IsNullOrWhiteSpace(peerNetworkIdShort))
+            return false;
+        Guid id;
+        try
+        {
+            id = CompressedNetworkId.FromShortString(peerNetworkIdShort.Trim()).Value;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+
+        var cutoff = DateTimeOffset.UtcNow - StaleAfter;
+        return _entries.TryGetValue(id, out var p) && p.LastSeenUtc >= cutoff;
+    }
+
     public event EventHandler? ClientsChanged;
 
     /// <summary>Принят чужой presence/discovery-пинг (не свой network id); обработчик не должен долго блокировать поток приёма.</summary>

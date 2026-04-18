@@ -1,3 +1,4 @@
+using System.Drawing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Data;
@@ -125,11 +126,27 @@ public sealed class MainChatsForm : Form
         Activated += async (_, _) => await RefreshAsync().ConfigureAwait(true);
         _chats.ChatListChanged += OnChatListChangedFromInvite;
         _chats.ChatMessageAppended += OnChatMessageAppended;
+        _p2P.LocalScan.ClientsChanged += OnLanPresenceChanged;
         FormClosed += (_, _) =>
         {
             _chats.ChatListChanged -= OnChatListChangedFromInvite;
             _chats.ChatMessageAppended -= OnChatMessageAppended;
+            _p2P.LocalScan.ClientsChanged -= OnLanPresenceChanged;
         };
+    }
+
+    private void OnLanPresenceChanged(object? sender, EventArgs e)
+    {
+        if (!IsHandleCreated || IsDisposed)
+            return;
+        try
+        {
+            BeginInvoke(() => _list.Invalidate());
+        }
+        catch (ObjectDisposedException)
+        {
+            // ignore
+        }
     }
 
     private void OnChatMessageAppended(object? sender, ChatMessageAppendedEventArgs e)
@@ -425,11 +442,20 @@ public sealed class MainChatsForm : Form
         if (_list.Items[e.Index] is not ChatEntity chat)
             return;
 
+        const int dotSize = 10;
+        const int dotPad = 4;
+        var online = _p2P.LocalScan.IsPeerSeenRecentlyOnLan(chat.PeerNetworkIdShort);
+        var dotBrush = online ? Brushes.ForestGreen : Brushes.IndianRed;
+        var cy = e.Bounds.Top + (e.Bounds.Height - dotSize) / 2;
+        e.Graphics.FillEllipse(dotBrush, e.Bounds.Left + dotPad, cy, dotSize, dotSize);
+
         var emphasize = _unreadChatIds.Contains(chat.Id) || _newChatIds.Contains(chat.Id);
         var baseFont = e.Font ?? _list.Font;
         using var drawFont = emphasize ? new Font(baseFont, FontStyle.Bold) : null;
         var font = drawFont ?? baseFont;
-        TextRenderer.DrawText(e.Graphics, chat.PeerNickname, font, e.Bounds, e.ForeColor,
+        var textBounds = new Rectangle(e.Bounds.Left + dotPad * 2 + dotSize, e.Bounds.Top,
+            e.Bounds.Width - dotPad * 2 - dotSize, e.Bounds.Height);
+        TextRenderer.DrawText(e.Graphics, chat.PeerNickname, font, textBounds, e.ForeColor,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         e.DrawFocusRectangle();
     }
