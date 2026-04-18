@@ -8,16 +8,17 @@ namespace ShortP2P.Client.LocalNetwork;
 
 /// <summary>
 ///     Сканирование локальной сети по discovery-пингам: UDP на broadcast-адрес каждой локальной IPv4-подсети
-///     и на 255.255.255.255, порт <see cref="PresencePingCodec.UdpPort" />; раунд повторяется в фоне каждые 5 минут,
-///     дополнительно по запросу UI (<see cref="ScanAsync" />, <see cref="TriggerScanAsync" />). Приём на порту 565.
+///     и на 255.255.255.255, порт <see cref="PresencePingCodec.UdpPort" />; фоновая рассылка своего пинга каждые 15 с,
+///     дополнительно по запросу UI (<see cref="ScanAsync" />, <see cref="TriggerScanAsync" />). Приём на порту 565;
+///     сырые пинги чужих пиров — в <see cref="DiscoveryPingReceived" /> (подписчик не должен блокировать цикл приёма).
 /// </summary>
 public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings) : IAsyncDisposable
 {
     /// <summary>Интервал фоновой рассылки discovery (broadcast по подсетям).</summary>
-    private static readonly TimeSpan PeriodicLanScanInterval = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan PeriodicLanScanInterval = TimeSpan.FromSeconds(15);
 
-    /// <summary>Удалять пира из списка, если не было пинга дольше этого (чуть больше периода сканирования).</summary>
-    private static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(6);
+    /// <summary>Удалять пира из списка, если не было пинга дольше этого (несколько периодов рассылки).</summary>
+    private static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(90);
 
     /// <summary>Длительность приёма пингов при ручном сканировании по умолчанию.</summary>
     public static readonly TimeSpan DefaultScanListenDuration = TimeSpan.FromSeconds(45);
@@ -48,6 +49,9 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings) : IA
     }
 
     public event EventHandler? ClientsChanged;
+
+    /// <summary>Принят чужой presence/discovery-пинг (не свой network id); обработчик не должен долго блокировать поток приёма.</summary>
+    public event EventHandler<DiscoveryPingReceivedEventArgs>? DiscoveryPingReceived;
 
     public async Task StartAsync(UserEntity user, CancellationToken cancellationToken = default)
     {
@@ -171,8 +175,17 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings) : IA
                 if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick, out var dataPort, out var advLink))
                     continue;
 
-                OnDiscoveryPingReceived(new DiscoveredLocalPeer(pingSender, nick, msg.RemoteAddress,
-                    msg.RemoteAddress.Kind, DateTimeOffset.UtcNow, dataPort, advLink));
+                var peer = new DiscoveredLocalPeer(pingSender, nick, msg.RemoteAddress,
+                    msg.RemoteAddress.Kind, DateTimeOffset.UtcNow, dataPort, advLink);
+                var u = _user;
+                if (u == null)
+                    continue;
+                var myId = CompressedNetworkId.FromShortString(u.NetworkIdShort).Value;
+                if (peer.NetworkId == myId)
+                    continue;
+
+                OnDiscoveryPingReceived(peer);
+                DiscoveryPingReceived?.Invoke(this, new DiscoveryPingReceivedEventArgs(peer));
             }
         }
         catch (OperationCanceledException)
@@ -183,11 +196,6 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings) : IA
 
     private void OnDiscoveryPingReceived(DiscoveredLocalPeer peer)
     {
-        var u = _user;
-        if (u == null) return;
-        var myId = CompressedNetworkId.FromShortString(u.NetworkIdShort).Value;
-        if (peer.NetworkId == myId) return;
-
         _entries.AddOrUpdate(peer.NetworkId, peer, (_, _) => peer);
         if (_scanSessionActive)
             return;
@@ -215,6 +223,7 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings) : IA
             u.Nickname,
             u.DataUdpPort,
             _routingSettings.LinkTechnology);
+        
         foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(PresencePingCodec.UdpPort))
         {
             try

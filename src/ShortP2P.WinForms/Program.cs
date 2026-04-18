@@ -33,8 +33,10 @@ internal static class Program
         services.AddSingleton<ChatRepository>();
         services.AddSingleton<P2pRoutingSettingsStore>();
         services.AddSingleton<BluetoothTransportRegistration>();
-        services.AddSingleton(sp =>
-            new UserP2pRuntime(sp.GetRequiredService<P2pRoutingSettingsStore>()));
+        services.AddSingleton(sp => new UserP2pRuntime(
+            sp.GetRequiredService<P2pRoutingSettingsStore>(),
+            sp.GetRequiredService<AuthService>(),
+            sp.GetRequiredService<ChatRepository>()));
 
         services.AddTransient<LoginForm>();
         services.AddTransient<RegisterForm>();
