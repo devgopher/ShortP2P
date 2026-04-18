@@ -178,7 +178,7 @@ public sealed class ChatP2pSession(
         var host = LocalEndpointHelper.GetPreferredLanIPv4String();
         var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
         var invite = ChatInviteCodec.Build(user.Nickname, nid,
-            RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), host, user.DataUdpPort);
+            RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), host, ChatInviteCodec.InviteUdpPort);
         await SendRouteRawAsync(invite, cancellationToken).ConfigureAwait(false);
     }
 

@@ -45,23 +45,28 @@ public static class IncomingChatInviteHandler
         if (existing != null)
         {
             var mergedHost = PeerHostList.MergeAppend(existing.PeerHost, host);
-            await repo.UpdateChatP2pRouteAsync(existing.Id, mergedHost, port, relayRouteBlob: null).ConfigureAwait(false);
+            var chatPeerPort = existing.PeerPort is < 1 or > 65535 || existing.PeerPort == ChatInviteCodec.InviteUdpPort
+                ? PresencePingCodec.DefaultDataUdpPort
+                : existing.PeerPort;
+            await repo.UpdateChatP2pRouteAsync(existing.Id, mergedHost, chatPeerPort, relayRouteBlob: null)
+                .ConfigureAwait(false);
             existing.PeerHost = mergedHost;
-            existing.PeerPort = port;
+            existing.PeerPort = chatPeerPort;
             existing.RelayRouteBlob = null;
             existing.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
             repo.NotifyChatListChanged();
             return;
         }
 
-        await repo.AddChatAsync(user.Id, nick, idShort, pubJson, host, port).ConfigureAwait(false);
+        await repo.AddChatAsync(user.Id, nick, idShort, pubJson, host, PresencePingCodec.DefaultDataUdpPort)
+            .ConfigureAwait(false);
 
         if (sendInviteReplyAsync != null)
         {
             var myHost = LocalEndpointHelper.GetPreferredLanIPv4String();
             var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
             var reply = ChatInviteCodec.Build(user.Nickname, nid,
-                RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), myHost, user.DataUdpPort);
+                RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), myHost, ChatInviteCodec.InviteUdpPort);
             var back = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(host), port));
             await sendInviteReplyAsync(reply, back, cancellationToken).ConfigureAwait(false);
         }
