@@ -219,6 +219,7 @@ public sealed class ChatP2pSession(
         IOException => true,
         TimeoutException => true,
         SocketException => true,
+        TaskCanceledException => true,
         _ => ex.InnerException != null && IsDeferrableSendFailure(ex.InnerException)
     };
 
@@ -402,11 +403,12 @@ public sealed class ChatP2pSession(
         {
             await DeliverOutgoingTextAsync(messageId, text, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch (Exception ex) when (CanQueueUntilPeerSeenOnLan() && IsDeferrableSendFailure(ex))
+        catch (Exception ex) when (CanQueueUntilPeerSeenOnLan() && !cancellationToken.IsCancellationRequested &&
+                                   (ex is OperationCanceledException || IsDeferrableSendFailure(ex)))
         {
             lock (_pendingSync)
                 _pendingOutgoing.Add(messageId);
