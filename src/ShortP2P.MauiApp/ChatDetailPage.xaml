@@ -15,8 +15,11 @@
         <CollectionView x:Name="MessagesCollection" Grid.Row="1">
             <CollectionView.ItemTemplate>
                 <DataTemplate>
-                    <Grid Padding="8">
-                        <Label Text="{Binding Text}" TextColor="{Binding MessageColor}" LineBreakMode="WordWrap" />
+                    <Grid Padding="8" ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                        <Label Grid.Column="0" Text="{Binding Text}" TextColor="{Binding MessageColor}"
+                               LineBreakMode="WordWrap" />
+                        <Label Grid.Column="1" Text="{Binding DeliveryGlyph}" TextColor="{Binding DeliveryGlyphColor}"
+                               FontSize="15" VerticalOptions="Start" IsVisible="{Binding ShowDelivery}" />
                     </Grid>
                 </DataTemplate>
             </CollectionView.ItemTemplate>

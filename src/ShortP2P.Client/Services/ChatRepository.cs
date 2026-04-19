@@ -124,15 +124,20 @@ public sealed class ChatRepository
             .ToListAsync();
     }
 
-    public async Task AddMessageAsync(int chatId, bool outgoing, string text)
+    public async Task<int> AddMessageAsync(int chatId, bool outgoing, string text,
+        MessageDeliveryStatus deliveryStatus = MessageDeliveryStatus.Delivered)
     {
         var conn = await _db.GetConnectionAsync();
+        var status = outgoing
+            ? deliveryStatus
+            : MessageDeliveryStatus.NotApplicable;
         var msg = new ChatMessageEntity
         {
             ChatId = chatId,
             Outgoing = outgoing,
             Text = text,
             SentUtcTicks = DateTime.UtcNow.Ticks,
+            DeliveryStatus = (int)status,
         };
         await conn.InsertAsync(msg);
 
@@ -144,6 +149,23 @@ public sealed class ChatRepository
         }
 
         ChatMessageAppended?.Invoke(this, new ChatMessageAppendedEventArgs(chatId, outgoing));
+        return msg.Id;
+    }
+
+    public async Task<ChatMessageEntity?> GetMessageAsync(int messageId)
+    {
+        var conn = await _db.GetConnectionAsync();
+        return await conn.FindAsync<ChatMessageEntity>(messageId);
+    }
+
+    public async Task UpdateMessageDeliveryStatusAsync(int messageId, MessageDeliveryStatus status)
+    {
+        var conn = await _db.GetConnectionAsync();
+        var m = await conn.FindAsync<ChatMessageEntity>(messageId);
+        if (m == null)
+            return;
+        m.DeliveryStatus = (int)status;
+        await conn.UpdateAsync(m);
     }
 
     /// <summary>Удаляет чат и все его сообщения локально. Возвращает false, если чат не найден или не принадлежит userId.</summary>

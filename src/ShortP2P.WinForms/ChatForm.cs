@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.Extensions.Logging;
+using ShortP2P.Client;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
 
@@ -139,7 +140,10 @@ public sealed class ChatForm : Form
                 var color = m.Outgoing ? Color.DodgerBlue : GetPaletteColor(sender);
                 var sentLocal = new DateTimeOffset(m.SentUtcTicks, TimeSpan.Zero).ToLocalTime();
                 var full = $"[{sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture)}] {m.Text}";
-                _messages.Items.Add(new ChatLine(full, color));
+                var ds = (MessageDeliveryStatus)m.DeliveryStatus;
+                if (m.Outgoing && ds == MessageDeliveryStatus.NotApplicable)
+                    ds = MessageDeliveryStatus.Delivered;
+                _messages.Items.Add(new ChatLine(full, color, m.Outgoing, ds));
             }
             _messages.EndUpdate();
         }
@@ -159,7 +163,6 @@ public sealed class ChatForm : Form
             await _p2PSession.SendTextAsync(text).ConfigureAwait(true);
             _userActions.LogInformation("Chat {Peer}: sent message ({Length} chars)", _chat.PeerNickname, text.Length);
             _input.Clear();
-            await ReloadMessagesAsync().ConfigureAwait(true);
         }
         catch (OutboundMessageQueuedException ex)
         {
@@ -172,6 +175,10 @@ public sealed class ChatForm : Form
             _logger.LogWarning(ex, "Send message failed in chat {ChatId}", _chat.Id);
             _userActions.LogInformation("Chat {Peer}: send message failed ({Message})", _chat.PeerNickname, ex.Message);
             MessageBox.Show(this, ex.Message, "Send failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            await ReloadMessagesAsync().ConfigureAwait(true);
         }
     }
 
@@ -203,10 +210,23 @@ public sealed class ChatForm : Form
         var line = _messages.Items[e.Index] as ChatLine;
         var text = line?.Text ?? _messages.Items[e.Index]?.ToString() ?? "";
         var color = line?.Color ?? ForeColor;
-        var textBounds = new Rectangle(e.Bounds.X + 4, e.Bounds.Y + 2, Math.Max(10, e.Bounds.Width - 8),
-            Math.Max(10, e.Bounds.Height - 4));
-        TextRenderer.DrawText(e.Graphics, text, e.Font, textBounds, color,
+        const int statusCol = 22;
+        var reserveRight = line is { Outgoing: true } ? statusCol : 0;
+        var textBounds = new Rectangle(e.Bounds.X + 4, e.Bounds.Y + 2,
+            Math.Max(10, e.Bounds.Width - 8 - reserveRight), Math.Max(10, e.Bounds.Height - 4));
+        var font = e.Font ?? _messages.Font;
+        TextRenderer.DrawText(e.Graphics, text, font, textBounds, color,
             TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+
+        if (line is { Outgoing: true })
+        {
+            var (glyph, gColor) = OutgoingDeliveryDraw(line.DeliveryStatus);
+            var gb = new Rectangle(e.Bounds.Right - statusCol - 2, e.Bounds.Y + 2, statusCol,
+                Math.Max(font.Height, e.Bounds.Height - 4));
+            TextRenderer.DrawText(e.Graphics, glyph, font, gb, gColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
+
         e.DrawFocusRectangle();
     }
 
@@ -220,11 +240,23 @@ public sealed class ChatForm : Form
 
         var line = _messages.Items[e.Index] as ChatLine;
         var text = line?.Text ?? _messages.Items[e.Index]?.ToString() ?? "";
-        var width = Math.Max(120, _messages.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 12);
+        const int statusCol = 22;
+        var reserveRight = line is { Outgoing: true } ? statusCol : 0;
+        var width = Math.Max(120,
+            _messages.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 12 - reserveRight);
         var measured = TextRenderer.MeasureText(text, _messages.Font, new Size(width, int.MaxValue),
             TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
         e.ItemHeight = Math.Max(_messages.Font.Height + 8, measured.Height + 8);
     }
+
+    private static (string Glyph, Color Color) OutgoingDeliveryDraw(MessageDeliveryStatus status) =>
+        status switch
+        {
+            MessageDeliveryStatus.Pending => (OutgoingDeliveryIndicators.Pending, Color.DarkGoldenrod),
+            MessageDeliveryStatus.Delivered => (OutgoingDeliveryIndicators.Delivered, Color.ForestGreen),
+            MessageDeliveryStatus.Failed => (OutgoingDeliveryIndicators.Failed, Color.Red),
+            _ => (OutgoingDeliveryIndicators.Delivered, Color.ForestGreen),
+        };
 
     private static Color GetPaletteColor(string key)
     {
@@ -254,7 +286,7 @@ public sealed class ChatForm : Form
         return Color.FromArgb(r, g, b);
     }
 
-    private sealed record ChatLine(string Text, Color Color)
+    private sealed record ChatLine(string Text, Color Color, bool Outgoing, MessageDeliveryStatus DeliveryStatus)
     {
         public override string ToString() => Text;
     }

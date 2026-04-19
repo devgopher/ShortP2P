@@ -35,6 +35,25 @@ public sealed class AppDatabase
             // column already exists
         }
 
+        try
+        {
+            await _connection.ExecuteAsync(
+                "ALTER TABLE messages ADD COLUMN DeliveryStatus INTEGER NOT NULL DEFAULT 2");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
+            await _connection.ExecuteAsync("UPDATE messages SET DeliveryStatus = 0 WHERE Outgoing = 0");
+        }
+        catch
+        {
+            // ignore
+        }
+
         return _connection;
     }
 }
