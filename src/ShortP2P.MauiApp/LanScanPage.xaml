@@ -13,13 +13,21 @@
         <CollectionView x:Name="PeerCollection" Grid.Row="1">
             <CollectionView.ItemTemplate>
                 <DataTemplate>
-                    <Grid Padding="12,8" RowDefinitions="Auto,Auto,Auto">
+                    <Grid Padding="12,8" ColumnDefinitions="Auto,*" ColumnSpacing="10" RowDefinitions="Auto,Auto,Auto">
                         <Grid.GestureRecognizers>
                             <TapGestureRecognizer NumberOfTapsRequired="2" Tapped="OnPeerDoubleTapped" />
                         </Grid.GestureRecognizers>
-                        <Label Grid.Row="0" Text="{Binding Nickname}" FontSize="16" />
-                        <Label Grid.Row="1" Text="{Binding NetworkIdShort}" FontSize="12" TextColor="Gray" />
-                        <Label Grid.Row="2" Text="{Binding DetailLine}" FontSize="11" TextColor="Gray" />
+                        <Ellipse Grid.Row="0" Grid.RowSpan="3" Grid.Column="0" WidthRequest="10" HeightRequest="10"
+                                 VerticalOptions="Center" Fill="#CD5C5C">
+                            <Ellipse.Triggers>
+                                <DataTrigger TargetType="Ellipse" Binding="{Binding IsPeerOnline}" Value="True">
+                                    <Setter Property="Fill" Value="#228B22" />
+                                </DataTrigger>
+                            </Ellipse.Triggers>
+                        </Ellipse>
+                        <Label Grid.Row="0" Grid.Column="1" Text="{Binding Nickname}" FontSize="16" />
+                        <Label Grid.Row="1" Grid.Column="1" Text="{Binding NetworkIdShort}" FontSize="12" TextColor="Gray" />
+                        <Label Grid.Row="2" Grid.Column="1" Text="{Binding DetailLine}" FontSize="11" TextColor="Gray" />
                     </Grid>
                 </DataTemplate>
             </CollectionView.ItemTemplate>

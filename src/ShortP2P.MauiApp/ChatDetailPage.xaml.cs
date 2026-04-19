@@ -7,11 +7,15 @@ namespace ShortP2P.MauiApp;
 
 public partial class ChatDetailPage : ContentPage
 {
+    private static readonly Color PresenceOnline = Color.FromArgb("#228B22");
+    private static readonly Color PresenceOffline = Color.FromArgb("#CD5C5C");
+
     private readonly AuthService _auth;
     private readonly ChatRepository _repo;
     private readonly UserP2pRuntime _p2p;
     private readonly ILogger<ChatDetailPage> _logger;
     private ChatP2pSession? _p2pSession;
+    private string? _peerNetworkIdShort;
 
     public ChatDetailPage(AuthService auth, ChatRepository repo, UserP2pRuntime p2p, ILogger<ChatDetailPage> logger)
     {
@@ -37,14 +41,16 @@ public partial class ChatDetailPage : ContentPage
 
         Title = chat.PeerNickname;
         PeerIdLabel.Text = $"Id: {chat.PeerNetworkIdShort}";
-        PeerStatusLabel.Text = "Статус: офлайн";
+        _peerNetworkIdShort = chat.PeerNetworkIdShort;
         var user = _auth.CurrentUser;
         if (user == null)
         {
+            _peerNetworkIdShort = null;
             await Navigation.PopAsync().ConfigureAwait(true);
             return;
         }
 
+        _p2p.LocalScan.ClientsChanged += OnPeerLanPresenceChanged;
         var uiSync = SynchronizationContext.Current;
         _p2pSession = _p2p.GetOrCreateSession(chat, user, _auth, _repo, uiSync);
         _p2pSession.MessagesChanged += OnP2PMessagesChanged;
@@ -69,12 +75,17 @@ public partial class ChatDetailPage : ContentPage
     protected override async void OnDisappearing()
     {
         base.OnDisappearing();
+        _p2p.LocalScan.ClientsChanged -= OnPeerLanPresenceChanged;
+        _peerNetworkIdShort = null;
         if (_p2pSession != null)
         {
             _p2pSession.MessagesChanged -= OnP2PMessagesChanged;
             _p2pSession = null;
         }
     }
+
+    private void OnPeerLanPresenceChanged(object? sender, EventArgs e) =>
+        MainThread.BeginInvokeOnMainThread(RefreshPeerPresenceLabel);
 
     private void OnP2PMessagesChanged(object? sender, EventArgs e) =>
         MainThread.BeginInvokeOnMainThread(async () => await ReloadMessagesAsync().ConfigureAwait(true));
@@ -127,7 +138,12 @@ public partial class ChatDetailPage : ContentPage
 
     private void RefreshPeerPresenceLabel()
     {
-        PeerStatusLabel.Text = "Статус: офлайн";
-        PeerStatusLabel.TextColor = Colors.Gray;
+        if (string.IsNullOrWhiteSpace(_peerNetworkIdShort))
+            return;
+
+        var online = _p2p.LocalScan.IsPeerSeenRecentlyOnLan(_peerNetworkIdShort);
+        PeerPresenceDot.Fill = online ? PresenceOnline : PresenceOffline;
+        PeerStatusLabel.Text = online ? "Статус: онлайн" : "Статус: офлайн";
+        PeerStatusLabel.TextColor = online ? PresenceOnline : Colors.Gray;
     }
 }

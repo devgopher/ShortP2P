@@ -16,8 +16,9 @@ public sealed class LanScanRow
     public string Nickname { get; init; } = "";
     public string NetworkIdShort { get; init; } = "";
     public string DetailLine { get; init; } = "";
+    public bool IsPeerOnline { get; init; }
 
-    public static LanScanRow From(DiscoveredLocalPeer p)
+    public static LanScanRow From(DiscoveredLocalPeer p, bool isPeerOnline)
     {
         var idShort = CompressedNetworkId.FromGuid(p.NetworkId).ToShortString();
         var transport = p.TransportKind switch
@@ -31,6 +32,7 @@ public sealed class LanScanRow
         return new LanScanRow
         {
             Peer = p,
+            IsPeerOnline = isPeerOnline,
             Nickname = string.IsNullOrEmpty(p.Nickname) ? "—" : p.Nickname,
             NetworkIdShort = idShort,
             DetailLine = $"{transport} · last ping {seen}",
@@ -76,7 +78,11 @@ public partial class LanScanPage : ContentPage
     {
         _rows.Clear();
         foreach (var p in _p2p.LocalScan.Clients)
-            _rows.Add(LanScanRow.From(p));
+        {
+            var idShort = CompressedNetworkId.FromGuid(p.NetworkId).ToShortString();
+            var online = _p2p.LocalScan.IsPeerSeenRecentlyOnLan(idShort);
+            _rows.Add(LanScanRow.From(p, online));
+        }
     }
 
     private async void OnScanClicked(object? sender, EventArgs e)

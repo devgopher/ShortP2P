@@ -5,13 +5,11 @@ internal static class DeliveryAckCodec
 {
     private const byte Marker = 0xAC;
 
-    public static byte[] Build(Guid messageId)
+    public static byte[] ToBytes(Guid messageId)
     {
         var b = new byte[17];
         b[0] = Marker;
-        if (!messageId.TryWriteBytes(b.AsSpan(1)))
-            throw new InvalidOperationException("Guid write failed.");
-        return b;
+        return !messageId.TryWriteBytes(b.AsSpan(1)) ? throw new InvalidOperationException("Guid write failed.") : b;
     }
 
     public static bool TryParse(ReadOnlySpan<byte> plaintext, out Guid messageId)

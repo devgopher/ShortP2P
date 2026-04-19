@@ -27,14 +27,14 @@
                             </SwipeItems>
                         </SwipeView.RightItems>
                         <Grid Padding="12,8" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
-                            <Label Grid.Column="0" Text="●" FontSize="16" VerticalOptions="Center"
-                                   TextColor="#C62828" WidthRequest="22" HorizontalTextAlignment="Center">
-                                <Label.Triggers>
-                                    <DataTrigger TargetType="Label" Binding="{Binding IsPeerOnline}" Value="True">
-                                        <Setter Property="TextColor" Value="#2E7D32" />
+                            <Ellipse Grid.Column="0" WidthRequest="10" HeightRequest="10" VerticalOptions="Center"
+                                     HorizontalOptions="Center" Fill="#CD5C5C">
+                                <Ellipse.Triggers>
+                                    <DataTrigger TargetType="Ellipse" Binding="{Binding IsPeerOnline}" Value="True">
+                                        <Setter Property="Fill" Value="#228B22" />
                                     </DataTrigger>
-                                </Label.Triggers>
-                            </Label>
+                                </Ellipse.Triggers>
+                            </Ellipse>
                             <VerticalStackLayout Grid.Column="1" Spacing="2">
                                 <Label Text="{Binding PeerNickname}" FontSize="18" />
                                 <Label Text="{Binding PeerNetworkIdShort}" FontSize="12" TextColor="Gray" />
