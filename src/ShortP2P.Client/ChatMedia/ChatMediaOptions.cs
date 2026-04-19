@@ -13,8 +13,8 @@ public sealed class ChatMediaOptions
         AllowTrailingCommas = true,
     };
 
-    /// <summary>Максимальный размер одного изображения (байт), по умолчанию 256 КиБ.</summary>
-    public int MaxImageBytes { get; set; } = 262_144;
+    /// <summary>Максимальный размер одного изображения (байт), по умолчанию 100 КиБ.</summary>
+    public int MaxImageBytes { get; set; } = 100 * 1024;
 
     /// <summary>Разрешённые MIME-типы изображений.</summary>
     public List<string> AllowedImageMimeTypes { get; set; } =
