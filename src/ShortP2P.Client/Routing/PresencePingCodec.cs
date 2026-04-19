@@ -5,8 +5,10 @@ namespace ShortP2P.Client.Routing;
 
 /// <summary>
 ///     Кодек discovery/presence ping на порту <see cref="UdpPort" />: network id + nickname (UTF-8) + порт data-UDP.
-///     Формат: [0]=frame, [1..16]=Guid, [17..18]=длина ника, [19..]=UTF-8 ник, uint16 BE dataUdpPort, [+1]=<see cref="LinkTechnologyPreset"/> (опционально).
-///     Совместимость: 17 байт только Guid; 19+nick — ник без порта; без последнего байта — скорость не передаётся (<see cref="LinkTechnologyPreset.Unlimited"/>).
+///     Формат: [0]=frame, [1..16]=Guid, [17..18]=длина ника, [19..]=UTF-8 ник, uint16 BE dataUdpPort,
+///     [+1]=<see cref="LinkTechnologyPreset" /> (опционально), [+2]=uint16 BE <see cref="PresencePeerCapabilities" /> (опционально, на будущее).
+///     Совместимость: 17 байт только Guid; 19+nick — ник без порта; без байта скорости — <see cref="LinkTechnologyPreset.Unlimited" />;
+///     без двух байт маски — считается только <see cref="PresencePeerCapabilities.Chat" /> у отправителя legacy-клиента.
 /// </summary>
 public static class PresencePingCodec
 {
@@ -21,7 +23,8 @@ public static class PresencePingCodec
     public const int DefaultDataUdpPort = 17200;
 
     public static byte[] Build(Guid networkId, string nickname, int dataUdpPort,
-        LinkTechnologyPreset advertisedLink = LinkTechnologyPreset.Unlimited)
+        LinkTechnologyPreset advertisedLink = LinkTechnologyPreset.Unlimited,
+        PresencePeerCapabilities advertisedCapabilities = PresencePeerCapabilities.Chat)
     {
         nickname ??= string.Empty;
         if (dataUdpPort is < 1 or > 65535)
@@ -31,7 +34,8 @@ public static class PresencePingCodec
         if (nickBytes.Length > MaxNicknameUtf8Bytes)
             nickBytes = nickBytes.AsSpan(0, MaxNicknameUtf8Bytes).ToArray();
 
-        var buf = new byte[1 + 16 + 2 + nickBytes.Length + 2 + 1];
+        const int trailerAfterPort = 1 + 2; // LinkTechnology + capabilities BE
+        var buf = new byte[1 + 16 + 2 + nickBytes.Length + 2 + trailerAfterPort];
         buf[0] = FramePresencePing;
         networkId.TryWriteBytes(buf.AsSpan(1, 16));
         BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(17, 2), (ushort)nickBytes.Length);
@@ -39,16 +43,21 @@ public static class PresencePingCodec
         var portOff = 19 + nickBytes.Length;
         BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(portOff, 2), (ushort)dataUdpPort);
         buf[portOff + 2] = (byte)advertisedLink;
+        var cap = (ushort)((ushort)advertisedCapabilities & (ushort)PresencePeerCapabilities.AllDefined);
+        cap |= (ushort)PresencePeerCapabilities.Chat;
+        BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(portOff + 3, 2), cap);
         return buf;
     }
 
     public static bool TryParse(ReadOnlySpan<byte> datagram, out Guid networkId, out string nickname,
-        out int dataUdpPort, out LinkTechnologyPreset advertisedLink)
+        out int dataUdpPort, out LinkTechnologyPreset advertisedLink,
+        out PresencePeerCapabilities advertisedCapabilities)
     {
         networkId = Guid.Empty;
         nickname = "";
         dataUdpPort = DefaultDataUdpPort;
         advertisedLink = LinkTechnologyPreset.Unlimited;
+        advertisedCapabilities = PresencePeerCapabilities.Chat;
 
         if (datagram.Length < 17 || datagram[0] != FramePresencePing)
             return false;
@@ -86,18 +95,27 @@ public static class PresencePingCodec
             return dataUdpPort is >= 1 and <= 65535;
         }
 
-        if (datagram.Length == afterNick + 2 + 1)
-        {
-            dataUdpPort = BinaryPrimitives.ReadUInt16BigEndian(datagram.Slice(afterNick, 2));
-            if (dataUdpPort is < 1 or > 65535)
-                return false;
-            var lt = (LinkTechnologyPreset)datagram[afterNick + 2];
-            if (!Enum.IsDefined(lt))
-                return false;
-            advertisedLink = lt;
-            return true;
-        }
+        if (datagram.Length < afterNick + 3)
+            return false;
 
-        return false;
+        dataUdpPort = BinaryPrimitives.ReadUInt16BigEndian(datagram.Slice(afterNick, 2));
+        if (dataUdpPort is < 1 or > 65535)
+            return false;
+        var lt = (LinkTechnologyPreset)datagram[afterNick + 2];
+        if (!Enum.IsDefined(lt))
+            return false;
+        advertisedLink = lt;
+
+        if (datagram.Length == afterNick + 3)
+            return true;
+
+        if (datagram.Length < afterNick + 5)
+            return false;
+
+        var raw = BinaryPrimitives.ReadUInt16BigEndian(datagram.Slice(afterNick + 3, 2));
+        advertisedCapabilities =
+            (PresencePeerCapabilities)(raw & (ushort)PresencePeerCapabilities.AllDefined);
+        advertisedCapabilities |= PresencePeerCapabilities.Chat;
+        return true;
     }
 }

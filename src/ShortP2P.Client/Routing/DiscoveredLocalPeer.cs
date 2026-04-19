@@ -7,6 +7,7 @@ namespace ShortP2P.Client.Routing;
 /// </summary>
 /// <param name="PeerDataUdpPort">Порт пира для data/чата (из пинга или <see cref="PresencePingCodec.DefaultDataUdpPort" />).</param>
 /// <param name="AdvertisedLinkTechnology">Пресет канала из пинга отправителя.</param>
+/// <param name="AdvertisedCapabilities">Маска возможностей из пинга; у старых клиентов без поля — только <see cref="PresencePeerCapabilities.Chat" />.</param>
 public sealed record DiscoveredLocalPeer(
     Guid NetworkId,
     string Nickname,
@@ -14,7 +15,8 @@ public sealed record DiscoveredLocalPeer(
     TransportKind TransportKind,
     DateTimeOffset LastSeenUtc,
     int PeerDataUdpPort,
-    LinkTechnologyPreset AdvertisedLinkTechnology = LinkTechnologyPreset.Unlimited);
+    LinkTechnologyPreset AdvertisedLinkTechnology = LinkTechnologyPreset.Unlimited,
+    PresencePeerCapabilities AdvertisedCapabilities = PresencePeerCapabilities.Chat);
 
 public sealed class DiscoveryPingReceivedEventArgs(DiscoveredLocalPeer peer) : EventArgs
 {

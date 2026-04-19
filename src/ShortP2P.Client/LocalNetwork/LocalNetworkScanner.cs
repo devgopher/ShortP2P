@@ -193,11 +193,12 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings) : IA
             await foreach (var msg in presenceUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 var buf = msg.Payload.ToArray();
-                if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick, out var dataPort, out var advLink))
+                if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick, out var dataPort, out var advLink,
+                        out var advCaps))
                     continue;
 
                 var peer = new DiscoveredLocalPeer(pingSender, nick, msg.RemoteAddress,
-                    msg.RemoteAddress.Kind, DateTimeOffset.UtcNow, dataPort, advLink);
+                    msg.RemoteAddress.Kind, DateTimeOffset.UtcNow, dataPort, advLink, advCaps);
                 var u = _user;
                 if (u == null)
                     continue;
@@ -243,7 +244,8 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings) : IA
             CompressedNetworkId.FromShortString(u.NetworkIdShort).Value,
             u.Nickname,
             u.DataUdpPort,
-            _routingSettings.LinkTechnology);
+            _routingSettings.LinkTechnology,
+            PresencePeerCapabilities.Chat);
         
         foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(PresencePingCodec.UdpPort))
         {
