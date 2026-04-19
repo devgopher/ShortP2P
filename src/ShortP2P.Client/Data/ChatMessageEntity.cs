@@ -16,4 +16,7 @@ public class ChatMessageEntity
     public string Text { get; set; } = "";
 
     public long SentUtcTicks { get; set; }
+
+    /// <summary>Значение <see cref="MessageDeliveryStatus"/>; для входящих — NotApplicable.</summary>
+    public int DeliveryStatus { get; set; }
 }

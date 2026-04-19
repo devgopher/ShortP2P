@@ -38,7 +38,7 @@ public sealed class ChatP2pSession(
     private readonly LocalNetworkScanner? _localScan = localNetworkScanner;
 
     private readonly object _pendingSync = new();
-    private readonly List<string> _pendingOutgoing = [];
+    private readonly List<int> _pendingOutgoing = [];
     private readonly SemaphoreSlim _flushPendingSem = new(1, 1);
     private volatile bool _presenceHooked;
 
@@ -316,17 +316,29 @@ public sealed class ChatP2pSession(
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                string next;
+                int nextId;
                 lock (_pendingSync)
                 {
                     if (_pendingOutgoing.Count == 0)
                         return;
-                    next = _pendingOutgoing[0];
+                    nextId = _pendingOutgoing[0];
+                }
+
+                var row = await repo.GetMessageAsync(nextId).ConfigureAwait(false);
+                if (row == null || row.ChatId != chat.Id || !row.Outgoing)
+                {
+                    lock (_pendingSync)
+                    {
+                        if (_pendingOutgoing.Count > 0 && _pendingOutgoing[0] == nextId)
+                            _pendingOutgoing.RemoveAt(0);
+                    }
+
+                    continue;
                 }
 
                 try
                 {
-                    await DeliverOutgoingTextAsync(next, cancellationToken).ConfigureAwait(false);
+                    await DeliverOutgoingTextAsync(nextId, row.Text, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -339,7 +351,7 @@ public sealed class ChatP2pSession(
 
                 lock (_pendingSync)
                 {
-                    if (_pendingOutgoing.Count > 0)
+                    if (_pendingOutgoing.Count > 0 && _pendingOutgoing[0] == nextId)
                         _pendingOutgoing.RemoveAt(0);
                 }
             }
@@ -350,7 +362,7 @@ public sealed class ChatP2pSession(
         }
     }
 
-    private async Task DeliverOutgoingTextAsync(string text, CancellationToken cancellationToken)
+    private async Task DeliverOutgoingTextAsync(int messageId, string text, CancellationToken cancellationToken)
     {
         var bytes = Encoding.UTF8.GetBytes(text);
         var ackTimeout = (_routing?.LinkTechnology ?? LinkTechnologyPreset.Unlimited).GetMessageAckTimeout();
@@ -371,7 +383,7 @@ public sealed class ChatP2pSession(
             _routing,
             cancellationToken).ConfigureAwait(false);
 
-        await repo.AddMessageAsync(chat.Id, true, text).ConfigureAwait(false);
+        await repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Delivered).ConfigureAwait(false);
         RaiseMessagesChanged();
     }
 
@@ -383,9 +395,13 @@ public sealed class ChatP2pSession(
             throw new ArgumentException($"Message is too long. Max length is {MaxMessageChars} characters.",
                 nameof(text));
 
+        var messageId = await repo.AddMessageAsync(chat.Id, true, text, MessageDeliveryStatus.Pending)
+            .ConfigureAwait(false);
+        RaiseMessagesChanged();
+
         try
         {
-            await DeliverOutgoingTextAsync(text, cancellationToken).ConfigureAwait(false);
+            await DeliverOutgoingTextAsync(messageId, text, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -395,8 +411,14 @@ public sealed class ChatP2pSession(
                                    (ex is OperationCanceledException || IsDeferrableSendFailure(ex)))
         {
             lock (_pendingSync)
-                _pendingOutgoing.Add(text);
+                _pendingOutgoing.Add(messageId);
             throw new OutboundMessageQueuedException();
+        }
+        catch (Exception)
+        {
+            await repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Failed).ConfigureAwait(false);
+            RaiseMessagesChanged();
+            throw;
         }
     }
 
@@ -628,7 +650,7 @@ public sealed class ChatP2pSession(
             await foreach (var incoming in m.Incoming.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 var text = Encoding.UTF8.GetString(incoming.Payload.ToArray());
-                await repo.AddMessageAsync(chat.Id, false, text).ConfigureAwait(false);
+                _ = await repo.AddMessageAsync(chat.Id, false, text).ConfigureAwait(false);
                 RaiseMessagesChanged();
             }
         }

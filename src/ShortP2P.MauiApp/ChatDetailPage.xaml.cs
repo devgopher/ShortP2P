@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.Extensions.Logging;
+using ShortP2P.Client;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
 
@@ -101,7 +102,11 @@ public partial class ChatDetailPage : ContentPage
                 var sentLocal = new DateTimeOffset(m.SentUtcTicks, TimeSpan.Zero).ToLocalTime();
                 var text =
                     $"[{sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture)}] {m.Text}";
-                return new MessageRow(text, color);
+                var ds = (MessageDeliveryStatus)m.DeliveryStatus;
+                if (m.Outgoing && ds == MessageDeliveryStatus.NotApplicable)
+                    ds = MessageDeliveryStatus.Delivered;
+                var (glyph, gColor, show) = DeliveryUiFor(ds, m.Outgoing);
+                return new MessageRow(text, color, show, glyph, gColor);
             })
             .ToList();
     }
@@ -116,7 +121,6 @@ public partial class ChatDetailPage : ContentPage
         {
             await _p2pSession.SendTextAsync(text).ConfigureAwait(true);
             MessageEntry.Text = string.Empty;
-            await ReloadMessagesAsync().ConfigureAwait(true);
         }
         catch (OutboundMessageQueuedException ex)
         {
@@ -128,9 +132,28 @@ public partial class ChatDetailPage : ContentPage
             _logger.LogWarning(ex, "Send message failed");
             await DisplayAlert("Send failed", ex.Message, "OK").ConfigureAwait(true);
         }
+        finally
+        {
+            await ReloadMessagesAsync().ConfigureAwait(true);
+        }
     }
 
-    private sealed record MessageRow(string Text, Color MessageColor);
+    private static (string Glyph, Color GlyphColor, bool Show) DeliveryUiFor(MessageDeliveryStatus status,
+        bool outgoing)
+    {
+        if (!outgoing)
+            return ("", Colors.Transparent, false);
+        return status switch
+        {
+            MessageDeliveryStatus.Pending => (OutgoingDeliveryIndicators.Pending, Color.FromArgb("#B8860B"), true),
+            MessageDeliveryStatus.Delivered => (OutgoingDeliveryIndicators.Delivered, Color.FromArgb("#228B22"), true),
+            MessageDeliveryStatus.Failed => (OutgoingDeliveryIndicators.Failed, Colors.Red, true),
+            _ => (OutgoingDeliveryIndicators.Delivered, Color.FromArgb("#228B22"), true),
+        };
+    }
+
+    private sealed record MessageRow(string Text, Color MessageColor, bool ShowDelivery, string DeliveryGlyph,
+        Color DeliveryGlyphColor);
 
     private static Color GetPaletteColor(string key)
     {
