@@ -51,7 +51,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 return existing;
             }
 
-            var s = new ChatP2pSession(chat, user, auth, repo, uiSync, Settings);
+            var s = new ChatP2pSession(chat, user, auth, repo, uiSync, Settings, LocalScan);
             _chatSessions[chat.Id] = s;
             return s;
         }
@@ -156,7 +156,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 }
                 else
                 {
-                    session = new ChatP2pSession(c, user, auth, repo, uiSync, Settings);
+                    session = new ChatP2pSession(c, user, auth, repo, uiSync, Settings, LocalScan);
                     _chatSessions[c.Id] = session;
                 }
 

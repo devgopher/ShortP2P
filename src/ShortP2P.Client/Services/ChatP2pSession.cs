@@ -1,6 +1,9 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using ShortP2P.Client;
+using ShortP2P.Client.LocalNetwork;
+using ShortP2P.Client.Routing;
 using System.Threading;
 using System.Threading.Channels;
 using ShortP2P.Client.Data;
@@ -22,7 +25,8 @@ public sealed class ChatP2pSession(
     AuthService auth,
     ChatRepository repo,
     SynchronizationContext? uiSynchronizationContext = null,
-    P2pRoutingSettings? routingSettings = null)
+    P2pRoutingSettings? routingSettings = null,
+    LocalNetworkScanner? localNetworkScanner = null)
     : IAsyncDisposable
 {
     private const byte FrameHandshake = 0x01;
@@ -31,6 +35,12 @@ public sealed class ChatP2pSession(
 
     private readonly P2pRoutingSettings? _routing = routingSettings;
     private readonly GuaranteedDeliveryPolicy _guaranteedDelivery = new();
+    private readonly LocalNetworkScanner? _localScan = localNetworkScanner;
+
+    private readonly object _pendingSync = new();
+    private readonly List<string> _pendingOutgoing = [];
+    private readonly SemaphoreSlim _flushPendingSem = new(1, 1);
+    private volatile bool _presenceHooked;
 
     private readonly object _sync = new();
     private readonly SemaphoreSlim _sessionSetup = new(1, 1);
@@ -143,6 +153,7 @@ public sealed class ChatP2pSession(
             // пир офлайн или сеть недоступна
         }
 
+        HookPresenceForPendingFlush();
     }
 
     /// <summary>
@@ -203,18 +214,145 @@ public sealed class ChatP2pSession(
         }
     }
 
-    public async ValueTask SendTextAsync(string text, CancellationToken cancellationToken = default)
+    private static bool IsDeferrableSendFailure(Exception ex) => ex switch
     {
-        if (string.IsNullOrEmpty(text))
+        IOException => true,
+        TimeoutException => true,
+        SocketException => true,
+        _ => ex.InnerException != null && IsDeferrableSendFailure(ex.InnerException)
+    };
+
+    private bool CanQueueUntilPeerSeenOnLan() =>
+        _localScan != null && !string.IsNullOrWhiteSpace(chat.PeerNetworkIdShort);
+
+    private void HookPresenceForPendingFlush()
+    {
+        if (_localScan == null || _presenceHooked)
             return;
-        if (text.Length > MaxMessageChars)
-            throw new ArgumentException($"Message is too long. Max length is {MaxMessageChars} characters.",
-                nameof(text));
+        _localScan.ClientsChanged += OnLanClientsChangedForPendingFlush;
+        _localScan.DiscoveryPingReceived += OnDiscoveryPingForPendingFlush;
+        _presenceHooked = true;
+    }
+
+    private void UnhookPresenceAndClearPending()
+    {
+        lock (_pendingSync)
+            _pendingOutgoing.Clear();
+
+        if (!_presenceHooked || _localScan == null)
+            return;
+        _localScan.ClientsChanged -= OnLanClientsChangedForPendingFlush;
+        _localScan.DiscoveryPingReceived -= OnDiscoveryPingForPendingFlush;
+        _presenceHooked = false;
+    }
+
+    private bool HasPendingOutgoing()
+    {
+        lock (_pendingSync)
+            return _pendingOutgoing.Count > 0;
+    }
+
+    private void OnLanClientsChangedForPendingFlush(object? sender, EventArgs e)
+    {
+        if (!HasPendingOutgoing())
+            return;
+        if (!_localScan!.IsPeerSeenRecentlyOnLan(chat.PeerNetworkIdShort))
+            return;
+        StartFlushPendingInBackground();
+    }
+
+    private void OnDiscoveryPingForPendingFlush(object? sender, DiscoveryPingReceivedEventArgs e)
+    {
+        if (!HasPendingOutgoing())
+            return;
+        if (string.IsNullOrWhiteSpace(chat.PeerNetworkIdShort))
+            return;
+        string peerShort;
+        try
+        {
+            peerShort = CompressedNetworkId.FromGuid(e.Peer.NetworkId).ToShortString();
+        }
+        catch (FormatException)
+        {
+            return;
+        }
+
+        if (!string.Equals(peerShort, chat.PeerNetworkIdShort.Trim(), StringComparison.OrdinalIgnoreCase))
+            return;
+        StartFlushPendingInBackground();
+    }
+
+    private void StartFlushPendingInBackground()
+    {
+        var cts = _cts;
+        if (cts == null || cts.IsCancellationRequested)
+            return;
+        var token = cts.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await TryFlushPendingOutgoingAsync(token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // shutdown
+            }
+            catch
+            {
+                // сеть / таймауты
+            }
+        }, token);
+    }
+
+    private async Task TryFlushPendingOutgoingAsync(CancellationToken cancellationToken)
+    {
+        if (_udp == null || _transportLayer == null)
+            return;
+
+        await _flushPendingSem.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                string next;
+                lock (_pendingSync)
+                {
+                    if (_pendingOutgoing.Count == 0)
+                        return;
+                    next = _pendingOutgoing[0];
+                }
+
+                try
+                {
+                    await DeliverOutgoingTextAsync(next, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    return;
+                }
+
+                lock (_pendingSync)
+                {
+                    if (_pendingOutgoing.Count > 0)
+                        _pendingOutgoing.RemoveAt(0);
+                }
+            }
+        }
+        finally
+        {
+            _flushPendingSem.Release();
+        }
+    }
+
+    private async Task DeliverOutgoingTextAsync(string text, CancellationToken cancellationToken)
+    {
         var bytes = Encoding.UTF8.GetBytes(text);
-        var shouldRetry = false;
-
         var ackTimeout = (_routing?.LinkTechnology ?? LinkTechnologyPreset.Unlimited).GetMessageAckTimeout();
-
         await _guaranteedDelivery.ExecuteAsync(
             async ct =>
             {
@@ -228,12 +366,36 @@ public sealed class ChatP2pSession(
                     await _messenger!.SendBinaryAsync(bytes, _peerAddress!, ct).ConfigureAwait(false);
             },
             null,
-            shouldRetry,
+            false,
             _routing,
             cancellationToken).ConfigureAwait(false);
 
         await repo.AddMessageAsync(chat.Id, true, text).ConfigureAwait(false);
         RaiseMessagesChanged();
+    }
+
+    public async ValueTask SendTextAsync(string text, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(text))
+            return;
+        if (text.Length > MaxMessageChars)
+            throw new ArgumentException($"Message is too long. Max length is {MaxMessageChars} characters.",
+                nameof(text));
+
+        try
+        {
+            await DeliverOutgoingTextAsync(text, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (CanQueueUntilPeerSeenOnLan() && IsDeferrableSendFailure(ex))
+        {
+            lock (_pendingSync)
+                _pendingOutgoing.Add(text);
+            throw new OutboundMessageQueuedException();
+        }
     }
 
     /// <summary>Сброс AES-сессии и повторный обмен ключами после ошибки дешифровки входящего пакета.</summary>
@@ -476,6 +638,8 @@ public sealed class ChatP2pSession(
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
+        UnhookPresenceAndClearPending();
+
         if (_cts != null)
             await _cts.CancelAsync();
 

@@ -107,6 +107,11 @@ public partial class ChatDetailPage : ContentPage
             MessageEntry.Text = string.Empty;
             await ReloadMessagesAsync().ConfigureAwait(true);
         }
+        catch (OutboundMessageQueuedException ex)
+        {
+            _logger.LogInformation(ex, "Message queued until peer is on LAN");
+            await DisplayAlert("Ожидание сети", ex.Message, "OK").ConfigureAwait(true);
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Send message failed");

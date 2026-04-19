@@ -161,6 +161,12 @@ public sealed class ChatForm : Form
             _input.Clear();
             await ReloadMessagesAsync().ConfigureAwait(true);
         }
+        catch (OutboundMessageQueuedException ex)
+        {
+            _logger.LogInformation(ex, "Message queued until peer is on LAN (chat {ChatId})", _chat.Id);
+            _userActions.LogInformation("Chat {Peer}: message queued for LAN delivery", _chat.PeerNickname);
+            MessageBox.Show(this, ex.Message, "Ожидание сети", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Send message failed in chat {ChatId}", _chat.Id);
