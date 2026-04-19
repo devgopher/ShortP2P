@@ -1,8 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
+		<!-- SDK 10 treats net8.0-* MAUI TFMs as out-of-support workloads; allow local builds until the app is retargeted. -->
+		<CheckEolWorkloads>false</CheckEolWorkloads>
 		<!-- .NET 8 MAUI: add net8.0-android;net8.0-ios;net8.0-maccatalyst to TargetFrameworks after `dotnet workload restore` -->
-		<TargetFrameworks>net8.0-windows10.0.19041.0</TargetFrameworks>
+		<TargetFrameworks>net8.0-windows10.0.19041.0;net8.0-android</TargetFrameworks>
 
 		<OutputType>Exe</OutputType>
 		<RootNamespace>ShortP2P.MauiApp</RootNamespace>
@@ -20,6 +22,10 @@
 
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+
+		<!-- Installable only on Android 11+ (API 30); compile against default platform API from SDK. -->
+		<AndroidMinSdkVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">30</AndroidMinSdkVersion>
+		<AndroidPackageFormat Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">apk</AndroidPackageFormat>
 	</PropertyGroup>
 
 	<ItemGroup>

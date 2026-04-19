@@ -6,7 +6,11 @@
     <Grid RowDefinitions="Auto,*,Auto" Padding="8" RowSpacing="8">
         <VerticalStackLayout Grid.Row="0" Spacing="6" Padding="0,0,0,4">
             <Label x:Name="PeerIdLabel" FontSize="12" TextColor="Gray" />
-            <Label x:Name="PeerStatusLabel" FontSize="12" TextColor="Gray" />
+            <HorizontalStackLayout Spacing="8" VerticalOptions="Center">
+                <Ellipse x:Name="PeerPresenceDot" WidthRequest="10" HeightRequest="10" VerticalOptions="Center"
+                         Fill="#CD5C5C" />
+                <Label x:Name="PeerStatusLabel" FontSize="12" TextColor="Gray" VerticalOptions="Center" />
+            </HorizontalStackLayout>
         </VerticalStackLayout>
         <CollectionView x:Name="MessagesCollection" Grid.Row="1">
             <CollectionView.ItemTemplate>

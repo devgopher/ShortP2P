@@ -236,7 +236,7 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
     {
         try
         {
-            var plain = DeliveryAckCodec.Build(messageId);
+            var plain = DeliveryAckCodec.ToBytes(messageId);
             var encrypted = _session.Encrypt(plain);
             await _transport.SendAsync(encrypted, replyTo, CancellationToken.None).ConfigureAwait(false);
         }
