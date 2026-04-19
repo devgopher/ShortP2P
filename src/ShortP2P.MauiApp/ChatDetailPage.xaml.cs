@@ -93,7 +93,9 @@ public partial class ChatDetailPage : ContentPage
 
     private async Task ReloadMessagesAsync()
     {
-        var rows = await _repo.ListMessagesAsync(ChatId).ConfigureAwait(true);
+        var rows = (await _repo.ListMessagesAsync(ChatId).ConfigureAwait(true))
+            .OrderByDescending(m => m.SentUtcTicks)
+            .ThenByDescending(m => m.Id);
         MessagesCollection.ItemsSource = rows
             .Select(m =>
             {
