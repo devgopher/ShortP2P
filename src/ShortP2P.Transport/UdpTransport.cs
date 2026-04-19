@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using System.Net;
 using System.Threading.Channels;
 using ShortP2P.Transport.Abstractions;
 
@@ -14,7 +15,9 @@ public sealed class UdpTransport(int listenPort, bool enableBroadcast = false) :
 
     private static UdpClient CreateClient(int listenPort, bool enableBroadcast)
     {
-        var c = new UdpClient(listenPort);
+        var c = new UdpClient();
+        c.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        c.Client.Bind(new IPEndPoint(IPAddress.Any, listenPort));
         if (enableBroadcast)
             c.EnableBroadcast = true;
         return c;
