@@ -155,6 +155,9 @@ public sealed class MainChatsForm : Form
 
     private void OnChatMessageAppended(object? sender, ChatMessageAppendedEventArgs e)
     {
+        if (!e.Outgoing)
+            IncomingMessageSound.TryPlay();
+
         if (e.Outgoing || _focusedChatId == e.ChatId)
             return;
         if (!IsHandleCreated || IsDisposed)

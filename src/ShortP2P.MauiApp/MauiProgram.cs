@@ -58,6 +58,8 @@ public static class MauiProgram
 
         var app = builder.Build();
         Services = app.Services;
+        IncomingMessageSound.EnsureHooked(Services.GetRequiredService<ChatRepository>(),
+            Services.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(IncomingMessageSound)));
         Services.GetRequiredService<ILogger<MauiHost>>().LogInformation("GUI application started");
 
         AppDomain.CurrentDomain.ProcessExit += (_, _) => LogManager.Shutdown();
