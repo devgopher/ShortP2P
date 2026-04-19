@@ -1,3 +1,4 @@
+using System.Drawing.Drawing2D;
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client;
@@ -126,6 +127,14 @@ public sealed class ChatForm : Form
             _p2PSession.MessagesChanged -= OnP2pMessagesChanged;
             _p2PSession = null;
         }
+
+        foreach (var item in _messages.Items)
+        {
+            if (item is ChatLine line)
+                line.Dispose();
+        }
+
+        _messages.Items.Clear();
         base.OnFormClosed(e);
     }
 
@@ -140,6 +149,12 @@ public sealed class ChatForm : Form
             if (!IsHandleCreated || IsDisposed)
                 return;
             _messages.BeginUpdate();
+            foreach (var existing in _messages.Items)
+            {
+                if (existing is ChatLine oldLine)
+                    oldLine.Dispose();
+            }
+
             _messages.Items.Clear();
             foreach (var m in rows)
             {
@@ -155,7 +170,7 @@ public sealed class ChatForm : Form
                 {
                     var kb = (blob.Length + 1023) / 1024;
                     var mimeShort = string.IsNullOrEmpty(m.MimeType) ? "image" : m.MimeType.Replace("image/", "");
-                    var caption = $"[{ts}] {sender} · {mimeShort} · {kb} КБ (двойной щелчок — просмотр)";
+                    var caption = $"[{ts}] {sender} · {mimeShort} · {kb} КБ";
                     _messages.Items.Add(new ChatLine(caption, color, m.Outgoing, ds, true, blob));
                 }
                 else
@@ -323,11 +338,21 @@ public sealed class ChatForm : Form
         var color = line?.Color ?? ForeColor;
         const int statusCol = 22;
         var reserveRight = line is { Outgoing: true } ? statusCol : 0;
-        var textBounds = new Rectangle(e.Bounds.X + 4, e.Bounds.Y + 2,
-            Math.Max(10, e.Bounds.Width - 8 - reserveRight), Math.Max(10, e.Bounds.Height - 4));
         var font = e.Font ?? _messages.Font;
+        var textWidth = Math.Max(10, e.Bounds.Width - 8 - reserveRight);
+        var captionMeasured = TextRenderer.MeasureText(text, font, new Size(textWidth, int.MaxValue),
+            TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+        var captionH = captionMeasured.Height;
+        var textBounds = new Rectangle(e.Bounds.X + 4, e.Bounds.Y + 2, textWidth, Math.Max(font.Height, captionH));
         TextRenderer.DrawText(e.Graphics, text, font, textBounds, color,
             TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+
+        if (line is { IsImage: true, Thumbnail: { } thumb })
+        {
+            var imgY = textBounds.Bottom + 4;
+            var imgRect = new Rectangle(e.Bounds.X + 4, imgY, thumb.Width, thumb.Height);
+            e.Graphics.DrawImage(thumb, imgRect);
+        }
 
         if (line is { Outgoing: true })
         {
@@ -357,7 +382,10 @@ public sealed class ChatForm : Form
             _messages.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 12 - reserveRight);
         var measured = TextRenderer.MeasureText(text, _messages.Font, new Size(width, int.MaxValue),
             TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
-        e.ItemHeight = Math.Max(_messages.Font.Height + 8, measured.Height + 8);
+        var h = measured.Height + 8;
+        if (line is { IsImage: true, Thumbnail: { } thumb })
+            h += 4 + thumb.Height + 4;
+        e.ItemHeight = Math.Max(_messages.Font.Height + 8, h);
     }
 
     private static (string Glyph, Color Color) OutgoingDeliveryDraw(MessageDeliveryStatus status) =>
@@ -397,9 +425,72 @@ public sealed class ChatForm : Form
         return Color.FromArgb(r, g, b);
     }
 
-    private sealed record ChatLine(string DisplayText, Color Color, bool Outgoing, MessageDeliveryStatus DeliveryStatus,
-        bool IsImage, byte[]? ImageBytes)
+    private static Bitmap? TryCreateThumbnail(byte[] bytes, int maxEdge)
     {
+        try
+        {
+            using var ms = new MemoryStream(bytes, writable: false);
+            using var src = Image.FromStream(ms, useEmbeddedColorManagement: false, validateImageData: false);
+            var w = src.Width;
+            var h = src.Height;
+            if (w <= 0 || h <= 0)
+                return null;
+            var scale = Math.Min(1.0, Math.Min((double)maxEdge / w, (double)maxEdge / h));
+            var tw = Math.Max(1, (int)Math.Round(w * scale));
+            var th = Math.Max(1, (int)Math.Round(h * scale));
+            var bmp = new Bitmap(tw, th);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.SmoothingMode = SmoothingMode.HighQuality;
+                g.DrawImage(src, 0, 0, tw, th);
+            }
+
+            return bmp;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private sealed class ChatLine : IDisposable
+    {
+        private const int ThumbMaxEdge = 240;
+        private bool _disposed;
+        private Bitmap? _thumbnail;
+
+        public ChatLine(string displayText, Color color, bool outgoing, MessageDeliveryStatus deliveryStatus,
+            bool isImage, byte[]? imageBytes)
+        {
+            DisplayText = displayText;
+            Color = color;
+            Outgoing = outgoing;
+            DeliveryStatus = deliveryStatus;
+            IsImage = isImage;
+            ImageBytes = imageBytes;
+            if (isImage && imageBytes is { Length: > 0 })
+                _thumbnail = TryCreateThumbnail(imageBytes, ThumbMaxEdge);
+        }
+
+        public string DisplayText { get; }
+        public Color Color { get; }
+        public bool Outgoing { get; }
+        public MessageDeliveryStatus DeliveryStatus { get; }
+        public bool IsImage { get; }
+        public byte[]? ImageBytes { get; }
+        public Bitmap? Thumbnail => _thumbnail;
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            _thumbnail?.Dispose();
+            _thumbnail = null;
+        }
+
         public override string ToString() => DisplayText;
     }
 }
