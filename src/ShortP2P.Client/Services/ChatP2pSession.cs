@@ -367,6 +367,13 @@ public sealed class ChatP2pSession(
 
     private static byte[] BuildOutgoingWire(ChatMessageEntity row)
     {
+        if (row.PayloadKind == (int)ChatPayloadKind.File)
+        {
+            if (row.ImageBlob == null || row.ImageBlob.Length == 0)
+                throw new InvalidOperationException("File message has no payload.");
+            return ChatWireCodec.EncodeFile(row.Text, row.MimeType, row.ImageBlob);
+        }
+
         if (row.PayloadKind == (int)ChatPayloadKind.Image)
         {
             if (row.ImageBlob == null || row.ImageBlob.Length == 0)
@@ -451,6 +458,48 @@ public sealed class ChatP2pSession(
         RaiseMessagesChanged();
 
         var wire = ChatWireCodec.EncodeImage(mimeType, bytes);
+        try
+        {
+            await DeliverOutgoingWireAsync(messageId, wire, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (CanQueueUntilPeerSeenOnLan() && !cancellationToken.IsCancellationRequested &&
+                                   (ex is OperationCanceledException || IsDeferrableSendFailure(ex)))
+        {
+            lock (_pendingSync)
+                _pendingOutgoing.Add(messageId);
+            throw new OutboundMessageQueuedException();
+        }
+        catch (Exception)
+        {
+            await repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Failed).ConfigureAwait(false);
+            RaiseMessagesChanged();
+            throw;
+        }
+    }
+
+    public async ValueTask SendFileAsync(string fileName, ReadOnlyMemory<byte> fileBytes, string mimeType,
+        CancellationToken cancellationToken = default)
+    {
+        if (fileBytes.Length == 0)
+            throw new ArgumentException("File is empty.", nameof(fileBytes));
+        _media.ValidateDocumentMime(mimeType);
+        _media.ValidateDocumentSize(fileBytes.Length);
+
+        var bytes = fileBytes.ToArray();
+        var safeName = Path.GetFileName(fileName.Trim());
+        if (string.IsNullOrEmpty(safeName))
+            safeName = "file";
+
+        var messageId = await repo.AddFileMessageAsync(chat.Id, true, safeName, mimeType, bytes,
+                MessageDeliveryStatus.Pending)
+            .ConfigureAwait(false);
+        RaiseMessagesChanged();
+
+        var wire = ChatWireCodec.EncodeFile(safeName, mimeType, bytes);
         try
         {
             await DeliverOutgoingWireAsync(messageId, wire, cancellationToken).ConfigureAwait(false);
@@ -584,7 +633,7 @@ public sealed class ChatP2pSession(
                 if (_session != null && _messenger != null)
                     return;
                 _session = hs.Session;
-                _messenger = new MessengerService(_prefixed!, _session, null, OnDecryptFailureAsync);
+                _messenger = new MessengerService(_prefixed!, _session, CreateMessengerOptions(), OnDecryptFailureAsync);
                 ms = _messenger;
             }
 
@@ -596,6 +645,9 @@ public sealed class ChatP2pSession(
             _sessionSetup.Release();
         }
     }
+
+    private MessengerOptions CreateMessengerOptions() =>
+        new MessengerOptions { MaxBinaryMessageBytes = _media.MaxMessengerBinaryBytes };
 
     private async Task TransportReceiveLoopAsync(CancellationToken cancellationToken)
     {
@@ -658,7 +710,7 @@ public sealed class ChatP2pSession(
 
                 var localPrivate = auth.GetCurrentPrivateKey();
                 _session = P2PCrypto.CreateSession(localPrivate, handshakePacket);
-                _messenger = new MessengerService(_prefixed!, _session, null, OnDecryptFailureAsync);
+                _messenger = new MessengerService(_prefixed!, _session, CreateMessengerOptions(), OnDecryptFailureAsync);
                 created = _messenger;
             }
 
@@ -713,7 +765,29 @@ public sealed class ChatP2pSession(
                             _ = await repo.AddImageMessageAsync(chat.Id, false, img.MimeType, img.ImageBytes)
                                 .ConfigureAwait(false);
                             break;
+                        case ChatWireFile f:
+                            try
+                            {
+                                _media.ValidateDocumentMime(f.MimeType);
+                                _media.ValidateDocumentSize(f.FileBytes.Length);
+                                _ = await repo.AddFileMessageAsync(chat.Id, false, f.FileName, f.MimeType, f.FileBytes)
+                                    .ConfigureAwait(false);
+                            }
+                            catch
+                            {
+                                _ = await repo.AddMessageAsync(chat.Id, false,
+                                        "[Входящий файл отклонён: неподдерживаемый тип или размер.]")
+                                    .ConfigureAwait(false);
+                            }
+
+                            break;
                     }
+                }
+                else if (ChatWireCodec.LooksLikeFramedWire(payload))
+                {
+                    _ = await repo.AddMessageAsync(chat.Id, false,
+                            "[Входящее сообщение не распознано. Обновите клиент.]")
+                        .ConfigureAwait(false);
                 }
                 else
                 {

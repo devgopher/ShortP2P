@@ -187,6 +187,38 @@ public sealed class ChatRepository
         return msg.Id;
     }
 
+    public async Task<int> AddFileMessageAsync(int chatId, bool outgoing, string fileName, string mimeType,
+        byte[] fileBytes, MessageDeliveryStatus deliveryStatus = MessageDeliveryStatus.Delivered)
+    {
+        ArgumentNullException.ThrowIfNull(fileBytes);
+        var conn = await _db.GetConnectionAsync();
+        var status = outgoing
+            ? deliveryStatus
+            : MessageDeliveryStatus.NotApplicable;
+        var msg = new ChatMessageEntity
+        {
+            ChatId = chatId,
+            Outgoing = outgoing,
+            Text = fileName.Trim(),
+            SentUtcTicks = DateTime.UtcNow.Ticks,
+            DeliveryStatus = (int)status,
+            PayloadKind = (int)ChatPayloadKind.File,
+            MimeType = mimeType.Trim(),
+            ImageBlob = fileBytes,
+        };
+        await conn.InsertAsync(msg);
+
+        var chat = await conn.FindAsync<ChatEntity>(chatId);
+        if (chat != null)
+        {
+            chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
+            await conn.UpdateAsync(chat);
+        }
+
+        ChatMessageAppended?.Invoke(this, new ChatMessageAppendedEventArgs(chatId, outgoing));
+        return msg.Id;
+    }
+
     public async Task<ChatMessageEntity?> GetMessageAsync(int messageId)
     {
         var conn = await _db.GetConnectionAsync();

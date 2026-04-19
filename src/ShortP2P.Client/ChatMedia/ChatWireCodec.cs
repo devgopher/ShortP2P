@@ -10,6 +10,11 @@ public static class ChatWireCodec
 
     private const byte KindText = 0x01;
     private const byte KindImage = 0x02;
+    private const byte KindFile = 0x03;
+
+    /// <summary>Магия S2P1 без успешного разбора вида — чтобы не показывать мусор как текст UTF-8.</summary>
+    public static bool LooksLikeFramedWire(ReadOnlySpan<byte> payload) =>
+        payload.Length >= Magic.Length && payload.StartsWith(Magic);
 
     public static byte[] EncodeText(string text)
     {
@@ -37,6 +42,40 @@ public static class ChatWireCodec
         BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(o, 4), (uint)imageBytes.Length);
         imageBytes.CopyTo(buf.AsSpan(o + 4));
         return buf;
+    }
+
+    public static byte[] EncodeFile(string fileName, string mimeType, ReadOnlySpan<byte> fileBytes)
+    {
+        var mime = Encoding.UTF8.GetBytes(mimeType.Trim());
+        if (mime.Length > ushort.MaxValue)
+            throw new ArgumentException("MIME type is too long.", nameof(mimeType));
+
+        var name = Encoding.UTF8.GetBytes(NormalizeWireFileName(fileName));
+        if (name.Length > ushort.MaxValue)
+            throw new ArgumentException("File name is too long.", nameof(fileName));
+
+        var buf = new byte[Magic.Length + 1 + 2 + mime.Length + 2 + name.Length + 4 + fileBytes.Length];
+        Magic.CopyTo(buf);
+        buf[Magic.Length] = KindFile;
+        var o = Magic.Length + 1;
+        BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(o, 2), (ushort)mime.Length);
+        o += 2;
+        mime.CopyTo(buf.AsSpan(o));
+        o += mime.Length;
+        BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(o, 2), (ushort)name.Length);
+        o += 2;
+        name.CopyTo(buf.AsSpan(o));
+        o += name.Length;
+        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(o, 4), (uint)fileBytes.Length);
+        o += 4;
+        fileBytes.CopyTo(buf.AsSpan(o));
+        return buf;
+    }
+
+    static string NormalizeWireFileName(string fileName)
+    {
+        var n = Path.GetFileName(fileName.Trim());
+        return string.IsNullOrEmpty(n) ? "file" : n;
     }
 
     /// <summary>Возвращает false для «наследуемых» сообщений (сырой UTF-8 без магии).</summary>
@@ -81,6 +120,30 @@ public static class ChatWireCodec
             return true;
         }
 
+        if (kind == KindFile)
+        {
+            if (rest.Length < 2)
+                return false;
+            var mimeLen = BinaryPrimitives.ReadUInt16LittleEndian(rest);
+            rest = rest.Slice(2);
+            if (rest.Length < mimeLen + 2)
+                return false;
+            var mime = Encoding.UTF8.GetString(rest.Slice(0, mimeLen));
+            rest = rest.Slice(mimeLen);
+            var nameLen = BinaryPrimitives.ReadUInt16LittleEndian(rest);
+            rest = rest.Slice(2);
+            if (rest.Length < nameLen + 4)
+                return false;
+            var wireName = Encoding.UTF8.GetString(rest.Slice(0, nameLen));
+            rest = rest.Slice(nameLen);
+            var fileLen = BinaryPrimitives.ReadUInt32LittleEndian(rest);
+            rest = rest.Slice(4);
+            if (rest.Length < fileLen)
+                return false;
+            message = new ChatWireFile(wireName, mime, rest.Slice(0, (int)fileLen).ToArray());
+            return true;
+        }
+
         return false;
     }
 }
@@ -90,3 +153,5 @@ public abstract record ChatWireMessage;
 public sealed record ChatWireText(string Text) : ChatWireMessage;
 
 public sealed record ChatWireImage(string MimeType, byte[] ImageBytes) : ChatWireMessage;
+
+public sealed record ChatWireFile(string FileName, string MimeType, byte[] FileBytes) : ChatWireMessage;

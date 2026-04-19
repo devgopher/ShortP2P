@@ -41,6 +41,7 @@ public sealed class ChatForm : Form
         MaxLength = ChatP2pSession.MaxMessageChars,
     };
     private readonly Button _attachImage = new() { Text = "Image…", Dock = DockStyle.Right, AutoSize = true };
+    private readonly Button _attachDocument = new() { Text = "Document…", Dock = DockStyle.Right, AutoSize = true };
     private readonly Button _send = new() { Text = "Send", Dock = DockStyle.Right, AutoSize = true };
     private ChatP2pSession? _p2PSession;
 
@@ -73,13 +74,15 @@ public sealed class ChatForm : Form
         };
         top.Controls.Add(_peerInfoLabel, 0, 0);
 
-        var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 88, ColumnCount = 3 };
+        var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 88, ColumnCount = 4 };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.Controls.Add(_input, 0, 0);
         bottom.Controls.Add(_attachImage, 1, 0);
-        bottom.Controls.Add(_send, 2, 0);
+        bottom.Controls.Add(_attachDocument, 2, 0);
+        bottom.Controls.Add(_send, 3, 0);
 
         // Порядок: Fill сначала, затем Top/Bottom — иначе между шапкой и вводом остаётся пустая полоса.
         Controls.Add(_messages);
@@ -87,6 +90,7 @@ public sealed class ChatForm : Form
         Controls.Add(bottom);
 
         _attachImage.Click += async (_, _) => await OnAttachImageAsync().ConfigureAwait(true);
+        _attachDocument.Click += async (_, _) => await OnAttachDocumentAsync().ConfigureAwait(true);
         _send.Click += async (_, _) => await OnSendAsync().ConfigureAwait(true);
         _messages.DrawItem += OnMessagesDrawItem;
         _messages.MeasureItem += OnMessagesMeasureItem;
@@ -166,17 +170,24 @@ public sealed class ChatForm : Form
                 if (m.Outgoing && ds == MessageDeliveryStatus.NotApplicable)
                     ds = MessageDeliveryStatus.Delivered;
 
-                if (m.PayloadKind == (int)ChatPayloadKind.Image && m.ImageBlob is { Length: > 0 } blob)
+                if (m.PayloadKind == (int)ChatPayloadKind.File && m.ImageBlob is { Length: > 0 } fileBlob)
+                {
+                    var kb = (fileBlob.Length + 1023) / 1024;
+                    var name = string.IsNullOrEmpty(m.Text) ? "file" : m.Text;
+                    var caption = $"[{ts}] {sender} · документ · {name} · {kb} КБ (двойной щелчок — сохранить)";
+                    _messages.Items.Add(new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.File, fileBlob, name));
+                }
+                else if (m.PayloadKind == (int)ChatPayloadKind.Image && m.ImageBlob is { Length: > 0 } blob)
                 {
                     var kb = (blob.Length + 1023) / 1024;
                     var mimeShort = string.IsNullOrEmpty(m.MimeType) ? "image" : m.MimeType.Replace("image/", "");
                     var caption = $"[{ts}] {sender} · {mimeShort} · {kb} КБ";
-                    _messages.Items.Add(new ChatLine(caption, color, m.Outgoing, ds, true, blob));
+                    _messages.Items.Add(new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.Image, blob, null));
                 }
                 else
                 {
                     var full = $"[{ts}] {m.Text}";
-                    _messages.Items.Add(new ChatLine(full, color, m.Outgoing, ds, false, null));
+                    _messages.Items.Add(new ChatLine(full, color, m.Outgoing, ds, ChatLineKind.Text, null, null));
                 }
             }
             _messages.EndUpdate();
@@ -271,6 +282,77 @@ public sealed class ChatForm : Form
         }
     }
 
+    private async Task OnAttachDocumentAsync()
+    {
+        if (_p2PSession == null)
+            return;
+
+        using var dlg = new OpenFileDialog
+        {
+            Title = "Документ Word / LibreOffice (до 10 МБ)",
+            Filter =
+                "Документы|*.doc;*.docx;*.rtf;*.pdf;*.odt;*.ods;*.odp;*.odg;*.xlsx;*.xls;*.pptx;*.ppt|Все файлы|*.*",
+            CheckFileExists = true,
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        try
+        {
+            if (!DocumentAttachHelper.TryGetMimeFromExtension(dlg.FileName, out var mime))
+            {
+                MessageBox.Show(this,
+                    "Допустимы только .doc, .docx, .rtf, .pdf, .odt, .ods, .odp, .odg, .xlsx, .xls, .pptx, .ppt.",
+                    "Файл", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var bytes = await File.ReadAllBytesAsync(dlg.FileName).ConfigureAwait(true);
+            if (bytes.Length == 0)
+            {
+                MessageBox.Show(this, "Файл пустой.", "Файл", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var headLen = Math.Min(4096, bytes.Length);
+            if (!DocumentAttachHelper.SniffMatchesMime(bytes.AsSpan(0, headLen), mime))
+            {
+                MessageBox.Show(this, "Содержимое не совпадает с типом файла (ожидается корректный Office/LibreOffice).",
+                    "Файл", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (bytes.Length > _media.MaxDocumentBytes)
+            {
+                var limMb = (_media.MaxDocumentBytes + (1024 * 1024 - 1)) / (1024 * 1024);
+                MessageBox.Show(this, $"Файл больше {limMb} МБ (лимит в chat-media.json: maxDocumentBytes).", "Размер",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            _media.ValidateDocumentMime(mime);
+            await _p2PSession.SendFileAsync(dlg.FileName, bytes, mime).ConfigureAwait(true);
+            _userActions.LogInformation("Chat {Peer}: sent document ({Bytes} bytes, {Mime})", _chat.PeerNickname,
+                bytes.Length, mime);
+        }
+        catch (OutboundMessageQueuedException ex)
+        {
+            _logger.LogInformation(ex, "Document queued until peer is on LAN (chat {ChatId})", _chat.Id);
+            _userActions.LogInformation("Chat {Peer}: document queued for LAN delivery", _chat.PeerNickname);
+            MessageBox.Show(this, ex.Message, "Ожидание сети", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Send document failed in chat {ChatId}", _chat.Id);
+            _userActions.LogInformation("Chat {Peer}: send document failed ({Message})", _chat.PeerNickname, ex.Message);
+            MessageBox.Show(this, ex.Message, "Документ", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            await ReloadMessagesAsync().ConfigureAwait(true);
+        }
+    }
+
     private async Task OnSendAsync()
     {
         var text = _input.Text.Trim();
@@ -312,10 +394,28 @@ public sealed class ChatForm : Form
     {
         if (_messages.SelectedItem is not ChatLine line)
             return;
-        if (line.IsImage && line.ImageBytes is { Length: > 0 })
+        if (line.Kind == ChatLineKind.File && line.PayloadBytes is { Length: > 0 })
+        {
+            using var sfd = new SaveFileDialog
+            {
+                Title = "Сохранить документ",
+                FileName = string.IsNullOrEmpty(line.FileSuggestedName) ? "document" : line.FileSuggestedName,
+                Filter = "Все файлы|*.*",
+                OverwritePrompt = true,
+            };
+            if (sfd.ShowDialog(this) == DialogResult.OK)
+            {
+                _userActions.LogInformation("Chat {Peer}: save document to {Path}", _chat.PeerNickname, sfd.FileName);
+                File.WriteAllBytes(sfd.FileName, line.PayloadBytes);
+            }
+
+            return;
+        }
+
+        if (line.Kind == ChatLineKind.Image && line.PayloadBytes is { Length: > 0 })
         {
             _userActions.LogInformation("Chat {Peer}: open image viewer", _chat.PeerNickname);
-            using var v = new ImageViewForm("Изображение", line.ImageBytes);
+            using var v = new ImageViewForm("Изображение", line.PayloadBytes);
             v.ShowDialog(this);
             return;
         }
@@ -347,7 +447,7 @@ public sealed class ChatForm : Form
         TextRenderer.DrawText(e.Graphics, text, font, textBounds, color,
             TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
 
-        if (line is { IsImage: true, Thumbnail: { } thumb })
+        if (line is { Kind: ChatLineKind.Image, Thumbnail: { } thumb })
         {
             var imgY = textBounds.Bottom + 4;
             var imgRect = new Rectangle(e.Bounds.X + 4, imgY, thumb.Width, thumb.Height);
@@ -383,7 +483,7 @@ public sealed class ChatForm : Form
         var measured = TextRenderer.MeasureText(text, _messages.Font, new Size(width, int.MaxValue),
             TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
         var h = measured.Height + 8;
-        if (line is { IsImage: true, Thumbnail: { } thumb })
+        if (line is { Kind: ChatLineKind.Image, Thumbnail: { } thumb })
             h += 4 + thumb.Height + 4;
         e.ItemHeight = Math.Max(_messages.Font.Height + 8, h);
     }
@@ -455,6 +555,13 @@ public sealed class ChatForm : Form
         }
     }
 
+    private enum ChatLineKind
+    {
+        Text,
+        Image,
+        File,
+    }
+
     private sealed class ChatLine : IDisposable
     {
         private const int ThumbMaxEdge = 240;
@@ -462,24 +569,26 @@ public sealed class ChatForm : Form
         private Bitmap? _thumbnail;
 
         public ChatLine(string displayText, Color color, bool outgoing, MessageDeliveryStatus deliveryStatus,
-            bool isImage, byte[]? imageBytes)
+            ChatLineKind kind, byte[]? payloadBytes, string? fileSuggestedName)
         {
             DisplayText = displayText;
             Color = color;
             Outgoing = outgoing;
             DeliveryStatus = deliveryStatus;
-            IsImage = isImage;
-            ImageBytes = imageBytes;
-            if (isImage && imageBytes is { Length: > 0 })
-                _thumbnail = TryCreateThumbnail(imageBytes, ThumbMaxEdge);
+            Kind = kind;
+            PayloadBytes = payloadBytes;
+            FileSuggestedName = fileSuggestedName;
+            if (kind == ChatLineKind.Image && payloadBytes is { Length: > 0 })
+                _thumbnail = TryCreateThumbnail(payloadBytes, ThumbMaxEdge);
         }
 
         public string DisplayText { get; }
         public Color Color { get; }
         public bool Outgoing { get; }
         public MessageDeliveryStatus DeliveryStatus { get; }
-        public bool IsImage { get; }
-        public byte[]? ImageBytes { get; }
+        public ChatLineKind Kind { get; }
+        public byte[]? PayloadBytes { get; }
+        public string? FileSuggestedName { get; }
         public Bitmap? Thumbnail => _thumbnail;
 
         public void Dispose()

@@ -5,6 +5,7 @@
              Title="Chat">
     <ContentPage.ToolbarItems>
         <ToolbarItem Text="Image" Order="Primary" Priority="2" Clicked="OnAttachImageClicked" />
+        <ToolbarItem Text="Document" Order="Primary" Priority="1" Clicked="OnAttachDocumentClicked" />
     </ContentPage.ToolbarItems>
     <Grid RowDefinitions="Auto,*,Auto" Padding="8" RowSpacing="8">
         <VerticalStackLayout Grid.Row="0" Spacing="6" Padding="0,0,0,4">
@@ -19,6 +20,9 @@
             <CollectionView.ItemTemplate>
                 <DataTemplate>
                     <Grid Padding="8" ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                        <Grid.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnMessageRowTapped" />
+                        </Grid.GestureRecognizers>
                         <VerticalStackLayout Grid.Column="0" Spacing="4">
                             <Label Text="{Binding CaptionLine}" TextColor="{Binding MessageColor}" FontAttributes="Bold"
                                    LineBreakMode="WordWrap" />
