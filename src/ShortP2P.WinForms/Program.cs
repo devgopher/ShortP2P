@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using NLog.Config;
 using NLog.Extensions.Logging;
 using ShortP2P.Client;
+using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
@@ -27,6 +28,7 @@ internal static class Program
 
         var appRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "ShortP2P", "WinForms");
+        services.AddSingleton(_ => ChatMediaOptions.LoadOrDefault(Path.Combine(appRoot, "chat-media.json")));
         services.AddSingleton(_ => new AppDatabase(Path.Combine(appRoot, "shortp2p.db")));
         services.AddSingleton<ISessionStorage>(_ => new FileSessionStorage(Path.Combine(appRoot, "session")));
         services.AddSingleton<AuthService>();
@@ -36,7 +38,8 @@ internal static class Program
         services.AddSingleton(sp => new UserP2pRuntime(
             sp.GetRequiredService<P2pRoutingSettingsStore>(),
             sp.GetRequiredService<AuthService>(),
-            sp.GetRequiredService<ChatRepository>()));
+            sp.GetRequiredService<ChatRepository>(),
+            sp.GetRequiredService<ChatMediaOptions>()));
 
         services.AddTransient<LoginForm>();
         services.AddTransient<RegisterForm>();

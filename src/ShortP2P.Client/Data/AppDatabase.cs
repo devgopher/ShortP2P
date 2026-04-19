@@ -54,6 +54,34 @@ public sealed class AppDatabase
             // ignore
         }
 
+        try
+        {
+            await _connection.ExecuteAsync(
+                "ALTER TABLE messages ADD COLUMN PayloadKind INTEGER NOT NULL DEFAULT 0");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
+            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN MimeType TEXT NOT NULL DEFAULT ''");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
+            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN ImageBlob BLOB NULL");
+        }
+        catch
+        {
+            // column already exists
+        }
+
         return _connection;
     }
 }

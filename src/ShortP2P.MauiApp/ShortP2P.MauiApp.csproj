@@ -23,9 +23,17 @@
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
 
-		<!-- Installable only on Android 11+ (API 30); compile against default platform API from SDK. -->
-		<AndroidMinSdkVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">30</AndroidMinSdkVersion>
 		<AndroidPackageFormat Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">apk</AndroidPackageFormat>
+	</PropertyGroup>
+
+	<!--
+	  Min API 24 = lowest android-* under local SDK (e.g. E:\AndroidSDK\platforms). Must align SupportedOSPlatformVersion
+	  with AndroidMinSdkVersion (XA1036). TargetPlatformVersion must be >= SupportedOSPlatformVersion (NETSDK1135).
+	-->
+	<PropertyGroup Condition="$(TargetFramework.Contains('-android'))">
+		<TargetPlatformVersion>34.0</TargetPlatformVersion>
+		<SupportedOSPlatformVersion>24.0</SupportedOSPlatformVersion>
+		<AndroidMinSdkVersion>24</AndroidMinSdkVersion>
 	</PropertyGroup>
 
 	<ItemGroup>

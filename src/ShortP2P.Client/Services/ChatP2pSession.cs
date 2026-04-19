@@ -3,9 +3,9 @@ using System.Net.Sockets;
 using System.Text;
 using ShortP2P.Client;
 using ShortP2P.Client.LocalNetwork;
-using ShortP2P.Client.Routing;
 using System.Threading;
 using System.Threading.Channels;
+using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Crypto;
@@ -26,7 +26,8 @@ public sealed class ChatP2pSession(
     ChatRepository repo,
     SynchronizationContext? uiSynchronizationContext = null,
     P2pRoutingSettings? routingSettings = null,
-    LocalNetworkScanner? localNetworkScanner = null)
+    LocalNetworkScanner? localNetworkScanner = null,
+    ChatMediaOptions? chatMediaOptions = null)
     : IAsyncDisposable
 {
     private const byte FrameHandshake = 0x01;
@@ -36,6 +37,7 @@ public sealed class ChatP2pSession(
     private readonly P2pRoutingSettings? _routing = routingSettings;
     private readonly GuaranteedDeliveryPolicy _guaranteedDelivery = new();
     private readonly LocalNetworkScanner? _localScan = localNetworkScanner;
+    private readonly ChatMediaOptions _media = chatMediaOptions ?? new ChatMediaOptions();
 
     private readonly object _pendingSync = new();
     private readonly List<int> _pendingOutgoing = [];
@@ -338,7 +340,8 @@ public sealed class ChatP2pSession(
 
                 try
                 {
-                    await DeliverOutgoingTextAsync(nextId, row.Text, cancellationToken).ConfigureAwait(false);
+                    var wire = BuildOutgoingWire(row);
+                    await DeliverOutgoingWireAsync(nextId, wire, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -362,9 +365,20 @@ public sealed class ChatP2pSession(
         }
     }
 
-    private async Task DeliverOutgoingTextAsync(int messageId, string text, CancellationToken cancellationToken)
+    private static byte[] BuildOutgoingWire(ChatMessageEntity row)
     {
-        var bytes = Encoding.UTF8.GetBytes(text);
+        if (row.PayloadKind == (int)ChatPayloadKind.Image)
+        {
+            if (row.ImageBlob == null || row.ImageBlob.Length == 0)
+                throw new InvalidOperationException("Image message has no payload.");
+            return ChatWireCodec.EncodeImage(row.MimeType, row.ImageBlob);
+        }
+
+        return ChatWireCodec.EncodeText(row.Text);
+    }
+
+    private async Task DeliverOutgoingWireAsync(int messageId, byte[] wire, CancellationToken cancellationToken)
+    {
         var ackTimeout = (_routing?.LinkTechnology ?? LinkTechnologyPreset.Unlimited).GetMessageAckTimeout();
         await _guaranteedDelivery.ExecuteAsync(
             async ct =>
@@ -373,10 +387,10 @@ public sealed class ChatP2pSession(
                 if (string.IsNullOrEmpty(chat.RelayRouteBlob))
                 {
                     var dests = BuildOrderedDirectPeerAddresses();
-                    await _messenger!.SendBinaryAsyncExpectAck(bytes, dests, ackTimeout, ct).ConfigureAwait(false);
+                    await _messenger!.SendBinaryAsyncExpectAck(wire, dests, ackTimeout, ct).ConfigureAwait(false);
                 }
                 else
-                    await _messenger!.SendBinaryAsync(bytes, _peerAddress!, ct).ConfigureAwait(false);
+                    await _messenger!.SendBinaryAsync(wire, _peerAddress!, ct).ConfigureAwait(false);
             },
             null,
             false,
@@ -401,7 +415,45 @@ public sealed class ChatP2pSession(
 
         try
         {
-            await DeliverOutgoingTextAsync(messageId, text, cancellationToken).ConfigureAwait(false);
+            var wire = ChatWireCodec.EncodeText(text);
+            await DeliverOutgoingWireAsync(messageId, wire, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (CanQueueUntilPeerSeenOnLan() && !cancellationToken.IsCancellationRequested &&
+                                   (ex is OperationCanceledException || IsDeferrableSendFailure(ex)))
+        {
+            lock (_pendingSync)
+                _pendingOutgoing.Add(messageId);
+            throw new OutboundMessageQueuedException();
+        }
+        catch (Exception)
+        {
+            await repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Failed).ConfigureAwait(false);
+            RaiseMessagesChanged();
+            throw;
+        }
+    }
+
+    public async ValueTask SendImageAsync(ReadOnlyMemory<byte> imageBytes, string mimeType,
+        CancellationToken cancellationToken = default)
+    {
+        if (imageBytes.Length == 0)
+            throw new ArgumentException("Image is empty.", nameof(imageBytes));
+        _media.ValidateMime(mimeType);
+        _media.ValidateSize(imageBytes.Length);
+
+        var bytes = imageBytes.ToArray();
+        var messageId = await repo.AddImageMessageAsync(chat.Id, true, mimeType, bytes, MessageDeliveryStatus.Pending)
+            .ConfigureAwait(false);
+        RaiseMessagesChanged();
+
+        var wire = ChatWireCodec.EncodeImage(mimeType, bytes);
+        try
+        {
+            await DeliverOutgoingWireAsync(messageId, wire, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -649,8 +701,26 @@ public sealed class ChatP2pSession(
         {
             await foreach (var incoming in m.Incoming.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
-                var text = Encoding.UTF8.GetString(incoming.Payload.ToArray());
-                _ = await repo.AddMessageAsync(chat.Id, false, text).ConfigureAwait(false);
+                var payload = incoming.Payload.ToArray();
+                if (ChatWireCodec.TryParse(payload, out var wire) && wire != null)
+                {
+                    switch (wire)
+                    {
+                        case ChatWireText t:
+                            _ = await repo.AddMessageAsync(chat.Id, false, t.Text).ConfigureAwait(false);
+                            break;
+                        case ChatWireImage img:
+                            _ = await repo.AddImageMessageAsync(chat.Id, false, img.MimeType, img.ImageBytes)
+                                .ConfigureAwait(false);
+                            break;
+                    }
+                }
+                else
+                {
+                    var text = Encoding.UTF8.GetString(payload);
+                    _ = await repo.AddMessageAsync(chat.Id, false, text).ConfigureAwait(false);
+                }
+
                 RaiseMessagesChanged();
             }
         }

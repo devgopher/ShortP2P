@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client;
+using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
 
@@ -14,16 +15,19 @@ public partial class ChatDetailPage : ContentPage
     private readonly AuthService _auth;
     private readonly ChatRepository _repo;
     private readonly UserP2pRuntime _p2p;
+    private readonly ChatMediaOptions _media;
     private readonly ILogger<ChatDetailPage> _logger;
     private ChatP2pSession? _p2pSession;
     private string? _peerNetworkIdShort;
 
-    public ChatDetailPage(AuthService auth, ChatRepository repo, UserP2pRuntime p2p, ILogger<ChatDetailPage> logger)
+    public ChatDetailPage(AuthService auth, ChatRepository repo, UserP2pRuntime p2p, ChatMediaOptions media,
+        ILogger<ChatDetailPage> logger)
     {
         InitializeComponent();
         _auth = auth;
         _repo = repo;
         _p2p = p2p;
+        _media = media;
         _logger = logger;
     }
 
@@ -73,7 +77,7 @@ public partial class ChatDetailPage : ContentPage
         RefreshPeerPresenceLabel();
     }
 
-    protected override async void OnDisappearing()
+    protected override void OnDisappearing()
     {
         base.OnDisappearing();
         _p2p.LocalScan.ClientsChanged -= OnPeerLanPresenceChanged;
@@ -96,21 +100,53 @@ public partial class ChatDetailPage : ContentPage
         var rows = (await _repo.ListMessagesAsync(ChatId).ConfigureAwait(true))
             .OrderByDescending(m => m.SentUtcTicks)
             .ThenByDescending(m => m.Id);
-        MessagesCollection.ItemsSource = rows
-            .Select(m =>
+        var list = new List<MessageRowVm>();
+        foreach (var m in rows)
+        {
+            var sender = m.Outgoing ? "You" : Title ?? "Peer";
+            var color = m.Outgoing ? Colors.DodgerBlue : GetPaletteColor(sender);
+            var sentLocal = new DateTimeOffset(m.SentUtcTicks, TimeSpan.Zero).ToLocalTime();
+            var ts = sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture);
+            var ds = (MessageDeliveryStatus)m.DeliveryStatus;
+            if (m.Outgoing && ds == MessageDeliveryStatus.NotApplicable)
+                ds = MessageDeliveryStatus.Delivered;
+            var (glyph, gColor, show) = DeliveryUiFor(ds, m.Outgoing);
+
+            if (m.PayloadKind == (int)ChatPayloadKind.Image && m.ImageBlob is { Length: > 0 } blob)
             {
-                var sender = m.Outgoing ? "You" : Title ?? "Peer";
-                var color = m.Outgoing ? Colors.DodgerBlue : GetPaletteColor(sender);
-                var sentLocal = new DateTimeOffset(m.SentUtcTicks, TimeSpan.Zero).ToLocalTime();
-                var text =
-                    $"[{sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture)}] {m.Text}";
-                var ds = (MessageDeliveryStatus)m.DeliveryStatus;
-                if (m.Outgoing && ds == MessageDeliveryStatus.NotApplicable)
-                    ds = MessageDeliveryStatus.Delivered;
-                var (glyph, gColor, show) = DeliveryUiFor(ds, m.Outgoing);
-                return new MessageRow(text, color, show, glyph, gColor);
-            })
-            .ToList();
+                var kb = (blob.Length + 1023) / 1024;
+                var mimeShort = string.IsNullOrEmpty(m.MimeType) ? "image" : m.MimeType.Replace("image/", "");
+                list.Add(new MessageRowVm
+                {
+                    CaptionLine = $"[{ts}] {sender} · {mimeShort} · {kb} КБ",
+                    TextBody = "",
+                    ShowTextBody = false,
+                    IsImage = true,
+                    ImagePreview = ImageSource.FromStream(() => new MemoryStream(blob)),
+                    MessageColor = color,
+                    ShowDelivery = show,
+                    DeliveryGlyph = glyph,
+                    DeliveryGlyphColor = gColor,
+                });
+            }
+            else
+            {
+                list.Add(new MessageRowVm
+                {
+                    CaptionLine = $"[{ts}] {sender}",
+                    TextBody = m.Text,
+                    ShowTextBody = true,
+                    IsImage = false,
+                    ImagePreview = null,
+                    MessageColor = color,
+                    ShowDelivery = show,
+                    DeliveryGlyph = glyph,
+                    DeliveryGlyphColor = gColor,
+                });
+            }
+        }
+
+        MessagesCollection.ItemsSource = list;
     }
 
     private async void OnSendClicked(object? sender, EventArgs e)
@@ -140,6 +176,82 @@ public partial class ChatDetailPage : ContentPage
         }
     }
 
+    private async void OnAttachImageClicked(object? sender, EventArgs e)
+    {
+        if (_p2pSession == null)
+            return;
+
+        try
+        {
+            var pick = await FilePicker.Default.PickAsync(new PickOptions
+            {
+                PickerTitle = "Изображение (JPEG, PNG, GIF)",
+                FileTypes = FilePickerFileType.Images,
+            }).ConfigureAwait(true);
+            if (pick == null)
+                return;
+
+            if (!ImageAttachHelper.TryGetMimeFromExtension(pick.FileName, out var mime))
+            {
+                await DisplayAlert("Файл", "Допустимы только .jpg, .jpeg, .png, .gif", "OK").ConfigureAwait(true);
+                return;
+            }
+
+            await using var stream = await pick.OpenReadAsync().ConfigureAwait(true);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms).ConfigureAwait(true);
+            var bytes = ms.ToArray();
+            if (bytes.Length < 12)
+            {
+                await DisplayAlert("Файл", "Файл слишком маленький.", "OK").ConfigureAwait(true);
+                return;
+            }
+
+            if (!ImageAttachHelper.SniffMatchesMime(bytes.AsSpan(0, Math.Min(12, bytes.Length)), mime))
+            {
+                await DisplayAlert("Файл", "Содержимое не совпадает с расширением файла.", "OK").ConfigureAwait(true);
+                return;
+            }
+
+            if (bytes.Length > _media.MaxImageBytes)
+            {
+                var limKb = (_media.MaxImageBytes + 1023) / 1024;
+                var want = await DisplayAlert("Размер",
+                    $"Файл {(bytes.Length + 1023) / 1024} КБ больше лимита {limKb} КБ (настраивается в chat-media.json). Сжать изображение?",
+                    "Сжать",
+                    "Отмена").ConfigureAwait(true);
+                if (!want)
+                    return;
+                if (!ImageAttachmentCompressor.TryCompressToMaxBytes(bytes, _media.MaxImageBytes, out var compressed,
+                        out var err))
+                {
+                    await DisplayAlert("Сжатие", err ?? "Не удалось уложиться в лимит.", "OK").ConfigureAwait(true);
+                    return;
+                }
+
+                bytes = compressed;
+                mime = ImageAttachmentCompressor.SuggestMimeAfterCompression();
+            }
+
+            _media.ValidateMime(mime);
+            await _p2pSession.SendImageAsync(bytes, mime).ConfigureAwait(true);
+        }
+        catch (OutboundMessageQueuedException ex)
+        {
+            _logger.LogInformation(ex, "Image queued until peer is on LAN");
+            await DisplayAlert("Ожидание сети", ex.Message, "OK").ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Send image failed");
+            await DisplayAlert("Изображение", ex.Message, "OK").ConfigureAwait(true);
+        }
+        finally
+        {
+            await ReloadMessagesAsync().ConfigureAwait(true);
+        }
+    }
+
     private static (string Glyph, Color GlyphColor, bool Show) DeliveryUiFor(MessageDeliveryStatus status,
         bool outgoing)
     {
@@ -154,15 +266,11 @@ public partial class ChatDetailPage : ContentPage
         };
     }
 
-    private sealed record MessageRow(string Text, Color MessageColor, bool ShowDelivery, string DeliveryGlyph,
-        Color DeliveryGlyphColor);
-
     private static Color GetPaletteColor(string key)
     {
         var hash = Math.Abs(key.GetHashCode(StringComparison.Ordinal));
         var idx = hash % 64;
         var hue = idx * (360.0f / 64.0f);
-        // palette of 64 readable non-background colors
         return Color.FromHsla(hue / 360.0f, 0.72f, 0.44f);
     }
 

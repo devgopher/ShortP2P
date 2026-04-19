@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client;
+using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
 
@@ -13,6 +14,7 @@ public sealed class ChatForm : Form
     private readonly AuthService _auth;
     private readonly ChatRepository _repo;
     private readonly UserP2pRuntime _p2PRuntime;
+    private readonly ChatMediaOptions _media;
     private readonly ILogger<ChatForm> _logger;
     private readonly ILogger<UserAction> _userActions;
     private readonly Label _peerInfoLabel = new()
@@ -37,17 +39,19 @@ public sealed class ChatForm : Form
         BorderStyle = BorderStyle.FixedSingle,
         MaxLength = ChatP2pSession.MaxMessageChars,
     };
+    private readonly Button _attachImage = new() { Text = "Image…", Dock = DockStyle.Right, AutoSize = true };
     private readonly Button _send = new() { Text = "Send", Dock = DockStyle.Right, AutoSize = true };
     private ChatP2pSession? _p2PSession;
 
     public ChatForm(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo, UserP2pRuntime p2PRuntime,
-        ILogger<ChatForm> logger, ILogger<UserAction> userActions)
+        ILogger<ChatForm> logger, ILogger<UserAction> userActions, ChatMediaOptions media)
     {
         _chat = chat;
         _user = user;
         _auth = auth;
         _repo = repo;
         _p2PRuntime = p2PRuntime;
+        _media = media;
         _logger = logger;
         _userActions = userActions;
         Text = chat.PeerNickname;
@@ -68,17 +72,20 @@ public sealed class ChatForm : Form
         };
         top.Controls.Add(_peerInfoLabel, 0, 0);
 
-        var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 88, ColumnCount = 2 };
+        var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 88, ColumnCount = 3 };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.Controls.Add(_input, 0, 0);
-        bottom.Controls.Add(_send, 1, 0);
+        bottom.Controls.Add(_attachImage, 1, 0);
+        bottom.Controls.Add(_send, 2, 0);
 
         // Порядок: Fill сначала, затем Top/Bottom — иначе между шапкой и вводом остаётся пустая полоса.
         Controls.Add(_messages);
         Controls.Add(top);
         Controls.Add(bottom);
 
+        _attachImage.Click += async (_, _) => await OnAttachImageAsync().ConfigureAwait(true);
         _send.Click += async (_, _) => await OnSendAsync().ConfigureAwait(true);
         _messages.DrawItem += OnMessagesDrawItem;
         _messages.MeasureItem += OnMessagesMeasureItem;
@@ -139,17 +146,113 @@ public sealed class ChatForm : Form
                 var sender = m.Outgoing ? "You" : _chat.PeerNickname;
                 var color = m.Outgoing ? Color.DodgerBlue : GetPaletteColor(sender);
                 var sentLocal = new DateTimeOffset(m.SentUtcTicks, TimeSpan.Zero).ToLocalTime();
-                var full = $"[{sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture)}] {m.Text}";
+                var ts = sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture);
                 var ds = (MessageDeliveryStatus)m.DeliveryStatus;
                 if (m.Outgoing && ds == MessageDeliveryStatus.NotApplicable)
                     ds = MessageDeliveryStatus.Delivered;
-                _messages.Items.Add(new ChatLine(full, color, m.Outgoing, ds));
+
+                if (m.PayloadKind == (int)ChatPayloadKind.Image && m.ImageBlob is { Length: > 0 } blob)
+                {
+                    var kb = (blob.Length + 1023) / 1024;
+                    var mimeShort = string.IsNullOrEmpty(m.MimeType) ? "image" : m.MimeType.Replace("image/", "");
+                    var caption = $"[{ts}] {sender} · {mimeShort} · {kb} КБ (двойной щелчок — просмотр)";
+                    _messages.Items.Add(new ChatLine(caption, color, m.Outgoing, ds, true, blob));
+                }
+                else
+                {
+                    var full = $"[{ts}] {m.Text}";
+                    _messages.Items.Add(new ChatLine(full, color, m.Outgoing, ds, false, null));
+                }
             }
             _messages.EndUpdate();
         }
         catch (ObjectDisposedException)
         {
             // expected while closing
+        }
+    }
+
+    private async Task OnAttachImageAsync()
+    {
+        if (_p2PSession == null)
+            return;
+
+        using var dlg = new OpenFileDialog
+        {
+            Title = "Изображение (JPEG, PNG, GIF)",
+            Filter = "Изображения|*.jpg;*.jpeg;*.png;*.gif|Все файлы|*.*",
+            CheckFileExists = true,
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        try
+        {
+            if (!ImageAttachHelper.TryGetMimeFromExtension(dlg.FileName, out var mime))
+            {
+                MessageBox.Show(this, "Допустимы только .jpg, .jpeg, .png, .gif.", "Файл", MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var bytes = await File.ReadAllBytesAsync(dlg.FileName).ConfigureAwait(true);
+            if (bytes.Length < 12)
+            {
+                MessageBox.Show(this, "Файл слишком маленький.", "Файл", MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            if (!ImageAttachHelper.SniffMatchesMime(bytes.AsSpan(0, Math.Min(12, bytes.Length)), mime))
+            {
+                MessageBox.Show(this, "Содержимое не совпадает с расширением файла.", "Файл", MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (bytes.Length > _media.MaxImageBytes)
+            {
+                var limKb = (_media.MaxImageBytes + 1023) / 1024;
+                var want = MessageBox.Show(this,
+                    $"Файл {(bytes.Length + 1023) / 1024} КБ больше лимита {limKb} КБ (настраивается в chat-media.json). Сжать изображение?",
+                    "Размер",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button1);
+                if (want != DialogResult.Yes)
+                    return;
+                if (!ImageAttachmentCompressor.TryCompressToMaxBytes(bytes, _media.MaxImageBytes, out var compressed,
+                        out var err))
+                {
+                    MessageBox.Show(this, err ?? "Не удалось уложиться в лимит.", "Сжатие", MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+
+                bytes = compressed;
+                mime = ImageAttachmentCompressor.SuggestMimeAfterCompression();
+            }
+
+            _media.ValidateMime(mime);
+            await _p2PSession.SendImageAsync(bytes, mime).ConfigureAwait(true);
+            _userActions.LogInformation("Chat {Peer}: sent image ({Bytes} bytes, {Mime})", _chat.PeerNickname,
+                bytes.Length, mime);
+        }
+        catch (OutboundMessageQueuedException ex)
+        {
+            _logger.LogInformation(ex, "Image queued until peer is on LAN (chat {ChatId})", _chat.Id);
+            _userActions.LogInformation("Chat {Peer}: image queued for LAN delivery", _chat.PeerNickname);
+            MessageBox.Show(this, ex.Message, "Ожидание сети", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Send image failed in chat {ChatId}", _chat.Id);
+            _userActions.LogInformation("Chat {Peer}: send image failed ({Message})", _chat.PeerNickname, ex.Message);
+            MessageBox.Show(this, ex.Message, "Изображение", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            await ReloadMessagesAsync().ConfigureAwait(true);
         }
     }
 
@@ -194,10 +297,18 @@ public sealed class ChatForm : Form
     {
         if (_messages.SelectedItem is not ChatLine line)
             return;
-        if (line.Text.Length <= 64)
+        if (line.IsImage && line.ImageBytes is { Length: > 0 })
+        {
+            _userActions.LogInformation("Chat {Peer}: open image viewer", _chat.PeerNickname);
+            using var v = new ImageViewForm("Изображение", line.ImageBytes);
+            v.ShowDialog(this);
+            return;
+        }
+
+        if (line.DisplayText.Length <= 64)
             return;
         _userActions.LogInformation("Chat {Peer}: open long message viewer", _chat.PeerNickname);
-        using var dlg = new MessageViewForm("Сообщение", line.Text);
+        using var dlg = new MessageViewForm("Сообщение", line.DisplayText);
         dlg.ShowDialog(this);
     }
 
@@ -208,7 +319,7 @@ public sealed class ChatForm : Form
             return;
 
         var line = _messages.Items[e.Index] as ChatLine;
-        var text = line?.Text ?? _messages.Items[e.Index]?.ToString() ?? "";
+        var text = line?.DisplayText ?? _messages.Items[e.Index]?.ToString() ?? "";
         var color = line?.Color ?? ForeColor;
         const int statusCol = 22;
         var reserveRight = line is { Outgoing: true } ? statusCol : 0;
@@ -239,7 +350,7 @@ public sealed class ChatForm : Form
         }
 
         var line = _messages.Items[e.Index] as ChatLine;
-        var text = line?.Text ?? _messages.Items[e.Index]?.ToString() ?? "";
+        var text = line?.DisplayText ?? _messages.Items[e.Index]?.ToString() ?? "";
         const int statusCol = 22;
         var reserveRight = line is { Outgoing: true } ? statusCol : 0;
         var width = Math.Max(120,
@@ -286,8 +397,9 @@ public sealed class ChatForm : Form
         return Color.FromArgb(r, g, b);
     }
 
-    private sealed record ChatLine(string Text, Color Color, bool Outgoing, MessageDeliveryStatus DeliveryStatus)
+    private sealed record ChatLine(string DisplayText, Color Color, bool Outgoing, MessageDeliveryStatus DeliveryStatus,
+        bool IsImage, byte[]? ImageBytes)
     {
-        public override string ToString() => Text;
+        public override string ToString() => DisplayText;
     }
 }

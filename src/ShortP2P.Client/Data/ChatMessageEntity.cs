@@ -19,4 +19,11 @@ public class ChatMessageEntity
 
     /// <summary>Значение <see cref="MessageDeliveryStatus"/>; для входящих — NotApplicable.</summary>
     public int DeliveryStatus { get; set; }
+
+    /// <summary><see cref="ChatPayloadKind"/>.</summary>
+    public int PayloadKind { get; set; }
+
+    public string MimeType { get; set; } = "";
+
+    public byte[]? ImageBlob { get; set; }
 }

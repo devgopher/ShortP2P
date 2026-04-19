@@ -138,6 +138,41 @@ public sealed class ChatRepository
             Text = text,
             SentUtcTicks = DateTime.UtcNow.Ticks,
             DeliveryStatus = (int)status,
+            PayloadKind = (int)ChatPayloadKind.Text,
+            MimeType = "",
+            ImageBlob = null,
+        };
+        await conn.InsertAsync(msg);
+
+        var chat = await conn.FindAsync<ChatEntity>(chatId);
+        if (chat != null)
+        {
+            chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
+            await conn.UpdateAsync(chat);
+        }
+
+        ChatMessageAppended?.Invoke(this, new ChatMessageAppendedEventArgs(chatId, outgoing));
+        return msg.Id;
+    }
+
+    public async Task<int> AddImageMessageAsync(int chatId, bool outgoing, string mimeType, byte[] imageBytes,
+        MessageDeliveryStatus deliveryStatus = MessageDeliveryStatus.Delivered)
+    {
+        ArgumentNullException.ThrowIfNull(imageBytes);
+        var conn = await _db.GetConnectionAsync();
+        var status = outgoing
+            ? deliveryStatus
+            : MessageDeliveryStatus.NotApplicable;
+        var msg = new ChatMessageEntity
+        {
+            ChatId = chatId,
+            Outgoing = outgoing,
+            Text = "",
+            SentUtcTicks = DateTime.UtcNow.Ticks,
+            DeliveryStatus = (int)status,
+            PayloadKind = (int)ChatPayloadKind.Image,
+            MimeType = mimeType.Trim(),
+            ImageBlob = imageBytes,
         };
         await conn.InsertAsync(msg);
 

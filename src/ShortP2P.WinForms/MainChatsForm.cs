@@ -1,6 +1,7 @@
 using System.Drawing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
@@ -24,12 +25,14 @@ public sealed class MainChatsForm : Form
     private readonly ILogger<ChatForm> _chatLog;
     private readonly ILogger<LocalNetworkScanForm> _lanScanLog;
     private readonly ILogger<UserAction> _userActions;
+    private readonly ChatMediaOptions _chatMedia;
     private int? _focusedChatId;
     private bool _knownChatsInitialized;
 
     public MainChatsForm(AuthService auth, ChatRepository chats, UserP2pRuntime p2P,
         P2pRoutingSettingsStore routingStore, IServiceProvider services, ILogger<MainChatsForm> logger,
-        ILogger<ChatForm> chatLog, ILogger<LocalNetworkScanForm> lanScanLog, ILogger<UserAction> userActions)
+        ILogger<ChatForm> chatLog, ILogger<LocalNetworkScanForm> lanScanLog, ILogger<UserAction> userActions,
+        ChatMediaOptions chatMedia)
     {
         _auth = auth;
         _chats = chats;
@@ -40,6 +43,7 @@ public sealed class MainChatsForm : Form
         _chatLog = chatLog;
         _lanScanLog = lanScanLog;
         _userActions = userActions;
+        _chatMedia = chatMedia;
         Text = "ShortP2P — Chats";
         StartPosition = FormStartPosition.CenterScreen;
         Width = 560;
@@ -281,7 +285,7 @@ public sealed class MainChatsForm : Form
                 _focusedChatId = chat.Id;
                 _unreadChatIds.Remove(chat.Id);
                 _list.Invalidate();
-                using var win = new ChatForm(chat, u, _auth, _chats, _p2P, _chatLog, _userActions);
+                using var win = new ChatForm(chat, u, _auth, _chats, _p2P, _chatLog, _userActions, _chatMedia);
                 win.ShowDialog(owner);
                 _focusedChatId = null;
             },
@@ -427,7 +431,7 @@ public sealed class MainChatsForm : Form
         if (u == null) return;
 
         _focusedChatId = chat.Id;
-        using var win = new ChatForm(chat, u, _auth, _chats, _p2P, _chatLog, _userActions);
+        using var win = new ChatForm(chat, u, _auth, _chats, _p2P, _chatLog, _userActions, _chatMedia);
         win.ShowDialog(this);
         _focusedChatId = null;
         await RefreshAsync().ConfigureAwait(true);

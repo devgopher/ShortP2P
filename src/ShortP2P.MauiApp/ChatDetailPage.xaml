@@ -3,6 +3,9 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="ShortP2P.MauiApp.ChatDetailPage"
              Title="Chat">
+    <ContentPage.ToolbarItems>
+        <ToolbarItem Text="Image" Order="Primary" Priority="2" Clicked="OnAttachImageClicked" />
+    </ContentPage.ToolbarItems>
     <Grid RowDefinitions="Auto,*,Auto" Padding="8" RowSpacing="8">
         <VerticalStackLayout Grid.Row="0" Spacing="6" Padding="0,0,0,4">
             <Label x:Name="PeerIdLabel" FontSize="12" TextColor="Gray" />
@@ -16,8 +19,14 @@
             <CollectionView.ItemTemplate>
                 <DataTemplate>
                     <Grid Padding="8" ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <Label Grid.Column="0" Text="{Binding Text}" TextColor="{Binding MessageColor}"
-                               LineBreakMode="WordWrap" />
+                        <VerticalStackLayout Grid.Column="0" Spacing="4">
+                            <Label Text="{Binding CaptionLine}" TextColor="{Binding MessageColor}" FontAttributes="Bold"
+                                   LineBreakMode="WordWrap" />
+                            <Label Text="{Binding TextBody}" TextColor="{Binding MessageColor}" LineBreakMode="WordWrap"
+                                   IsVisible="{Binding ShowTextBody}" />
+                            <Image Source="{Binding ImagePreview}" IsVisible="{Binding IsImage}" MaximumHeightRequest="240"
+                                   Aspect="AspectFit" />
+                        </VerticalStackLayout>
                         <Label Grid.Column="1" Text="{Binding DeliveryGlyph}" TextColor="{Binding DeliveryGlyphColor}"
                                FontSize="15" VerticalOptions="Start" IsVisible="{Binding ShowDelivery}" />
                     </Grid>

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.LocalNetwork;
 using ShortP2P.Client.Routing;
@@ -14,6 +15,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private readonly P2pRoutingSettingsStore _store;
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
+    private readonly ChatMediaOptions _chatMedia;
 
     private readonly object _sessionLock = new();
     private readonly Dictionary<int, ChatP2pSession> _chatSessions = new();
@@ -32,11 +34,13 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     /// <summary>Сканирование LAN по discovery-пингам (UDP 565, broadcast).</summary>
     public LocalNetworkScanner LocalScan { get; }
 
-    public UserP2pRuntime(P2pRoutingSettingsStore store, AuthService auth, ChatRepository chats)
+    public UserP2pRuntime(P2pRoutingSettingsStore store, AuthService auth, ChatRepository chats,
+        ChatMediaOptions chatMedia)
     {
         _store = store;
         _auth = auth;
         _chats = chats;
+        _chatMedia = chatMedia;
         LocalScan = new LocalNetworkScanner(Settings);
     }
 
@@ -51,7 +55,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 return existing;
             }
 
-            var s = new ChatP2pSession(chat, user, auth, repo, uiSync, Settings, LocalScan);
+            var s = new ChatP2pSession(chat, user, auth, repo, uiSync, Settings, LocalScan, _chatMedia);
             _chatSessions[chat.Id] = s;
             return s;
         }
@@ -156,7 +160,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 }
                 else
                 {
-                    session = new ChatP2pSession(c, user, auth, repo, uiSync, Settings, LocalScan);
+                    session = new ChatP2pSession(c, user, auth, repo, uiSync, Settings, LocalScan, _chatMedia);
                     _chatSessions[c.Id] = session;
                 }
 
