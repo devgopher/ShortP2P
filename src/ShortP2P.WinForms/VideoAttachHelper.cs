@@ -1,12 +1,68 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Compression;
 
 namespace ShortP2P.WinForms;
 
 internal static class VideoAttachHelper
 {
-    private static readonly int[] CompressionCrfSteps = [30, 34, 38, 42];
+    private static readonly int[] CompressionQpSteps = [24, 28, 32, 36];
     private static readonly int[] DownscaleHeights = [720, 480, 360, 240, 144];
+    private const string FfmpegDownloadUrl =
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip";
+    private static string FfmpegExePath => Path.Combine(AppContext.BaseDirectory, "ffmpeg", "ffmpeg.exe");
+    private static string FfprobeExePath => Path.Combine(AppContext.BaseDirectory, "ffmpeg", "ffprobe.exe");
+    private static string FfmpegFolderPath => Path.Combine(AppContext.BaseDirectory, "ffmpeg");
+
+    public static bool AreBundledToolsAvailable() => File.Exists(FfmpegExePath) && File.Exists(FfprobeExePath);
+
+    public static async Task<(bool Success, string? Error)> TryDownloadBundledToolsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            Directory.CreateDirectory(FfmpegFolderPath);
+            var archivePath = Path.Combine(Path.GetTempPath(), $"shortp2p-ffmpeg-{Guid.NewGuid():N}.zip");
+            try
+            {
+                using var http = new HttpClient();
+                await using (var stream = await http.GetStreamAsync(FfmpegDownloadUrl, cancellationToken).ConfigureAwait(false))
+                await using (var fs = new FileStream(archivePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    await stream.CopyToAsync(fs, cancellationToken).ConfigureAwait(false);
+
+                using var zip = ZipFile.OpenRead(archivePath);
+                var ffmpegEntry = zip.Entries.FirstOrDefault(e =>
+                    e.FullName.EndsWith("/bin/ffmpeg.exe", StringComparison.OrdinalIgnoreCase));
+                var ffprobeEntry = zip.Entries.FirstOrDefault(e =>
+                    e.FullName.EndsWith("/bin/ffprobe.exe", StringComparison.OrdinalIgnoreCase));
+                if (ffmpegEntry == null || ffprobeEntry == null)
+                    return (false, "ffmpeg/ffprobe not found in downloaded archive.");
+
+                ffmpegEntry.ExtractToFile(FfmpegExePath, overwrite: true);
+                ffprobeEntry.ExtractToFile(FfprobeExePath, overwrite: true);
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(archivePath))
+                        File.Delete(archivePath);
+                }
+                catch
+                {
+                    // ignore temp cleanup failures
+                }
+            }
+
+            return AreBundledToolsAvailable()
+                ? (true, null)
+                : (false, "Download completed, but tools are not available.");
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
 
     public static bool TryGetMimeFromExtension(string filePath, out string mime)
     {
@@ -26,8 +82,11 @@ internal static class VideoAttachHelper
     public static async Task<(bool Success, double DurationSeconds, string? Error)> TryProbeDurationSecondsAsync(
         string inputPath, CancellationToken cancellationToken = default)
     {
+        if (!File.Exists(FfprobeExePath))
+            return (false, 0, "ffprobe not bundled.");
+
         var args = $"-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"{inputPath}\"";
-        var (exitCode, stdOut, stdErr) = await RunToolAsync("ffprobe", args, cancellationToken).ConfigureAwait(false);
+        var (exitCode, stdOut, stdErr) = await RunToolAsync(FfprobeExePath, args, cancellationToken).ConfigureAwait(false);
         if (exitCode != 0)
             return (false, 0, string.IsNullOrWhiteSpace(stdErr) ? "ffprobe failed." : stdErr.Trim());
         var raw = stdOut.Trim();
@@ -39,6 +98,9 @@ internal static class VideoAttachHelper
     public static async Task<(bool Success, byte[]? Bytes, string? OutputFileName, string? OutputMime, string? Error)>
         TryCompressToLimitAsync(string inputPath, int maxBytes, CancellationToken cancellationToken = default)
     {
+        if (!File.Exists(FfmpegExePath))
+            return (false, null, null, null, "ffmpeg not bundled.");
+
         var tempDir = Path.Combine(Path.GetTempPath(), $"shortp2p-video-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
 
@@ -76,13 +138,13 @@ internal static class VideoAttachHelper
     private static async Task<(bool Success, byte[]? Bytes)> TryRunVariantsAsync(string inputPath, int maxBytes, string tempDir,
         bool useScale, int height, CancellationToken cancellationToken)
     {
-        foreach (var crf in CompressionCrfSteps)
+        foreach (var qp in CompressionQpSteps)
         {
-            var outPath = Path.Combine(tempDir, $"out_{(useScale ? height.ToString(CultureInfo.InvariantCulture) : "src")}_{crf}.mp4");
+            var outPath = Path.Combine(tempDir, $"out_{(useScale ? height.ToString(CultureInfo.InvariantCulture) : "src")}_{qp}.mp4");
             var vf = useScale ? " -vf \"scale=-2:" + height.ToString(CultureInfo.InvariantCulture) + ":force_original_aspect_ratio=decrease\"" : "";
             var args =
-                $"-y -i \"{inputPath}\" -c:v libx264 -preset veryfast -crf {crf}{vf} -c:a aac -b:a 96k -movflags +faststart \"{outPath}\"";
-            var (exitCode, _, _) = await RunToolAsync("ffmpeg", args, cancellationToken).ConfigureAwait(false);
+                $"-y -i \"{inputPath}\" -c:v libopenh264 -qp {qp}{vf} -c:a aac -b:a 96k -movflags +faststart \"{outPath}\"";
+            var (exitCode, _, _) = await RunToolAsync(FfmpegExePath, args, cancellationToken).ConfigureAwait(false);
             if (exitCode != 0 || !File.Exists(outPath))
                 continue;
 

@@ -262,6 +262,36 @@ public sealed class ChatForm : Form
                 return;
             }
 
+            if (!VideoAttachHelper.AreBundledToolsAvailable())
+            {
+                var wantDownload = MessageBox.Show(this,
+                    "Для проверки длительности и сжатия видео нужны ffmpeg/ffprobe. Скачать их в подпапку ffmpeg?",
+                    "Видео",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button1);
+                if (wantDownload == DialogResult.Yes)
+                {
+                    UseWaitCursor = true;
+                    try
+                    {
+                        var dl = await VideoAttachHelper.TryDownloadBundledToolsAsync().ConfigureAwait(true);
+                        if (!dl.Success)
+                        {
+                            MessageBox.Show(this,
+                                $"Не удалось скачать ffmpeg/ffprobe. Продолжаем без них.\r\n{dl.Error}",
+                                "Видео",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Information);
+                        }
+                    }
+                    finally
+                    {
+                        UseWaitCursor = false;
+                    }
+                }
+            }
+
             var bytes = await File.ReadAllBytesAsync(dlg.FileName).ConfigureAwait(true);
             var durationInfo = await VideoAttachHelper.TryProbeDurationSecondsAsync(dlg.FileName).ConfigureAwait(true);
             if (durationInfo.Success)
