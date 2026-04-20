@@ -294,20 +294,17 @@ public sealed class ChatForm : Form
 
             var bytes = await File.ReadAllBytesAsync(dlg.FileName).ConfigureAwait(true);
             var durationInfo = await VideoAttachHelper.TryProbeDurationSecondsAsync(dlg.FileName).ConfigureAwait(true);
-            if (durationInfo.Success)
+            if (durationInfo is { Success: true, DurationSeconds: > 60.0 })
             {
-                if (durationInfo.DurationSeconds > 60.0)
-                {
-                    MessageBox.Show(this, $"Видео длится {Math.Ceiling(durationInfo.DurationSeconds)} сек. Лимит: 60 сек.",
-                        "Видео", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
+                MessageBox.Show(this, $"Видео длится {Math.Ceiling(durationInfo.DurationSeconds)} сек. Лимит: 60 сек.",
+                    "Видео", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
             }
 
             var outgoingName = Path.GetFileName(dlg.FileName);
             if (bytes.Length > _media.MaxDocumentBytes)
             {
-                var limMb = (_media.MaxDocumentBytes + (1024 * 1024 - 1)) / (1024 * 1024);
+                var limMb = (_media.MaxDocumentBytes + 1048575) / 1048576;
                 if (!durationInfo.Success)
                 {
                     MessageBox.Show(this,
