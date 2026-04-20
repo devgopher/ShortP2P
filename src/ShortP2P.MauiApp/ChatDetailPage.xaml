@@ -28,6 +28,8 @@
                                    LineBreakMode="WordWrap" />
                             <Label Text="{Binding TextBody}" TextColor="{Binding MessageColor}" LineBreakMode="WordWrap"
                                    IsVisible="{Binding ShowTextBody}" />
+                            <Label FormattedText="{Binding FileBodyFormatted}" LineBreakMode="WordWrap"
+                                   IsVisible="{Binding IsFile}" />
                             <Image Source="{Binding ImagePreview}" IsVisible="{Binding IsImage}" MaximumHeightRequest="240"
                                    Aspect="AspectFit" />
                         </VerticalStackLayout>

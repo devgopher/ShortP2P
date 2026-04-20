@@ -144,11 +144,22 @@ public partial class ChatDetailPage : ContentPage
             {
                 var kb = (docBlob.Length + 1023) / 1024;
                 var name = string.IsNullOrEmpty(m.Text) ? "file" : m.Text;
+                var kindCaption = m.MimeType?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true
+                    ? "видео"
+                    : "документ";
+                var fileBody = new FormattedString();
+                fileBody.Spans.Add(new Span
+                {
+                    Text = $"{name} · {kb} КБ · нажмите строку — ",
+                    TextColor = color,
+                });
+                fileBody.Spans.Add(new Span { Text = "Скачать", TextColor = Colors.DodgerBlue });
                 list.Add(new MessageRowVm
                 {
-                    CaptionLine = $"[{ts}] {sender} · документ",
-                    TextBody = $"{name} · {kb} КБ · нажмите строку, чтобы сохранить/поделиться",
-                    ShowTextBody = true,
+                    CaptionLine = $"[{ts}] {sender} · {kindCaption}",
+                    TextBody = "",
+                    FileBodyFormatted = fileBody,
+                    ShowTextBody = false,
                     IsImage = false,
                     IsFile = true,
                     MessageId = m.Id,

@@ -10,6 +10,11 @@ namespace ShortP2P.WinForms;
 
 public sealed class ChatForm : Form
 {
+    private const string FileCaptionNewline = "\r\n";
+    private const string FileDownloadHintPrefix = "Двойной щелчок — ";
+    private const string FileDownloadHintAction = "Скачать";
+    private static readonly Color FileDownloadActionColor = Color.FromArgb(0, 102, 204);
+
     private readonly ChatEntity _chat;
     private readonly UserEntity _user;
     private readonly AuthService _auth;
@@ -215,7 +220,8 @@ public sealed class ChatForm : Form
                     var kindCaption = m.MimeType?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true
                         ? "видео"
                         : "документ";
-                    var caption = $"[{ts}] {sender} · {kindCaption} · {name} · {kb} КБ (двойной щелчок — сохранить)";
+                    var caption =
+                        $"[{ts}] {sender} · {kindCaption} · {name} · {kb} КБ{FileCaptionNewline}{FileDownloadHintPrefix}{FileDownloadHintAction}";
                     _messages.Items.Add(new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.File, fileBlob, name));
                 }
                 else if (m.PayloadKind == (int)ChatPayloadKind.Image && m.ImageBlob is { Length: > 0 } blob)
@@ -602,9 +608,38 @@ public sealed class ChatForm : Form
         var captionMeasured = TextRenderer.MeasureText(text, font, new Size(textWidth, int.MaxValue),
             TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
         var captionH = captionMeasured.Height;
-        var textBounds = new Rectangle(e.Bounds.X + 4, e.Bounds.Y + 2, textWidth, Math.Max(font.Height, captionH));
-        TextRenderer.DrawText(e.Graphics, text, font, textBounds, color,
-            TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+        Rectangle textBounds;
+
+        if (line?.Kind == ChatLineKind.File &&
+            text.IndexOf(FileCaptionNewline, StringComparison.Ordinal) is var nlIdx && nlIdx >= 0)
+        {
+            var head = text[..nlIdx];
+            var headMeasured = TextRenderer.MeasureText(head, font, new Size(textWidth, int.MaxValue),
+                TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+            textBounds = new Rectangle(e.Bounds.X + 4, e.Bounds.Y + 2, textWidth,
+                Math.Max(font.Height, headMeasured.Height));
+            TextRenderer.DrawText(e.Graphics, head, font, textBounds, color,
+                TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+
+            var line2Y = textBounds.Bottom + 2;
+            var prefixW = TextRenderer.MeasureText(FileDownloadHintPrefix, font).Width;
+            var prefixBounds = new Rectangle(e.Bounds.X + 4, line2Y, prefixW + 2, font.Height + 2);
+            TextRenderer.DrawText(e.Graphics, FileDownloadHintPrefix, font, prefixBounds, color,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding |
+                TextFormatFlags.SingleLine);
+
+            var actionBounds = new Rectangle(e.Bounds.X + 4 + prefixW, line2Y,
+                Math.Max(10, textWidth - prefixW), font.Height + 2);
+            TextRenderer.DrawText(e.Graphics, FileDownloadHintAction, font, actionBounds, FileDownloadActionColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding |
+                TextFormatFlags.SingleLine);
+        }
+        else
+        {
+            textBounds = new Rectangle(e.Bounds.X + 4, e.Bounds.Y + 2, textWidth, Math.Max(font.Height, captionH));
+            TextRenderer.DrawText(e.Graphics, text, font, textBounds, color,
+                TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+        }
 
         if (line is { Kind: ChatLineKind.Image, Thumbnail: { } thumb })
         {
