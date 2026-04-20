@@ -45,6 +45,12 @@ public sealed class ChatMediaOptions
         "application/vnd.oasis.opendocument.graphics",
         "application/rtf",
         "application/pdf",
+        "video/mp4",
+        "video/x-msvideo",
+        "video/quicktime",
+        "video/x-ms-wmv",
+        "video/ogg",
+        "video/webm",
     ];
 
     public static ChatMediaOptions LoadOrDefault(string? jsonPath)

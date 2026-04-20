@@ -44,27 +44,33 @@ public sealed class ChatForm : Form
     {
         Text = "🖼",
         Dock = DockStyle.Right,
-        Width = 50,
+        Width = 36,
         Height = 36,
         Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point),
-     };
+    };
+    private readonly Button _attachVideo = new()
+    {
+        Text = "🎬",
+        Dock = DockStyle.Right,
+        Width = 36,
+        Height = 36,
+        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point),
+    };
     private readonly Button _attachDocument = new()
     {
         Text = "📄",
         Dock = DockStyle.Right,
-        Width = 50,
-        Height = 20,
+        Width = 36,
+        Height = 36,
         Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point),
-
     };
     private readonly Button _send = new()
     {
         Text = "➤",
         Dock = DockStyle.Right,
-        Width = 50,
-        Height = 20,
+        Width = 36,
+        Height = 36,
         Font = new Font("Segoe UI", 10, FontStyle.Bold, GraphicsUnit.Point),
-
     };
     private readonly ToolTip _buttonTooltips = new() { ShowAlways = true };
     private ChatP2pSession? _p2PSession;
@@ -98,17 +104,20 @@ public sealed class ChatForm : Form
         };
         top.Controls.Add(_peerInfoLabel, 0, 0);
 
-        var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 76, ColumnCount = 4 };
+        var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 76, ColumnCount = 5 };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.Controls.Add(_input, 0, 0);
         bottom.Controls.Add(_attachImage, 1, 0);
-        bottom.Controls.Add(_attachDocument, 2, 0);
-        bottom.Controls.Add(_send, 3, 0);
+        bottom.Controls.Add(_attachVideo, 2, 0);
+        bottom.Controls.Add(_attachDocument, 3, 0);
+        bottom.Controls.Add(_send, 4, 0);
 
         _buttonTooltips.SetToolTip(_attachImage, "Отправить изображение");
+        _buttonTooltips.SetToolTip(_attachVideo, "Отправить видео");
         _buttonTooltips.SetToolTip(_attachDocument, "Отправить документ");
         _buttonTooltips.SetToolTip(_send, "Отправить сообщение");
 
@@ -118,6 +127,7 @@ public sealed class ChatForm : Form
         Controls.Add(bottom);
 
         _attachImage.Click += async (_, _) => await OnAttachImageAsync().ConfigureAwait(true);
+        _attachVideo.Click += async (_, _) => await OnAttachVideoAsync().ConfigureAwait(true);
         _attachDocument.Click += async (_, _) => await OnAttachDocumentAsync().ConfigureAwait(true);
         _send.Click += async (_, _) => await OnSendAsync().ConfigureAwait(true);
         _messages.DrawItem += OnMessagesDrawItem;
@@ -202,7 +212,10 @@ public sealed class ChatForm : Form
                 {
                     var kb = (fileBlob.Length + 1023) / 1024;
                     var name = string.IsNullOrEmpty(m.Text) ? "file" : m.Text;
-                    var caption = $"[{ts}] {sender} · документ · {name} · {kb} КБ (двойной щелчок — сохранить)";
+                    var kindCaption = m.MimeType?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true
+                        ? "видео"
+                        : "документ";
+                    var caption = $"[{ts}] {sender} · {kindCaption} · {name} · {kb} КБ (двойной щелчок — сохранить)";
                     _messages.Items.Add(new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.File, fileBlob, name));
                 }
                 else if (m.PayloadKind == (int)ChatPayloadKind.Image && m.ImageBlob is { Length: > 0 } blob)
@@ -223,6 +236,97 @@ public sealed class ChatForm : Form
         catch (ObjectDisposedException)
         {
             // expected while closing
+        }
+    }
+
+    private async Task OnAttachVideoAsync()
+    {
+        if (_p2PSession == null)
+            return;
+
+        using var dlg = new OpenFileDialog
+        {
+            Title = "Видео (до 60 секунд, до 10 МБ)",
+            Filter = "Видео|*.mp4;*.avi;*.mov;*.wmv;*.ogv;*.webm|Все файлы|*.*",
+            CheckFileExists = true,
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        try
+        {
+            if (!VideoAttachHelper.TryGetMimeFromExtension(dlg.FileName, out var mime))
+            {
+                MessageBox.Show(this, "Допустимы только .mp4, .avi, .mov, .wmv, .ogv, .webm.", "Видео", MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var bytes = await File.ReadAllBytesAsync(dlg.FileName).ConfigureAwait(true);
+            var durationInfo = await VideoAttachHelper.TryProbeDurationSecondsAsync(dlg.FileName).ConfigureAwait(true);
+            if (durationInfo.Success)
+            {
+                if (durationInfo.DurationSeconds > 60.0)
+                {
+                    MessageBox.Show(this, $"Видео длится {Math.Ceiling(durationInfo.DurationSeconds)} сек. Лимит: 60 сек.",
+                        "Видео", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+            }
+
+            var outgoingName = Path.GetFileName(dlg.FileName);
+            if (bytes.Length > _media.MaxDocumentBytes)
+            {
+                var limMb = (_media.MaxDocumentBytes + (1024 * 1024 - 1)) / (1024 * 1024);
+                if (!durationInfo.Success)
+                {
+                    MessageBox.Show(this,
+                        $"Файл больше {limMb} МБ (лимит в chat-media.json: maxDocumentBytes).",
+                        "Видео",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+
+                var prepared = await VideoAttachHelper.TryCompressToLimitAsync(dlg.FileName, _media.MaxDocumentBytes)
+                    .ConfigureAwait(true);
+                if (!prepared.Success || prepared.Bytes == null || prepared.OutputFileName == null ||
+                    prepared.OutputMime == null)
+                {
+                    MessageBox.Show(this,
+                        prepared.Error ?? $"Не удалось уложить видео в {limMb} МБ после сжатия/понижения разрешения.",
+                        "Видео",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+
+                bytes = prepared.Bytes;
+                outgoingName = prepared.OutputFileName;
+                mime = prepared.OutputMime;
+            }
+
+            _media.ValidateDocumentMime(mime);
+            _media.ValidateDocumentSize(bytes.Length);
+            await _p2PSession.SendFileAsync(outgoingName, bytes, mime).ConfigureAwait(true);
+            _userActions.LogInformation("Chat {Peer}: sent video ({Bytes} bytes, {Mime}, {Seconds} sec)",
+                _chat.PeerNickname, bytes.Length, mime, durationInfo.Success ? durationInfo.DurationSeconds : -1.0);
+        }
+        catch (OutboundMessageQueuedException ex)
+        {
+            _logger.LogInformation(ex, "Video queued until peer is on LAN (chat {ChatId})", _chat.Id);
+            _userActions.LogInformation("Chat {Peer}: video queued for LAN delivery", _chat.PeerNickname);
+            MessageBox.Show(this, ex.Message, "Ожидание сети", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Send video failed in chat {ChatId}", _chat.Id);
+            _userActions.LogInformation("Chat {Peer}: send video failed ({Message})", _chat.PeerNickname, ex.Message);
+            MessageBox.Show(this, ex.Message, "Видео", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            await ReloadMessagesAsync().ConfigureAwait(true);
         }
     }
 
@@ -426,7 +530,7 @@ public sealed class ChatForm : Form
         {
             using var sfd = new SaveFileDialog
             {
-                Title = "Сохранить документ",
+                Title = "Сохранить файл",
                 FileName = string.IsNullOrEmpty(line.FileSuggestedName) ? "document" : line.FileSuggestedName,
                 Filter = "Все файлы|*.*",
                 OverwritePrompt = true,
