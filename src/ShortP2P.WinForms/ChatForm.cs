@@ -40,9 +40,33 @@ public sealed class ChatForm : Form
         BorderStyle = BorderStyle.FixedSingle,
         MaxLength = ChatP2pSession.MaxMessageChars,
     };
-    private readonly Button _attachImage = new() { Text = "Image…", Dock = DockStyle.Right, AutoSize = true };
-    private readonly Button _attachDocument = new() { Text = "Document…", Dock = DockStyle.Right, AutoSize = true };
-    private readonly Button _send = new() { Text = "Send", Dock = DockStyle.Right, AutoSize = true };
+    private readonly Button _attachImage = new()
+    {
+        Text = "🖼",
+        Dock = DockStyle.Right,
+        Width = 50,
+        Height = 36,
+        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point),
+     };
+    private readonly Button _attachDocument = new()
+    {
+        Text = "📄",
+        Dock = DockStyle.Right,
+        Width = 50,
+        Height = 20,
+        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point),
+
+    };
+    private readonly Button _send = new()
+    {
+        Text = "➤",
+        Dock = DockStyle.Right,
+        Width = 50,
+        Height = 20,
+        Font = new Font("Segoe UI", 10, FontStyle.Bold, GraphicsUnit.Point),
+
+    };
+    private readonly ToolTip _buttonTooltips = new() { ShowAlways = true };
     private ChatP2pSession? _p2PSession;
 
     public ChatForm(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo, UserP2pRuntime p2PRuntime,
@@ -74,7 +98,7 @@ public sealed class ChatForm : Form
         };
         top.Controls.Add(_peerInfoLabel, 0, 0);
 
-        var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 88, ColumnCount = 4 };
+        var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 76, ColumnCount = 4 };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -83,6 +107,10 @@ public sealed class ChatForm : Form
         bottom.Controls.Add(_attachImage, 1, 0);
         bottom.Controls.Add(_attachDocument, 2, 0);
         bottom.Controls.Add(_send, 3, 0);
+
+        _buttonTooltips.SetToolTip(_attachImage, "Отправить изображение");
+        _buttonTooltips.SetToolTip(_attachDocument, "Отправить документ");
+        _buttonTooltips.SetToolTip(_send, "Отправить сообщение");
 
         // Порядок: Fill сначала, затем Top/Bottom — иначе между шапкой и вводом остаётся пустая полоса.
         Controls.Add(_messages);
