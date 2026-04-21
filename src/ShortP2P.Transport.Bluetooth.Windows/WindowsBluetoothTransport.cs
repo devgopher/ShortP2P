@@ -148,11 +148,21 @@ public sealed class WindowsBluetoothTransport : ITransport
             return;
         _bleRxCharacteristic = charResult.Characteristic;
         _bleRxCharacteristic.WriteRequested += OnBleWriteRequested;
-        _bleServiceProvider.StartAdvertising(new GattServiceProviderAdvertisingParameters
+        StartBleGattProviderAdvertising(_bleServiceProvider);
+    }
+
+    /// <summary>
+    ///     Включает периферийную рекламу BLE для зарегистрированного GATT-провайдера (обнаружение и приём подключений).
+    /// </summary>
+    private static void StartBleGattProviderAdvertising(GattServiceProvider provider)
+    {
+        var advertising = new GattServiceProviderAdvertisingParameters
         {
             IsDiscoverable = true,
-            IsConnectable = true
-        });
+            IsConnectable = true,
+        };
+
+        provider.StartAdvertising(advertising);
     }
 
     private async void OnBleWriteRequested(GattLocalCharacteristic sender, GattWriteRequestedEventArgs args)
@@ -356,7 +366,8 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
-        if (_rfcommProvider == null) return;
+        if (_rfcommProvider == null && _bleServiceProvider == null)
+            return;
 
         try
         {
@@ -373,16 +384,19 @@ public sealed class WindowsBluetoothTransport : ITransport
         _outbound.Clear();
         _bleOutboundRx.Clear();
 
-        try
+        if (_rfcommProvider != null)
         {
-            _rfcommProvider.StopAdvertising();
-        }
-        catch
-        {
-            // ignore
-        }
+            try
+            {
+                _rfcommProvider.StopAdvertising();
+            }
+            catch
+            {
+                // ignore
+            }
 
-        _rfcommProvider = null;
+            _rfcommProvider = null;
+        }
         if (_bleRxCharacteristic != null)
         {
             _bleRxCharacteristic.WriteRequested -= OnBleWriteRequested;
