@@ -740,9 +740,13 @@ public sealed class ChatForm : Form
     private static Color GetPaletteColor(string key)
     {
         var hash = Math.Abs(StringComparer.Ordinal.GetHashCode(key));
-        var idx = hash % 64;
-        var hue = idx * (360.0 / 64.0);
-        return ColorFromHsl(hue, 0.72, 0.44);
+        const int hueSteps = 12;
+        const int lightSteps = 3;
+        var h = hash % hueSteps;
+        var lBand = (hash / hueSteps) % lightSteps;
+        var hue = h * (360.0 / hueSteps);
+        var lightness = 0.40 + lBand * 0.06;
+        return ColorFromHsl(hue, 0.72, lightness);
     }
 
     private static Color ColorFromHsl(double hue, double saturation, double lightness)

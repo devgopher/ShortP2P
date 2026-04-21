@@ -461,9 +461,13 @@ public partial class ChatDetailPage : ContentPage
     private static Color GetPaletteColor(string key)
     {
         var hash = Math.Abs(key.GetHashCode(StringComparison.Ordinal));
-        var idx = hash % 64;
-        var hue = idx * (360.0f / 64.0f);
-        return Color.FromHsla(hue / 360.0f, 0.72f, 0.44f);
+        const int hueSteps = 12;
+        const int lightSteps = 3;
+        var h = hash % hueSteps;
+        var lBand = (hash / hueSteps) % lightSteps;
+        var hueDeg = h * (360.0f / hueSteps);
+        var lightness = 0.40f + lBand * 0.06f;
+        return Color.FromHsla(hueDeg / 360.0f, 0.72f, lightness);
     }
 
     private void RefreshPeerPresenceLabel()
