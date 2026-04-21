@@ -26,11 +26,12 @@ public sealed class AdaptiveChatTransportLayer(
             return ValueTask.CompletedTask;
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var localCts = _cts;
         var inboundTransports = inboundTransportsProvider();
         if (inboundTransports.Count == 0)
             throw new InvalidOperationException("No inbound transports are started.");
         foreach (var transport in inboundTransports)
-            _directReceiveTasks.Add(Task.Run(() => DirectReceiveLoopAsync(transport, _cts.Token), _cts.Token));
+            _directReceiveTasks.Add(Task.Run(() => DirectReceiveLoopAsync(transport, localCts.Token), localCts.Token));
 
         return ValueTask.CompletedTask;
     }
@@ -77,9 +78,7 @@ public sealed class AdaptiveChatTransportLayer(
 
         foreach (var peerAddress in peerAddresses)
         {
-            var transport = transportResolver(peerAddress ??
-                                              throw new InvalidOperationException(
-                                                  $"Transport is not started for {peerAddress.Kind}."));
+            var transport = transportResolver(peerAddress);
 
             if (transport == null) continue;
             try

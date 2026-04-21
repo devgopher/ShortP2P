@@ -5,6 +5,7 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Transport.Bluetooth.Windows;
 
 namespace ShortP2P.WinForms;
 
@@ -26,6 +27,8 @@ public sealed class MainChatsForm : Form
     private readonly ILogger<LocalNetworkScanForm> _lanScanLog;
     private readonly ILogger<UserAction> _userActions;
     private readonly ChatMediaOptions _chatMedia;
+    private readonly Label _udpTransportIndicator = new() { AutoSize = true };
+    private readonly Label _bluetoothTransportIndicator = new() { AutoSize = true };
     private int? _focusedChatId;
     private bool _knownChatsInitialized;
 
@@ -53,12 +56,13 @@ public sealed class MainChatsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             Padding = new Padding(12)
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         var hint = new Label
@@ -93,6 +97,17 @@ public sealed class MainChatsForm : Form
         btnRouting.Click += OnRoutingSettings;
         btnLogout.Click += OnLogout;
 
+        var transportIndicators = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            Dock = DockStyle.Bottom,
+            Padding = new Padding(0, 6, 0, 0),
+        };
+        transportIndicators.Controls.Add(_udpTransportIndicator);
+        transportIndicators.Controls.Add(new Label { AutoSize = true, Text = "   " });
+        transportIndicators.Controls.Add(_bluetoothTransportIndicator);
+
         _list.DisplayMember = nameof(ChatEntity.PeerNickname);
         _list.ValueMember = nameof(ChatEntity.Id);
         _list.DoubleClick += async (_, _) => await OpenSelectedChatAsync().ConfigureAwait(true);
@@ -102,6 +117,7 @@ public sealed class MainChatsForm : Form
         root.Controls.Add(hint, 0, 1);
         root.Controls.Add(_list, 0, 2);
         root.Controls.Add(toolbar, 0, 3);
+        root.Controls.Add(transportIndicators, 0, 4);
         _list.Dock = DockStyle.Fill;
         Controls.Add(root);
 
@@ -267,6 +283,7 @@ public sealed class MainChatsForm : Form
             }
 
             _list.EndUpdate();
+            UpdateTransportIndicators();
         }
         finally
         {
@@ -465,5 +482,27 @@ public sealed class MainChatsForm : Form
         TextRenderer.DrawText(e.Graphics, chat.PeerNickname, font, textBounds, e.ForeColor,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         e.DrawFocusRectangle();
+    }
+
+    private void UpdateTransportIndicators()
+    {
+        UpdateIndicator(_udpTransportIndicator, "UDP", _p2P.Settings.EnableUdpTransport, _p2P.LocalScan.IsUdpListening);
+        var btRunning = _p2P.LocalScan.IsBluetoothListening;
+        if (_p2P.BluetoothTransport is WindowsBluetoothTransport wbt)
+            btRunning = wbt.IsRunning;
+        UpdateIndicator(_bluetoothTransportIndicator, "Bluetooth", _p2P.Settings.EnableBluetoothTransport, btRunning);
+    }
+
+    private static void UpdateIndicator(Label label, string name, bool enabled, bool available)
+    {
+        if (!enabled)
+        {
+            label.Text = $"● {name}: отключен";
+            label.ForeColor = Color.Gray;
+            return;
+        }
+
+        label.Text = available ? $"● {name}: доступен" : $"● {name}: недоступен";
+        label.ForeColor = available ? Color.ForestGreen : Color.IndianRed;
     }
 }

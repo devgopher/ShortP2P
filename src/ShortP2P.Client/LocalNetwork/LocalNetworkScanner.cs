@@ -16,6 +16,9 @@ namespace ShortP2P.Client.LocalNetwork;
 /// </summary>
 public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITransport? bluetoothTransport = null) : IAsyncDisposable
 {
+    public bool IsUdpListening => _presenceUdp != null;
+    public bool IsBluetoothListening => _isBluetoothListening;
+
     /// <summary>Удалять пира из списка, если не было пинга дольше этого (несколько периодов рассылки).</summary>
     private TimeSpan DiscoveryStaleAfter =>
         TimeSpan.FromTicks(Math.Max(TimeSpan.FromSeconds(45).Ticks,
@@ -38,6 +41,7 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
     private Task? _periodicScanLoop;
     private Task? _staleLoop;
     private UserEntity? _user;
+    private bool _isBluetoothListening;
 
     /// <summary>Снимок последних найденных пиров (кроме текущего пользователя).</summary>
     public IReadOnlyList<DiscoveredLocalPeer> Clients
@@ -85,7 +89,10 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
         var token = _cts.Token;
         await _presenceUdp.StartAsync(cancellationToken).ConfigureAwait(false);
         if (bluetoothTransport != null)
+        {
             await bluetoothTransport.StartAsync(cancellationToken).ConfigureAwait(false);
+            _isBluetoothListening = true;
+        }
         _presenceReceiveLoop = Task.Run(() => PresenceReceiveLoopAsync(token), token);
         if (bluetoothTransport != null)
             _presenceBluetoothReceiveLoop = Task.Run(() => PresenceBluetoothReceiveLoopAsync(token), token);
@@ -144,6 +151,7 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
         _user = null;
         _entries.Clear();
         _bluetoothTargets.Clear();
+        _isBluetoothListening = false;
         lock (_snapshotSync)
             _snapshot = [];
     }

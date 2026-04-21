@@ -41,6 +41,8 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     public ChannelReader<TransportReceiveMessage> Inbound => _inbound.Reader;
 
+    public bool IsRunning => _rfcommProvider != null;
+
     public static bool IsUnavailableError(Exception ex)
     {
         for (var cur = ex; cur != null; cur = cur.InnerException)
