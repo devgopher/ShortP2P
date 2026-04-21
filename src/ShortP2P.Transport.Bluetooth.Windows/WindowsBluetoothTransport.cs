@@ -4,6 +4,7 @@ using System.Runtime.Versioning;
 using System.Threading.Channels;
 using ShortP2P.Transport.Abstractions;
 using Windows.Devices.Bluetooth;
+using Windows.Devices.Enumeration;
 using Windows.Devices.Bluetooth.Rfcomm;
 using Windows.Networking.Sockets;
 using Windows.Storage.Streams;
@@ -42,6 +43,32 @@ public sealed class WindowsBluetoothTransport : ITransport
     public ChannelReader<TransportReceiveMessage> Inbound => _inbound.Reader;
 
     public bool IsRunning => _rfcommProvider != null;
+
+    public async Task<IReadOnlyList<TransportAddress>> GetPairedDeviceAddressesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var selector = BluetoothDevice.GetDeviceSelectorFromPairingState(true);
+        var infos = await DeviceInformation.FindAllAsync(selector).AsTask(cancellationToken).ConfigureAwait(false);
+        var list = new List<TransportAddress>(infos.Count);
+        foreach (var info in infos)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var dev = await BluetoothDevice.FromIdAsync(info.Id).AsTask(cancellationToken).ConfigureAwait(false);
+                if (dev == null)
+                    continue;
+                list.Add(new TransportAddress(TransportKind.Bluetooth,
+                    BluetoothMacAddress.FromBluetoothAddress(dev.BluetoothAddress)));
+            }
+            catch
+            {
+                // skip broken pair item
+            }
+        }
+
+        return list;
+    }
 
     public static bool IsUnavailableError(Exception ex)
     {

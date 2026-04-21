@@ -331,6 +331,19 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
         var bt = bluetoothTransport;
         if (bt == null || !IsTransportEnabled(TransportKind.Bluetooth))
             return;
+        if (_bluetoothTargets.IsEmpty)
+        {
+            try
+            {
+                var paired = await TryGetPairedBluetoothAddressesAsync(bt, cancellationToken).ConfigureAwait(false);
+                foreach (var addr in paired)
+                    RememberBluetoothPeer(addr);
+            }
+            catch
+            {
+                // bluetooth subsystem unavailable
+            }
+        }
         foreach (var target in _bluetoothTargets.Values)
         {
             try
@@ -342,6 +355,18 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
                 // устройство выключено/вне зоны/не сопряжено
             }
         }
+    }
+
+    private static async Task<IReadOnlyList<TransportAddress>> TryGetPairedBluetoothAddressesAsync(
+        ITransport transport, CancellationToken cancellationToken)
+    {
+        var m = transport.GetType().GetMethod("GetPairedDeviceAddressesAsync",
+            [typeof(CancellationToken)]);
+        if (m == null || m.Invoke(transport, [cancellationToken]) is not Task t)
+            return [];
+        await t.ConfigureAwait(false);
+        var prop = t.GetType().GetProperty("Result");
+        return prop?.GetValue(t) as IReadOnlyList<TransportAddress> ?? [];
     }
 
     private async Task PeriodicScanLoopAsync(CancellationToken cancellationToken)
