@@ -172,7 +172,6 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
             return;
         }
 
-        bool shouldEnqueue;
         lock (_sync)
         {
             if (!_pending.TryGetValue(messageId, out var state))
@@ -214,7 +213,7 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
             if (buffer.Length > _options.MaxBinaryMessageBytes)
                 return;
 
-            shouldEnqueue = TrackDeliverOnce(messageId);
+            var shouldEnqueue = TrackDeliverOnce(messageId);
             if (shouldEnqueue)
                 _incoming.Writer.TryWrite(new IncomingBinaryMessage(buffer, msg.RemoteAddress));
         }

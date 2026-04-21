@@ -17,6 +17,7 @@ public static class IncomingChatInviteHandler
     /// </param>
     public static async Task TryAcceptAsync(ReadOnlyMemory<byte> datagram, AuthService auth, ChatRepository repo,
         Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, Task>? sendInviteReplyAsync,
+        TransportAddress? sourceAddress = null,
         CancellationToken cancellationToken = default)
     {
         if (!ChatInviteCodec.TryParse(datagram.Span, out var peerGuid, out var nick, out var pubJson, out var host,
@@ -40,11 +41,12 @@ public static class IncomingChatInviteHandler
         }
 
         var idShort = CompressedNetworkId.FromGuid(peerGuid).ToShortString();
+        var effectiveHost = ResolvePeerHost(host, sourceAddress);
         cancellationToken.ThrowIfCancellationRequested();
         var existing = await repo.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);
         if (existing != null)
         {
-            var mergedHost = PeerHostList.MergeAppend(existing.PeerHost, host);
+            var mergedHost = PeerHostList.MergeAppend(existing.PeerHost, effectiveHost);
             var chatPeerPort = existing.PeerPort is < 1 or > 65535 || existing.PeerPort == ChatInviteCodec.InviteUdpPort
                 ? PresencePingCodec.DefaultDataUdpPort
                 : existing.PeerPort;
@@ -58,7 +60,7 @@ public static class IncomingChatInviteHandler
             return;
         }
 
-        await repo.AddChatAsync(user.Id, nick, idShort, pubJson, host, PresencePingCodec.DefaultDataUdpPort)
+        await repo.AddChatAsync(user.Id, nick, idShort, pubJson, effectiveHost, PresencePingCodec.DefaultDataUdpPort)
             .ConfigureAwait(false);
 
         if (sendInviteReplyAsync != null)
@@ -67,8 +69,15 @@ public static class IncomingChatInviteHandler
             var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
             var reply = ChatInviteCodec.Build(user.Nickname, nid,
                 RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), myHost, ChatInviteCodec.InviteUdpPort);
-            var back = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(host), port));
+            var back = sourceAddress ?? UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(host), port));
             await sendInviteReplyAsync(reply, back, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private static string ResolvePeerHost(string inviteHost, TransportAddress? sourceAddress)
+    {
+        if (sourceAddress?.Kind == TransportKind.Bluetooth)
+            return BluetoothTransportAddress.ToMacString(sourceAddress.Data);
+        return inviteHost;
     }
 }

@@ -28,13 +28,20 @@ public static class LanChatStartFromDiscovery
             return LanChatStartResult.Failed("Выполните вход.");
 
         if (peer.TransportKind != TransportKind.Udp)
-            return LanChatStartResult.Failed("Для чата из списка нужен пир, найденный по UDP.");
+        {
+            if (peer.TransportKind != TransportKind.Bluetooth)
+                return LanChatStartResult.Failed("Неподдерживаемый транспорт пира.");
+            if (inviteListenerCoordinator?.BluetoothTransport == null)
+                return LanChatStartResult.Failed("Bluetooth transport is unavailable.");
+        }
 
         var idShort = CompressedNetworkId.FromGuid(peer.NetworkId).ToShortString();
         var existing = await chats.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);
         if (existing != null)
         {
-            var seenIp = UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address.ToString();
+            var seenIp = peer.TransportKind == TransportKind.Bluetooth
+                ? BluetoothTransportAddress.ToMacString(peer.SourceAddress.Data)
+                : UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address.ToString();
             var mergedHost = PeerHostList.MergeAppend(existing.PeerHost, seenIp);
             if (!string.Equals(mergedHost, existing.PeerHost, StringComparison.Ordinal))
             {
@@ -48,9 +55,10 @@ public static class LanChatStartFromDiscovery
             return LanChatStartResult.AlreadyExists(existing);
         }
 
-        var ip = UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address;
-        var ep = new IPEndPoint(ip, ChatInviteCodec.InviteUdpPort);
-        var dest = UdpTransportAddress.FromIPEndPoint(ep);
+        var dest = peer.TransportKind == TransportKind.Bluetooth
+            ? peer.SourceAddress
+            : UdpTransportAddress.FromIPEndPoint(
+                new IPEndPoint(UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address, ChatInviteCodec.InviteUdpPort));
 
         var host = LocalEndpointHelper.GetPreferredLanIPv4String();
         var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
@@ -63,7 +71,14 @@ public static class LanChatStartFromDiscovery
         try
         {
             await udp.StartAsync(cancellationToken).ConfigureAwait(false);
-            await udp.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
+            if (peer.TransportKind == TransportKind.Bluetooth)
+            {
+                var bt = inviteListenerCoordinator!.BluetoothTransport!;
+                await bt.StartAsync(cancellationToken).ConfigureAwait(false);
+                await bt.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
+            }
+            else
+                await udp.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

@@ -31,6 +31,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private Task? _inviteReceiveTask;
 
     public P2pRoutingSettings Settings { get; } = new();
+    public ITransport? BluetoothTransport => _bluetooth;
 
     /// <summary>Сканирование LAN по discovery-пингам (UDP 565, broadcast).</summary>
     public LocalNetworkScanner LocalScan { get; }
@@ -43,7 +44,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         _chats = chats;
         _chatMedia = chatMedia;
         _bluetooth = bluetooth;
-        LocalScan = new LocalNetworkScanner(Settings);
+        LocalScan = new LocalNetworkScanner(Settings, bluetooth);
     }
 
     public ChatP2pSession GetOrCreateSession(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo,
@@ -201,6 +202,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 await IncomingChatInviteHandler.TryAcceptAsync(buf, _auth, _chats,
                     async (payload, dest, _) => await udp.SendAsync(payload, dest, CancellationToken.None)
                         .ConfigureAwait(false),
+                    msg.RemoteAddress,
                     CancellationToken.None).ConfigureAwait(false);
             }
         }

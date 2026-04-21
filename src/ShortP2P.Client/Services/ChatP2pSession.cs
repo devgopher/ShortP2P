@@ -35,9 +35,7 @@ public sealed class ChatP2pSession(
     private const byte FrameCipher = 0x02;
     public const int MaxMessageChars = 32768;
 
-    private readonly P2pRoutingSettings? _routing = routingSettings;
     private readonly GuaranteedDeliveryPolicy _guaranteedDelivery = new();
-    private readonly LocalNetworkScanner? _localScan = localNetworkScanner;
     private readonly ChatMediaOptions _media = chatMediaOptions ?? new ChatMediaOptions();
 
     private readonly object _pendingSync = new();
@@ -84,7 +82,8 @@ public sealed class ChatP2pSession(
             _peerAddress = BluetoothTransportAddress.FromMac(mac);
         else
             throw new FormatException($"Unsupported peer host format: '{primary}'. Expected IPv4/IPv6 or Bluetooth MAC.");
-        ChatRelayRoute.FromChat(_peerAddress, chat.RelayRouteBlob);
+        if (_peerAddress.Kind == TransportKind.Bluetooth && localNetworkScanner != null)
+            localNetworkScanner.RememberBluetoothPeer(_peerAddress);
     }
 
     /// <summary>Обновляет строку чата из БД (тот же Id), не создавая новую сессию.</summary>
@@ -215,8 +214,8 @@ public sealed class ChatP2pSession(
     private async Task SendChatInviteWithRetryAsync(CancellationToken cancellationToken)
     {
         const int fallbackAttempts = 3;
-        var attempts = Math.Max(1, _routing?.SendFailureSearchAttempts ?? fallbackAttempts);
-        var delay = _routing?.SendFailureRetryDelay ?? TimeSpan.FromMilliseconds(350);
+        var attempts = Math.Max(1, routingSettings?.SendFailureSearchAttempts ?? fallbackAttempts);
+        var delay = routingSettings?.SendFailureRetryDelay ?? TimeSpan.FromMilliseconds(350);
 
         for (var i = 0; i < attempts; i++)
         {
@@ -243,14 +242,14 @@ public sealed class ChatP2pSession(
     };
 
     private bool CanQueueUntilPeerSeenOnLan() =>
-        _localScan != null && !string.IsNullOrWhiteSpace(chat.PeerNetworkIdShort);
+        localNetworkScanner != null && !string.IsNullOrWhiteSpace(chat.PeerNetworkIdShort);
 
     private void HookPresenceForPendingFlush()
     {
-        if (_localScan == null || _presenceHooked)
+        if (localNetworkScanner == null || _presenceHooked)
             return;
-        _localScan.ClientsChanged += OnLanClientsChangedForPendingFlush;
-        _localScan.DiscoveryPingReceived += OnDiscoveryPingForPendingFlush;
+        localNetworkScanner.ClientsChanged += OnLanClientsChangedForPendingFlush;
+        localNetworkScanner.DiscoveryPingReceived += OnDiscoveryPingForPendingFlush;
         _presenceHooked = true;
     }
 
@@ -259,10 +258,10 @@ public sealed class ChatP2pSession(
         lock (_pendingSync)
             _pendingOutgoing.Clear();
 
-        if (!_presenceHooked || _localScan == null)
+        if (!_presenceHooked || localNetworkScanner == null)
             return;
-        _localScan.ClientsChanged -= OnLanClientsChangedForPendingFlush;
-        _localScan.DiscoveryPingReceived -= OnDiscoveryPingForPendingFlush;
+        localNetworkScanner.ClientsChanged -= OnLanClientsChangedForPendingFlush;
+        localNetworkScanner.DiscoveryPingReceived -= OnDiscoveryPingForPendingFlush;
         _presenceHooked = false;
     }
 
@@ -276,7 +275,7 @@ public sealed class ChatP2pSession(
     {
         if (!HasPendingOutgoing())
             return;
-        if (!_localScan!.IsPeerSeenRecentlyOnLan(chat.PeerNetworkIdShort))
+        if (!localNetworkScanner!.IsPeerSeenRecentlyOnLan(chat.PeerNetworkIdShort))
             return;
         StartFlushPendingInBackground();
     }
@@ -398,7 +397,7 @@ public sealed class ChatP2pSession(
 
     private async Task DeliverOutgoingWireAsync(int messageId, byte[] wire, CancellationToken cancellationToken)
     {
-        var ackTimeout = (_routing?.LinkTechnology ?? LinkTechnologyPreset.Unlimited).GetMessageAckTimeout();
+        var ackTimeout = (routingSettings?.LinkTechnology ?? LinkTechnologyPreset.Unlimited).GetMessageAckTimeout();
         await _guaranteedDelivery.ExecuteAsync(
             async ct =>
             {
@@ -413,7 +412,7 @@ public sealed class ChatP2pSession(
             },
             null,
             false,
-            _routing,
+            routingSettings,
             cancellationToken).ConfigureAwait(false);
 
         await repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Delivered).ConfigureAwait(false);
@@ -684,8 +683,8 @@ public sealed class ChatP2pSession(
                         await IncomingChatInviteHandler.TryAcceptAsync(buf, auth, repo,
                             async (payload, dest, ct) =>
                             {
-                                await _udp!.SendAsync(payload, dest, ct).ConfigureAwait(false);
-                            }, cancellationToken).ConfigureAwait(false);
+                                await ResolveTransportForAddress(dest).SendAsync(payload, dest, ct).ConfigureAwait(false);
+                            }, msg.RemoteAddress, cancellationToken).ConfigureAwait(false);
                         continue;
                     case FrameHandshake when buf.Length == 129:
                     {
