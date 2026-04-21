@@ -31,7 +31,7 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     private readonly ConcurrentDictionary<ulong, StreamSocket> _outbound = new();
     private readonly ConcurrentDictionary<ulong, SemaphoreSlim> _sendLocks = new();
-    private readonly ILogger<WindowsBluetoothTransport> _logger;
+    // private readonly ILogger<WindowsBluetoothTransport> _logger;
 
     private RfcommServiceProvider? _rfcommProvider;
     private StreamSocketListener? _socketListener;
@@ -43,7 +43,7 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     public static bool IsUnavailableError(Exception ex)
     {
-        for (Exception? cur = ex; cur != null; cur = cur.InnerException)
+        for (var cur = ex; cur != null; cur = cur.InnerException)
         {
             if ((uint)cur.HResult == BluetoothUnavailableHResult)
                 return true;
@@ -72,7 +72,7 @@ public sealed class WindowsBluetoothTransport : ITransport
         }
         catch (Exception ex) when ((uint)ex.HResult == BluetoothUnavailableHResult)
         {
-            _logger.LogError("Bluetooth is unavailable (radio off or no adapter). Turn Bluetooth on and retry.");
+            //_logger.LogError("Bluetooth is unavailable (radio off or no adapter). Turn Bluetooth on and retry.");
             
             return;
         }

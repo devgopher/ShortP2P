@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using System.Diagnostics;
 
 namespace ShortP2P.WinForms;
 
@@ -18,6 +19,12 @@ internal sealed class RoutingSettingsForm : Form
     {
         DropDownStyle = ComboBoxStyle.DropDownList,
         Width = 360,
+        Anchor = AnchorStyles.Left,
+    };
+    private readonly CheckBox _suggestBluetoothPairing = new()
+    {
+        AutoSize = true,
+        Text = "Предлагать сопряжение по Bluetooth",
         Anchor = AnchorStyles.Left,
     };
 
@@ -43,7 +50,7 @@ internal sealed class RoutingSettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 6,
+            RowCount = 7,
             Padding = new Padding(12),
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
@@ -60,6 +67,22 @@ internal sealed class RoutingSettingsForm : Form
         Row(2, "Pause between attempts (ms)", _delayMs);
         Row(3, "FIND wait timeout (ms)", _searchTimeoutMs);
         Row(4, "Connection speed (presence ping, min bitrate)", _linkTechnology);
+        Row(5, "Bluetooth", _suggestBluetoothPairing);
+
+        var bluetoothTools = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            Anchor = AnchorStyles.Left,
+        };
+        var openBluetoothSettings = new Button
+        {
+            AutoSize = true,
+            Text = "Открыть Bluetooth настройки",
+        };
+        openBluetoothSettings.Click += (_, _) => OpenBluetoothSettings();
+        bluetoothTools.Controls.Add(openBluetoothSettings);
+        Row(6, "Быстрое действие", bluetoothTools);
 
         var buttons = new FlowLayoutPanel
         {
@@ -89,6 +112,20 @@ internal sealed class RoutingSettingsForm : Form
         _logger.LogInformation("P2P routing settings dialog opened");
     }
 
+    private void OpenBluetoothSettings()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("ms-settings:bluetooth") { UseShellExecute = true });
+            _userActions.LogInformation("P2P routing: opened system bluetooth settings");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not open Bluetooth settings");
+            MessageBox.Show(this, ex.Message, "Bluetooth", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
     private async Task LoadAsync()
     {
         var s = await _store.LoadAsync().ConfigureAwait(true);
@@ -98,6 +135,7 @@ internal sealed class RoutingSettingsForm : Form
         _searchTimeoutMs.Value = (decimal)s.SearchWaitTimeout.TotalMilliseconds;
         var li = Array.IndexOf(LinkTechnologyPresetExtensions.AllPresets, s.LinkTechnology);
         _linkTechnology.SelectedIndex = li >= 0 ? li : 0;
+        _suggestBluetoothPairing.Checked = s.SuggestBluetoothPairing;
     }
 
     private async Task SaveAsync()
@@ -113,6 +151,7 @@ internal sealed class RoutingSettingsForm : Form
             SendFailureRetryDelay = TimeSpan.FromMilliseconds((double)_delayMs.Value),
             SearchWaitTimeout = TimeSpan.FromMilliseconds((double)_searchTimeoutMs.Value),
             LinkTechnology = LinkTechnologyPresetExtensions.AllPresets[li],
+            SuggestBluetoothPairing = _suggestBluetoothPairing.Checked,
         };
         await _store.SaveAsync(s).ConfigureAwait(true);
         _userActions.LogInformation(
@@ -124,5 +163,6 @@ internal sealed class RoutingSettingsForm : Form
         _runtime.Settings.SendFailureRetryDelay = s.SendFailureRetryDelay;
         _runtime.Settings.SearchWaitTimeout = s.SearchWaitTimeout;
         _runtime.Settings.LinkTechnology = s.LinkTechnology;
+        _runtime.Settings.SuggestBluetoothPairing = s.SuggestBluetoothPairing;
     }
 }

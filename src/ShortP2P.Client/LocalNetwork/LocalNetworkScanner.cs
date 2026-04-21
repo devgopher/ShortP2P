@@ -200,12 +200,11 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
 
     private async Task PresenceReceiveLoopAsync(CancellationToken cancellationToken)
     {
-        var presenceUdp = _presenceUdp;
-        if (presenceUdp == null)
+        if (_presenceUdp == null)
             return;
         try
         {
-            await foreach (var msg in presenceUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (var msg in _presenceUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 var buf = msg.Payload.ToArray();
                 if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick, out var dataPort, out var advLink,
@@ -233,12 +232,11 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
 
     private async Task PresenceBluetoothReceiveLoopAsync(CancellationToken cancellationToken)
     {
-        var presenceBluetooth = bluetoothTransport;
-        if (presenceBluetooth == null)
+        if (bluetoothTransport == null)
             return;
         try
         {
-            await foreach (var msg in presenceBluetooth.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (var msg in bluetoothTransport.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 var buf = msg.Payload.ToArray();
                 if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick, out var dataPort, out var advLink,

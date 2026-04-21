@@ -17,4 +17,7 @@ public sealed class P2pRoutingSettings
 
     /// <summary>Пресет скорости для симуляции канала (data UDP / Bluetooth), не влияет на порт presence.</summary>
     public LinkTechnologyPreset LinkTechnology { get; set; } = LinkTechnologyPreset.Unlimited;
+
+    /// <summary>Показывать предложение открыть системное сопряжение Bluetooth при недоступном BT-пире.</summary>
+    public bool SuggestBluetoothPairing { get; set; }
 }

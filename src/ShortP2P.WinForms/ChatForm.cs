@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using System.Globalization;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client;
 using ShortP2P.Client.ChatMedia;
@@ -80,6 +81,7 @@ public sealed class ChatForm : Form
     };
     private readonly ToolTip _buttonTooltips = new() { ShowAlways = true };
     private ChatP2pSession? _p2PSession;
+    private bool _pairingPromptShown;
 
     public ChatForm(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo, UserP2pRuntime p2PRuntime,
         ILogger<ChatForm> logger, ILogger<UserAction> userActions, ChatMediaOptions media)
@@ -159,7 +161,7 @@ public sealed class ChatForm : Form
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Could not start UDP for chat {ChatId}", _chat.Id);
-                if (WindowsBluetoothTransport.IsUnavailableError(ex))
+                if (HandleBluetoothUnavailable(ex))
                     return;
                 MessageBox.Show(this, $"Could not start UDP: {ex.Message}", "P2P", MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
@@ -358,7 +360,7 @@ public sealed class ChatForm : Form
         {
             _logger.LogWarning(ex, "Send video failed in chat {ChatId}", _chat.Id);
             _userActions.LogInformation("Chat {Peer}: send video failed ({Message})", _chat.PeerNickname, ex.Message);
-            if (WindowsBluetoothTransport.IsUnavailableError(ex))
+            if (HandleBluetoothUnavailable(ex))
                 return;
             MessageBox.Show(this, ex.Message, "Видео", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
@@ -444,7 +446,7 @@ public sealed class ChatForm : Form
         {
             _logger.LogWarning(ex, "Send image failed in chat {ChatId}", _chat.Id);
             _userActions.LogInformation("Chat {Peer}: send image failed ({Message})", _chat.PeerNickname, ex.Message);
-            if (WindowsBluetoothTransport.IsUnavailableError(ex))
+            if (HandleBluetoothUnavailable(ex))
                 return;
             MessageBox.Show(this, ex.Message, "Изображение", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
@@ -517,7 +519,7 @@ public sealed class ChatForm : Form
         {
             _logger.LogWarning(ex, "Send document failed in chat {ChatId}", _chat.Id);
             _userActions.LogInformation("Chat {Peer}: send document failed ({Message})", _chat.PeerNickname, ex.Message);
-            if (WindowsBluetoothTransport.IsUnavailableError(ex))
+            if (HandleBluetoothUnavailable(ex))
                 return;
             MessageBox.Show(this, ex.Message, "Документ", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
@@ -548,7 +550,7 @@ public sealed class ChatForm : Form
         {
             _logger.LogWarning(ex, "Send message failed in chat {ChatId}", _chat.Id);
             _userActions.LogInformation("Chat {Peer}: send message failed ({Message})", _chat.PeerNickname, ex.Message);
-            if (WindowsBluetoothTransport.IsUnavailableError(ex))
+            if (HandleBluetoothUnavailable(ex))
                 return;
             MessageBox.Show(this, ex.Message, "Send failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
@@ -565,6 +567,38 @@ public sealed class ChatForm : Form
     }
 
     private string PeerInfoText(string statusLine) => $"Id: {_chat.PeerNetworkIdShort}\r\n{statusLine}";
+
+    private bool HandleBluetoothUnavailable(Exception ex)
+    {
+        if (!WindowsBluetoothTransport.IsUnavailableError(ex))
+            return false;
+
+        _userActions.LogInformation("Chat {Peer}: bluetooth unavailable ({Message})", _chat.PeerNickname, ex.Message);
+        if (!_p2PRuntime.Settings.SuggestBluetoothPairing || _pairingPromptShown)
+            return true;
+
+        _pairingPromptShown = true;
+        var answer = MessageBox.Show(this,
+            "Bluetooth-пир недоступен или не сопряжён. Открыть системные настройки Bluetooth для сопряжения?",
+            "Bluetooth",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question,
+            MessageBoxDefaultButton.Button1);
+        if (answer != DialogResult.Yes)
+            return true;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo("ms-settings:bluetooth") { UseShellExecute = true });
+            _userActions.LogInformation("Chat {Peer}: opened system bluetooth settings", _chat.PeerNickname);
+        }
+        catch (Exception openEx)
+        {
+            _logger.LogWarning(openEx, "Could not open Bluetooth settings");
+        }
+
+        return true;
+    }
 
     private void OnMessageDoubleClick(object? sender, EventArgs e)
     {
