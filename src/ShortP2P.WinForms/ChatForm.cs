@@ -211,6 +211,7 @@ public sealed class ChatForm : Form
             foreach (var m in rows)
             {
                 var sender = m.Outgoing ? "You" : _chat.PeerNickname;
+                var whoPrefix = m.Outgoing ? "[Я:]" : $"[{_chat.PeerNickname}:]";
                 var color = m.Outgoing ? Color.DodgerBlue : GetPaletteColor(sender);
                 var sentLocal = new DateTimeOffset(m.SentUtcTicks, TimeSpan.Zero).ToLocalTime();
                 var ts = sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture);
@@ -226,19 +227,19 @@ public sealed class ChatForm : Form
                         ? "видео"
                         : "документ";
                     var caption =
-                        $"[{ts}] {sender} · {kindCaption} · {name} · {kb} КБ{FileCaptionNewline}{FileDownloadHintPrefix}{FileDownloadHintAction}";
+                        $"{whoPrefix} [{ts}] · {kindCaption} · {name} · {kb} КБ{FileCaptionNewline}{FileDownloadHintPrefix}{FileDownloadHintAction}";
                     _messages.Items.Add(new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.File, fileBlob, name));
                 }
                 else if (m.PayloadKind == (int)ChatPayloadKind.Image && m.ImageBlob is { Length: > 0 } blob)
                 {
                     var kb = (blob.Length + 1023) / 1024;
                     var mimeShort = string.IsNullOrEmpty(m.MimeType) ? "image" : m.MimeType.Replace("image/", "");
-                    var caption = $"[{ts}] {sender} · {mimeShort} · {kb} КБ";
+                    var caption = $"{whoPrefix} [{ts}] · {mimeShort} · {kb} КБ";
                     _messages.Items.Add(new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.Image, blob, null));
                 }
                 else
                 {
-                    var full = $"[{ts}] {m.Text}";
+                    var full = $"{whoPrefix} [{ts}] {m.Text}";
                     _messages.Items.Add(new ChatLine(full, color, m.Outgoing, ds, ChatLineKind.Text, null, null));
                 }
             }

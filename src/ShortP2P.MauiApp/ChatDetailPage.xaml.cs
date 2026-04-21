@@ -132,6 +132,8 @@ public partial class ChatDetailPage : ContentPage
         foreach (var m in rows)
         {
             var sender = m.Outgoing ? "You" : Title ?? "Peer";
+            var peerNick = Title ?? "Peer";
+            var whoPrefix = m.Outgoing ? "[Я:]" : $"[{peerNick}:]";
             var color = m.Outgoing ? Colors.DodgerBlue : GetPaletteColor(sender);
             var sentLocal = new DateTimeOffset(m.SentUtcTicks, TimeSpan.Zero).ToLocalTime();
             var ts = sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture);
@@ -156,7 +158,7 @@ public partial class ChatDetailPage : ContentPage
                 fileBody.Spans.Add(new Span { Text = "Скачать", TextColor = Colors.DodgerBlue });
                 list.Add(new MessageRowVm
                 {
-                    CaptionLine = $"[{ts}] {sender} · {kindCaption}",
+                    CaptionLine = $"{whoPrefix} [{ts}] · {kindCaption}",
                     TextBody = "",
                     FileBodyFormatted = fileBody,
                     ShowTextBody = false,
@@ -176,7 +178,7 @@ public partial class ChatDetailPage : ContentPage
                 var mimeShort = string.IsNullOrEmpty(m.MimeType) ? "image" : m.MimeType.Replace("image/", "");
                 list.Add(new MessageRowVm
                 {
-                    CaptionLine = $"[{ts}] {sender} · {mimeShort} · {kb} КБ",
+                    CaptionLine = $"{whoPrefix} [{ts}] · {mimeShort} · {kb} КБ",
                     TextBody = "",
                     ShowTextBody = false,
                     IsImage = true,
@@ -193,7 +195,7 @@ public partial class ChatDetailPage : ContentPage
             {
                 list.Add(new MessageRowVm
                 {
-                    CaptionLine = $"[{ts}] {sender}",
+                    CaptionLine = $"{whoPrefix} [{ts}]",
                     TextBody = m.Text,
                     ShowTextBody = true,
                     IsImage = false,
