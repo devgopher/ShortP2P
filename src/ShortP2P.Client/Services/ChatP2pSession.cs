@@ -164,7 +164,7 @@ public sealed class ChatP2pSession(
         });
 
         _transportLayer = new AdaptiveChatTransportLayer(
-            () => _peerAddress,
+            () => _peerEndpoints.ToArray(),
             ResolveTransportForAddressOrNull,
             GetInboundTransports,
             IsTransportEnabled,

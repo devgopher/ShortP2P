@@ -8,7 +8,7 @@ namespace ShortP2P.Client.Services;
 ///     Транспортный слой чата: приём с локального UDP и отправка на адрес пира из чата.
 /// </summary>
 public sealed class AdaptiveChatTransportLayer(
-    Func<TransportAddress?> directPeerAddressProvider,
+    Func<TransportAddress[]?> directPeerAddressProvider,
     Func<TransportAddress, ITransport?> transportResolver,
     Func<IReadOnlyList<ITransport>> inboundTransportsProvider,
     Func<TransportKind, bool>? isTransportEnabled = null,
@@ -73,10 +73,26 @@ public sealed class AdaptiveChatTransportLayer(
 
     public async ValueTask SendPacketAsync(ReadOnlyMemory<byte> packet, CancellationToken cancellationToken = default)
     {
-        var peerAddress = directPeerAddressProvider() ?? throw new InvalidOperationException("Peer address is not set.");
-        var transport = transportResolver(peerAddress) ??
-                        throw new InvalidOperationException($"Transport is not started for {peerAddress.Kind}.");
-        await transport.SendAsync(packet, peerAddress, cancellationToken).ConfigureAwait(false);
+        var peerAddresses = directPeerAddressProvider() ?? throw new InvalidOperationException("Peer address is not set.");
+
+        foreach (var peerAddress in peerAddresses)
+        {
+            var transport = transportResolver(peerAddress ??
+                                              throw new InvalidOperationException(
+                                                  $"Transport is not started for {peerAddress.Kind}."));
+
+            if (transport == null) continue;
+            try
+            {
+                await transport.SendAsync(packet, peerAddress, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                continue;
+            }
+
+            break;
+        }
     }
 
     private async Task DirectReceiveLoopAsync(ITransport transport, CancellationToken cancellationToken)
