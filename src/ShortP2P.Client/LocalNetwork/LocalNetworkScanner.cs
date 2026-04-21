@@ -166,6 +166,13 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
         _bluetoothTargets[Convert.ToBase64String(address.Data)] = address;
     }
 
+    private bool IsTransportEnabled(TransportKind kind) => kind switch
+    {
+        TransportKind.Udp => routingSettings.EnableUdpTransport,
+        TransportKind.Bluetooth => routingSettings.EnableBluetoothTransport,
+        _ => false
+    };
+
     /// <summary>Один раунд discovery: UDP broadcast по каждой подсети (+ limited broadcast).</summary>
     public Task TriggerScanAsync(CancellationToken cancellationToken = default) =>
         SendDiscoveryBroadcastRoundAsync(cancellationToken);
@@ -206,6 +213,8 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
         {
             await foreach (var msg in _presenceUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
+                if (!IsTransportEnabled(msg.RemoteAddress.Kind))
+                    continue;
                 var buf = msg.Payload.ToArray();
                 if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick, out var dataPort, out var advLink,
                         out var advCaps))
@@ -238,6 +247,8 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
         {
             await foreach (var msg in bluetoothTransport.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
+                if (!IsTransportEnabled(msg.RemoteAddress.Kind))
+                    continue;
                 var buf = msg.Payload.ToArray();
                 if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick, out var dataPort, out var advLink,
                         out var advCaps))
@@ -287,7 +298,7 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
     {
         var u = _user;
         var presenceUdp = _presenceUdp;
-        if (u == null || presenceUdp == null) return;
+        if (u == null) return;
         var payload = PresencePingCodec.Build(
             CompressedNetworkId.FromShortString(u.NetworkIdShort).Value,
             u.Nickname,
@@ -295,21 +306,22 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
             routingSettings.LinkTechnology,
             PresencePeerCapabilities.Chat);
         
-        foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(PresencePingCodec.UdpPort))
-        {
-            try
+        if (presenceUdp != null && IsTransportEnabled(TransportKind.Udp))
+            foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(PresencePingCodec.UdpPort))
             {
-                var addr = UdpTransportAddress.FromIPEndPoint(ep);
-                await presenceUdp.SendAsync(payload, addr, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    var addr = UdpTransportAddress.FromIPEndPoint(ep);
+                    await presenceUdp.SendAsync(payload, addr, cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // один broadcast может быть недоступен
+                }
             }
-            catch
-            {
-                // один broadcast может быть недоступен
-            }
-        }
 
         var bt = bluetoothTransport;
-        if (bt == null)
+        if (bt == null || !IsTransportEnabled(TransportKind.Bluetooth))
             return;
         foreach (var target in _bluetoothTargets.Values)
         {

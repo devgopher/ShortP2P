@@ -10,6 +10,8 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
     private const string KDelayMs = "p2p_send_retry_delay_ms";
     private const string KSearchTimeoutMs = "p2p_search_timeout_ms";
     private const string KLinkTechnology = "p2p_link_technology";
+    private const string KEnableUdpTransport = "p2p_transport_udp_enabled";
+    private const string KEnableBluetoothTransport = "p2p_transport_bluetooth_enabled";
     private const string KBluetoothPairingPrompt = "p2p_bluetooth_pairing_prompt";
 
     private readonly ISessionStorage _storage = storage ?? throw new ArgumentNullException(nameof(storage));
@@ -28,6 +30,10 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
         if (int.TryParse(await _storage.GetAsync(KLinkTechnology).ConfigureAwait(false), out var lt) &&
             Enum.IsDefined(typeof(LinkTechnologyPreset), lt))
             s.LinkTechnology = (LinkTechnologyPreset)lt;
+        if (bool.TryParse(await _storage.GetAsync(KEnableUdpTransport).ConfigureAwait(false), out var udp))
+            s.EnableUdpTransport = udp;
+        if (bool.TryParse(await _storage.GetAsync(KEnableBluetoothTransport).ConfigureAwait(false), out var bt))
+            s.EnableBluetoothTransport = bt;
         if (bool.TryParse(await _storage.GetAsync(KBluetoothPairingPrompt).ConfigureAwait(false), out var bp))
             s.SuggestBluetoothPairing = bp;
         return s;
@@ -42,6 +48,9 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
         await _storage.SetAsync(KSearchTimeoutMs, ((int)settings.SearchWaitTimeout.TotalMilliseconds).ToString())
             .ConfigureAwait(false);
         await _storage.SetAsync(KLinkTechnology, ((int)settings.LinkTechnology).ToString()).ConfigureAwait(false);
+        await _storage.SetAsync(KEnableUdpTransport, settings.EnableUdpTransport.ToString()).ConfigureAwait(false);
+        await _storage.SetAsync(KEnableBluetoothTransport, settings.EnableBluetoothTransport.ToString())
+            .ConfigureAwait(false);
         await _storage.SetAsync(KBluetoothPairingPrompt, settings.SuggestBluetoothPairing.ToString())
             .ConfigureAwait(false);
     }

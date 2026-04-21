@@ -37,6 +37,15 @@ public sealed class AppDatabase
 
         try
         {
+            await _connection.ExecuteAsync("ALTER TABLE chats ADD COLUMN PeerEndpointsJson TEXT NULL");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
             await _connection.ExecuteAsync(
                 "ALTER TABLE messages ADD COLUMN DeliveryStatus INTEGER NOT NULL DEFAULT 2");
         }

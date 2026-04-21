@@ -1,5 +1,7 @@
 using ShortP2P.Client.Data;
 using ShortP2P.Client;
+using ShortP2P.Transport;
+using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Client.Services;
 
@@ -57,10 +59,12 @@ public sealed class ChatRepository
             if (existing != null)
             {
                 var mergedHost = PeerHostList.MergeAppend(existing.PeerHost, peerHost);
+                var mergedEndpoints = MergePeerEndpoints(existing, peerHost, peerPort);
                 await UpdateChatP2pRouteAsync(existing.Id, mergedHost, peerPort, relayRouteBlob: null, peerRsaPublicJson)
                     .ConfigureAwait(false);
                 existing.PeerHost = mergedHost;
                 existing.PeerPort = peerPort;
+                existing.PeerEndpointsJson = mergedEndpoints;
                 if (peerRsaPublicJson != null)
                     existing.PeerRsaPublicJson = peerRsaPublicJson.Trim();
                 existing.RelayRouteBlob = null;
@@ -78,6 +82,7 @@ public sealed class ChatRepository
                 PeerRsaPublicJson = peerRsaPublicJson.Trim(),
                 PeerHost = peerHost.Trim(),
                 PeerPort = peerPort,
+                PeerEndpointsJson = MergePeerEndpoints(null, peerHost, peerPort),
                 UpdatedUtcTicks = DateTime.UtcNow.Ticks,
             };
             await conn.InsertAsync(chat);
@@ -108,11 +113,32 @@ public sealed class ChatRepository
         if (chat == null) return;
         chat.PeerHost = peerHost.Trim();
         chat.PeerPort = peerPort;
+        chat.PeerEndpointsJson = MergePeerEndpoints(chat, peerHost, peerPort);
         chat.RelayRouteBlob = string.IsNullOrWhiteSpace(relayRouteBlob) ? null : relayRouteBlob.Trim();
         if (peerRsaPublicJson != null)
             chat.PeerRsaPublicJson = peerRsaPublicJson.Trim();
         chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
         await conn.UpdateAsync(chat);
+    }
+
+    private static string MergePeerEndpoints(ChatEntity? existing, string peerHost, int peerPort)
+    {
+        var merged = new List<TransportAddress>();
+        if (existing != null)
+            merged.AddRange(PeerTransportEndpoints.Parse(existing));
+        foreach (var host in (peerHost ?? string.Empty).Split([',', ';', '|', ' ', '\n', '\r', '\t'],
+                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (System.Net.IPAddress.TryParse(host, out var ip) && peerPort is >= 1 and <= 65535)
+                merged.Add(UdpTransportAddress.FromIPEndPoint(new System.Net.IPEndPoint(ip, peerPort)));
+            else if (BluetoothTransportAddress.TryParseMac(host, out var mac))
+                merged.Add(BluetoothTransportAddress.FromMac(mac));
+        }
+
+        var dedup = new Dictionary<string, TransportAddress>(StringComparer.Ordinal);
+        foreach (var x in merged)
+            dedup[$"{(int)x.Kind}:{Convert.ToBase64String(x.Data)}"] = x;
+        return PeerTransportEndpoints.Serialize(dedup.Values);
     }
 
     public async Task<IReadOnlyList<ChatMessageEntity>> ListMessagesAsync(int chatId)

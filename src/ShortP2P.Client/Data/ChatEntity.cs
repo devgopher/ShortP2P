@@ -22,6 +22,9 @@ public class ChatEntity
 
     public int PeerPort { get; set; } = 17201;
 
+    /// <summary>JSON-массив endpoint'ов пира: UDP/Bluetooth (TransportKind + Data base64).</summary>
+    public string? PeerEndpointsJson { get; set; }
+
     /// <summary>Сериализованный маршрут ретрансляции (первый хоп + цепочка), null/пусто — прямой UDP.</summary>
     public string? RelayRouteBlob { get; set; }
 

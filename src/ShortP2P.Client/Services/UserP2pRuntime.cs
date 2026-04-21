@@ -266,6 +266,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         Settings.SendFailureRetryDelay = persisted.SendFailureRetryDelay;
         Settings.SearchWaitTimeout = persisted.SearchWaitTimeout;
         Settings.LinkTechnology = persisted.LinkTechnology;
+        Settings.EnableUdpTransport = persisted.EnableUdpTransport;
+        Settings.EnableBluetoothTransport = persisted.EnableBluetoothTransport;
         Settings.SuggestBluetoothPairing = persisted.SuggestBluetoothPairing;
 
         await LocalScan.StartAsync(user, cancellationToken).ConfigureAwait(false);

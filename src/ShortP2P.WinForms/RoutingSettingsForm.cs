@@ -27,6 +27,9 @@ internal sealed class RoutingSettingsForm : Form
         Text = "Предлагать сопряжение по Bluetooth",
         Anchor = AnchorStyles.Left,
     };
+    private readonly CheckBox _enableUdpTransport = new() { AutoSize = true, Text = "UDP", Anchor = AnchorStyles.Left };
+    private readonly CheckBox _enableBluetoothTransport = new()
+        { AutoSize = true, Text = "Bluetooth", Anchor = AnchorStyles.Left };
 
     public RoutingSettingsForm(P2pRoutingSettingsStore store, UserP2pRuntime runtime,
         ILogger<RoutingSettingsForm> logger,
@@ -50,7 +53,7 @@ internal sealed class RoutingSettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 7,
+            RowCount = 8,
             Padding = new Padding(12),
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
@@ -67,7 +70,16 @@ internal sealed class RoutingSettingsForm : Form
         Row(2, "Pause between attempts (ms)", _delayMs);
         Row(3, "FIND wait timeout (ms)", _searchTimeoutMs);
         Row(4, "Connection speed (presence ping, min bitrate)", _linkTechnology);
-        Row(5, "Bluetooth", _suggestBluetoothPairing);
+        var transportPanel = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            Anchor = AnchorStyles.Left,
+        };
+        transportPanel.Controls.Add(_enableUdpTransport);
+        transportPanel.Controls.Add(_enableBluetoothTransport);
+        Row(5, "Транспорт", transportPanel);
+        Row(6, "Bluetooth", _suggestBluetoothPairing);
 
         var bluetoothTools = new FlowLayoutPanel
         {
@@ -82,7 +94,7 @@ internal sealed class RoutingSettingsForm : Form
         };
         openBluetoothSettings.Click += (_, _) => OpenBluetoothSettings();
         bluetoothTools.Controls.Add(openBluetoothSettings);
-        Row(6, "Быстрое действие", bluetoothTools);
+        Row(7, "Быстрое действие", bluetoothTools);
 
         var buttons = new FlowLayoutPanel
         {
@@ -135,6 +147,8 @@ internal sealed class RoutingSettingsForm : Form
         _searchTimeoutMs.Value = (decimal)s.SearchWaitTimeout.TotalMilliseconds;
         var li = Array.IndexOf(LinkTechnologyPresetExtensions.AllPresets, s.LinkTechnology);
         _linkTechnology.SelectedIndex = li >= 0 ? li : 0;
+        _enableUdpTransport.Checked = s.EnableUdpTransport;
+        _enableBluetoothTransport.Checked = s.EnableBluetoothTransport;
         _suggestBluetoothPairing.Checked = s.SuggestBluetoothPairing;
     }
 
@@ -151,6 +165,8 @@ internal sealed class RoutingSettingsForm : Form
             SendFailureRetryDelay = TimeSpan.FromMilliseconds((double)_delayMs.Value),
             SearchWaitTimeout = TimeSpan.FromMilliseconds((double)_searchTimeoutMs.Value),
             LinkTechnology = LinkTechnologyPresetExtensions.AllPresets[li],
+            EnableUdpTransport = _enableUdpTransport.Checked,
+            EnableBluetoothTransport = _enableBluetoothTransport.Checked,
             SuggestBluetoothPairing = _suggestBluetoothPairing.Checked,
         };
         await _store.SaveAsync(s).ConfigureAwait(true);
@@ -163,6 +179,8 @@ internal sealed class RoutingSettingsForm : Form
         _runtime.Settings.SendFailureRetryDelay = s.SendFailureRetryDelay;
         _runtime.Settings.SearchWaitTimeout = s.SearchWaitTimeout;
         _runtime.Settings.LinkTechnology = s.LinkTechnology;
+        _runtime.Settings.EnableUdpTransport = s.EnableUdpTransport;
+        _runtime.Settings.EnableBluetoothTransport = s.EnableBluetoothTransport;
         _runtime.Settings.SuggestBluetoothPairing = s.SuggestBluetoothPairing;
     }
 }

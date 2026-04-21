@@ -60,6 +60,7 @@ public sealed class ChatP2pSession(
     private AdaptiveChatTransportLayer? _transportLayer;
 
     private TransportAddress? _peerAddress;
+    private List<TransportAddress> _peerEndpoints = [];
     private RsaPublicKey? _peerPublicKey;
 
     public event EventHandler? MessagesChanged;
@@ -75,15 +76,23 @@ public sealed class ChatP2pSession(
     private void RebuildRouteFromChat()
     {
         _peerPublicKey = RsaKeySerializer.DeserializePublic(chat.PeerRsaPublicJson);
-        var primary = PeerHostList.PrimaryHost(chat.PeerHost);
-        if (IPAddress.TryParse(primary, out var ip))
-            _peerAddress = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(ip, chat.PeerPort));
-        else if (BluetoothTransportAddress.TryParseMac(primary, out var mac))
-            _peerAddress = BluetoothTransportAddress.FromMac(mac);
-        else
-            throw new FormatException($"Unsupported peer host format: '{primary}'. Expected IPv4/IPv6 or Bluetooth MAC.");
-        if (_peerAddress.Kind == TransportKind.Bluetooth && localNetworkScanner != null)
-            localNetworkScanner.RememberBluetoothPeer(_peerAddress);
+        _peerEndpoints = PeerTransportEndpoints.Parse(chat).ToList();
+        if (_peerEndpoints.Count == 0)
+        {
+            var primary = PeerHostList.PrimaryHost(chat.PeerHost);
+            if (IPAddress.TryParse(primary, out var ip))
+                _peerEndpoints.Add(UdpTransportAddress.FromIPEndPoint(new IPEndPoint(ip, chat.PeerPort)));
+            else if (BluetoothTransportAddress.TryParseMac(primary, out var mac))
+                _peerEndpoints.Add(BluetoothTransportAddress.FromMac(mac));
+            else
+                throw new FormatException(
+                    $"Unsupported peer host format: '{primary}'. Expected IPv4/IPv6 or Bluetooth MAC.");
+        }
+
+        _peerAddress = _peerEndpoints[0];
+        foreach (var ep in _peerEndpoints)
+            if (ep.Kind == TransportKind.Bluetooth && localNetworkScanner != null)
+                localNetworkScanner.RememberBluetoothPeer(ep);
     }
 
     /// <summary>Обновляет строку чата из БД (тот же Id), не создавая новую сессию.</summary>
@@ -103,17 +112,12 @@ public sealed class ChatP2pSession(
 
     private bool ShouldAcceptIncomingFrom(TransportAddress from)
     {
+        if (!IsTransportEnabled(from.Kind))
+            return false;
+        if (_peerEndpoints.Any(x => x.Kind == from.Kind && x.Data.AsSpan().SequenceEqual(from.Data)))
+            return true;
         try
         {
-            if (from.Kind == TransportKind.Bluetooth)
-            {
-                if (_peerAddress?.Kind != TransportKind.Bluetooth)
-                    return false;
-                var expected = _peerAddress.Data;
-                var actual = from.Data;
-                return expected.Length == actual.Length && expected.AsSpan().SequenceEqual(actual);
-            }
-
             var ep = UdpTransportAddress.ToIPEndPoint(from);
             if (ep.Port == chat.PeerPort)
             {
@@ -145,9 +149,14 @@ public sealed class ChatP2pSession(
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        _udp = new UdpTransport(user.DataUdpPort);
-        await _udp.StartAsync(cancellationToken).ConfigureAwait(false);
-        if (bluetoothTransport != null)
+        if (IsTransportEnabled(TransportKind.Udp))
+        {
+            _udp = new UdpTransport(user.DataUdpPort);
+            await _udp.StartAsync(cancellationToken).ConfigureAwait(false);
+        }
+        else
+            _udp = null;
+        if (bluetoothTransport != null && IsTransportEnabled(TransportKind.Bluetooth))
             await bluetoothTransport.StartAsync(cancellationToken).ConfigureAwait(false);
         _prefixed = new PrefixedCipherTransport(_bridge, async (mem, dest, ct) =>
         {
@@ -158,6 +167,7 @@ public sealed class ChatP2pSession(
             () => _peerAddress,
             ResolveTransportForAddressOrNull,
             GetInboundTransports,
+            IsTransportEnabled,
             ShouldAcceptIncomingFrom);
         await _transportLayer.StartAsync(_cts.Token).ConfigureAwait(false);
         _transportReceiveTask = Task.Run(() => TransportReceiveLoopAsync(_cts.Token), _cts.Token);
@@ -603,24 +613,18 @@ public sealed class ChatP2pSession(
 
     private List<TransportAddress> BuildOrderedDirectPeerAddresses()
     {
-        if (_peerAddress?.Kind == TransportKind.Bluetooth)
-            return [_peerAddress];
-
         var list = new List<TransportAddress>();
-        foreach (var h in PeerHostList.ParseCandidates(chat.PeerHost))
+        if (_peerAddress != null && IsTransportEnabled(_peerAddress.Kind))
+            list.Add(_peerAddress);
+        foreach (var ep in _peerEndpoints)
         {
-            try
-            {
-                list.Add(UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(h), chat.PeerPort)));
-            }
-            catch
-            {
-                // skip
-            }
+            if (!IsTransportEnabled(ep.Kind))
+                continue;
+            if (list.Any(x => x.Kind == ep.Kind && x.Data.AsSpan().SequenceEqual(ep.Data)))
+                continue;
+            list.Add(ep);
         }
 
-        if (list.Count == 0 && _peerAddress != null)
-            list.Add(_peerAddress);
         return list;
     }
 
@@ -878,9 +882,9 @@ public sealed class ChatP2pSession(
     private IReadOnlyList<ITransport> GetInboundTransports()
     {
         var list = new List<ITransport>();
-        if (_udp != null)
+        if (_udp != null && IsTransportEnabled(TransportKind.Udp))
             list.Add(_udp);
-        if (bluetoothTransport != null)
+        if (bluetoothTransport != null && IsTransportEnabled(TransportKind.Bluetooth))
             list.Add(bluetoothTransport);
         return list;
     }
@@ -892,10 +896,17 @@ public sealed class ChatP2pSession(
     private ITransport? ResolveTransportForAddressOrNull(TransportAddress destination) =>
         destination.Kind switch
         {
-            TransportKind.Udp => _udp,
-            TransportKind.Bluetooth => bluetoothTransport,
+            TransportKind.Udp when IsTransportEnabled(TransportKind.Udp) => _udp,
+            TransportKind.Bluetooth when IsTransportEnabled(TransportKind.Bluetooth) => bluetoothTransport,
             _ => null
         };
+
+    private bool IsTransportEnabled(TransportKind kind) => kind switch
+    {
+        TransportKind.Udp => routingSettings?.EnableUdpTransport ?? true,
+        TransportKind.Bluetooth => routingSettings?.EnableBluetoothTransport ?? true,
+        _ => false
+    };
 
     private sealed class PrefixedCipherTransport(
         Channel<TransportReceiveMessage> bridge,
