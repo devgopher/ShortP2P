@@ -27,7 +27,8 @@ public sealed class ChatP2pSession(
     SynchronizationContext? uiSynchronizationContext = null,
     P2pRoutingSettings? routingSettings = null,
     LocalNetworkScanner? localNetworkScanner = null,
-    ChatMediaOptions? chatMediaOptions = null)
+    ChatMediaOptions? chatMediaOptions = null,
+    ITransport? bluetoothTransport = null)
     : IAsyncDisposable
 {
     private const byte FrameHandshake = 0x01;
@@ -61,7 +62,6 @@ public sealed class ChatP2pSession(
     private AdaptiveChatTransportLayer? _transportLayer;
 
     private TransportAddress? _peerAddress;
-    private ChatRelayRoute _route = null!;
     private RsaPublicKey? _peerPublicKey;
 
     public event EventHandler? MessagesChanged;
@@ -78,8 +78,13 @@ public sealed class ChatP2pSession(
     {
         _peerPublicKey = RsaKeySerializer.DeserializePublic(chat.PeerRsaPublicJson);
         var primary = PeerHostList.PrimaryHost(chat.PeerHost);
-        _peerAddress = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(primary), chat.PeerPort));
-        _route = ChatRelayRoute.FromChat(_peerAddress, chat.RelayRouteBlob);
+        if (IPAddress.TryParse(primary, out var ip))
+            _peerAddress = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(ip, chat.PeerPort));
+        else if (BluetoothTransportAddress.TryParseMac(primary, out var mac))
+            _peerAddress = BluetoothTransportAddress.FromMac(mac);
+        else
+            throw new FormatException($"Unsupported peer host format: '{primary}'. Expected IPv4/IPv6 or Bluetooth MAC.");
+        ChatRelayRoute.FromChat(_peerAddress, chat.RelayRouteBlob);
     }
 
     /// <summary>Обновляет строку чата из БД (тот же Id), не создавая новую сессию.</summary>
@@ -101,6 +106,15 @@ public sealed class ChatP2pSession(
     {
         try
         {
+            if (from.Kind == TransportKind.Bluetooth)
+            {
+                if (_peerAddress?.Kind != TransportKind.Bluetooth)
+                    return false;
+                var expected = _peerAddress.Data;
+                var actual = from.Data;
+                return expected.Length == actual.Length && expected.AsSpan().SequenceEqual(actual);
+            }
+
             var ep = UdpTransportAddress.ToIPEndPoint(from);
             if (ep.Port == chat.PeerPort)
             {
@@ -134,14 +148,17 @@ public sealed class ChatP2pSession(
 
         _udp = new UdpTransport(user.DataUdpPort);
         await _udp.StartAsync(cancellationToken).ConfigureAwait(false);
+        if (bluetoothTransport != null)
+            await bluetoothTransport.StartAsync(cancellationToken).ConfigureAwait(false);
         _prefixed = new PrefixedCipherTransport(_bridge, async (mem, dest, ct) =>
         {
-            await _udp!.SendAsync(mem, dest, ct).ConfigureAwait(false);
+            await ResolveTransportForAddress(dest).SendAsync(mem, dest, ct).ConfigureAwait(false);
         });
 
         _transportLayer = new AdaptiveChatTransportLayer(
             () => _peerAddress,
-            () => _udp,
+            ResolveTransportForAddressOrNull,
+            GetInboundTransports,
             ShouldAcceptIncomingFrom);
         await _transportLayer.StartAsync(_cts.Token).ConfigureAwait(false);
         _transportReceiveTask = Task.Run(() => TransportReceiveLoopAsync(_cts.Token), _cts.Token);
@@ -367,21 +384,16 @@ public sealed class ChatP2pSession(
 
     private static byte[] BuildOutgoingWire(ChatMessageEntity row)
     {
-        if (row.PayloadKind == (int)ChatPayloadKind.File)
+        return row.PayloadKind switch
         {
-            if (row.ImageBlob == null || row.ImageBlob.Length == 0)
-                throw new InvalidOperationException("File message has no payload.");
-            return ChatWireCodec.EncodeFile(row.Text, row.MimeType, row.ImageBlob);
-        }
-
-        if (row.PayloadKind == (int)ChatPayloadKind.Image)
-        {
-            if (row.ImageBlob == null || row.ImageBlob.Length == 0)
-                throw new InvalidOperationException("Image message has no payload.");
-            return ChatWireCodec.EncodeImage(row.MimeType, row.ImageBlob);
-        }
-
-        return ChatWireCodec.EncodeText(row.Text);
+            (int)ChatPayloadKind.File when row.ImageBlob == null || row.ImageBlob.Length == 0 =>
+                throw new InvalidOperationException("File message has no payload."),
+            (int)ChatPayloadKind.File => ChatWireCodec.EncodeFile(row.Text, row.MimeType, row.ImageBlob),
+            (int)ChatPayloadKind.Image when row.ImageBlob == null || row.ImageBlob.Length == 0 =>
+                throw new InvalidOperationException("Image message has no payload."),
+            (int)ChatPayloadKind.Image => ChatWireCodec.EncodeImage(row.MimeType, row.ImageBlob),
+            _ => ChatWireCodec.EncodeText(row.Text)
+        };
     }
 
     private async Task DeliverOutgoingWireAsync(int messageId, byte[] wire, CancellationToken cancellationToken)
@@ -592,6 +604,9 @@ public sealed class ChatP2pSession(
 
     private List<TransportAddress> BuildOrderedDirectPeerAddresses()
     {
+        if (_peerAddress?.Kind == TransportKind.Bluetooth)
+            return [_peerAddress];
+
         var list = new List<TransportAddress>();
         foreach (var h in PeerHostList.ParseCandidates(chat.PeerHost))
         {
@@ -843,6 +858,8 @@ public sealed class ChatP2pSession(
 
         if (_udp != null)
             await _udp.StopAsync(cancellationToken).ConfigureAwait(false);
+        if (bluetoothTransport != null)
+            await bluetoothTransport.StopAsync(cancellationToken).ConfigureAwait(false);
 
         _bridge.Writer.TryComplete();
         _cts?.Dispose();
@@ -858,6 +875,28 @@ public sealed class ChatP2pSession(
     }
 
     public ValueTask DisposeAsync() => StopAsync();
+
+    private IReadOnlyList<ITransport> GetInboundTransports()
+    {
+        var list = new List<ITransport>();
+        if (_udp != null)
+            list.Add(_udp);
+        if (bluetoothTransport != null)
+            list.Add(bluetoothTransport);
+        return list;
+    }
+
+    private ITransport ResolveTransportForAddress(TransportAddress destination) =>
+        ResolveTransportForAddressOrNull(destination) ??
+        throw new InvalidOperationException($"Transport is not started for {destination.Kind}.");
+
+    private ITransport? ResolveTransportForAddressOrNull(TransportAddress destination) =>
+        destination.Kind switch
+        {
+            TransportKind.Udp => _udp,
+            TransportKind.Bluetooth => bluetoothTransport,
+            _ => null
+        };
 
     private sealed class PrefixedCipherTransport(
         Channel<TransportReceiveMessage> bridge,

@@ -5,6 +5,7 @@ using ShortP2P.Client;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
+using ShortP2P.Transport.Bluetooth.Windows;
 
 namespace ShortP2P.WinForms;
 
@@ -158,6 +159,8 @@ public sealed class ChatForm : Form
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Could not start UDP for chat {ChatId}", _chat.Id);
+                if (WindowsBluetoothTransport.IsUnavailableError(ex))
+                    return;
                 MessageBox.Show(this, $"Could not start UDP: {ex.Message}", "P2P", MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
             }
@@ -355,6 +358,8 @@ public sealed class ChatForm : Form
         {
             _logger.LogWarning(ex, "Send video failed in chat {ChatId}", _chat.Id);
             _userActions.LogInformation("Chat {Peer}: send video failed ({Message})", _chat.PeerNickname, ex.Message);
+            if (WindowsBluetoothTransport.IsUnavailableError(ex))
+                return;
             MessageBox.Show(this, ex.Message, "Видео", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
@@ -439,6 +444,8 @@ public sealed class ChatForm : Form
         {
             _logger.LogWarning(ex, "Send image failed in chat {ChatId}", _chat.Id);
             _userActions.LogInformation("Chat {Peer}: send image failed ({Message})", _chat.PeerNickname, ex.Message);
+            if (WindowsBluetoothTransport.IsUnavailableError(ex))
+                return;
             MessageBox.Show(this, ex.Message, "Изображение", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
@@ -510,6 +517,8 @@ public sealed class ChatForm : Form
         {
             _logger.LogWarning(ex, "Send document failed in chat {ChatId}", _chat.Id);
             _userActions.LogInformation("Chat {Peer}: send document failed ({Message})", _chat.PeerNickname, ex.Message);
+            if (WindowsBluetoothTransport.IsUnavailableError(ex))
+                return;
             MessageBox.Show(this, ex.Message, "Документ", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
@@ -539,6 +548,8 @@ public sealed class ChatForm : Form
         {
             _logger.LogWarning(ex, "Send message failed in chat {ChatId}", _chat.Id);
             _userActions.LogInformation("Chat {Peer}: send message failed ({Message})", _chat.PeerNickname, ex.Message);
+            if (WindowsBluetoothTransport.IsUnavailableError(ex))
+                return;
             MessageBox.Show(this, ex.Message, "Send failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally

@@ -19,6 +19,7 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 public sealed class WindowsBluetoothTransport : ITransport
 {
     private const int DefaultChannelCapacity = 256;
+    private const uint BluetoothUnavailableHResult = 0x800710DF;
 
     private readonly Channel<TransportReceiveMessage> _inbound =
         Channel.CreateBounded<TransportReceiveMessage>(new BoundedChannelOptions(DefaultChannelCapacity)
@@ -40,6 +41,21 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     public ChannelReader<TransportReceiveMessage> Inbound => _inbound.Reader;
 
+    public static bool IsUnavailableError(Exception ex)
+    {
+        for (Exception? cur = ex; cur != null; cur = cur.InnerException)
+        {
+            if ((uint)cur.HResult == BluetoothUnavailableHResult)
+                return true;
+            if (cur is InvalidOperationException &&
+                (cur.Message.Contains("Bluetooth device not found or not paired", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("service not found on the remote device", StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
+
+        return false;
+    }
+
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -54,9 +70,9 @@ public sealed class WindowsBluetoothTransport : ITransport
             provider = await RfcommServiceProvider.CreateAsync(RfcommServiceId.SerialPort).AsTask(ct)
                 .ConfigureAwait(false);
         }
-        catch (Exception ex) when ((uint)ex.HResult == 0x800710DF)
+        catch (Exception ex) when ((uint)ex.HResult == BluetoothUnavailableHResult)
         {
-            //_logger.LogError("Bluetooth is unavailable (radio off or no adapter). Turn Bluetooth on and retry.", ex);
+            _logger.LogError("Bluetooth is unavailable (radio off or no adapter). Turn Bluetooth on and retry.");
             
             return;
         }

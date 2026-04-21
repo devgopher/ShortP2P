@@ -39,7 +39,8 @@ internal static class Program
             sp.GetRequiredService<P2pRoutingSettingsStore>(),
             sp.GetRequiredService<AuthService>(),
             sp.GetRequiredService<ChatRepository>(),
-            sp.GetRequiredService<ChatMediaOptions>()));
+            sp.GetRequiredService<ChatMediaOptions>(),
+            sp.GetRequiredService<BluetoothTransportRegistration>().Instance));
 
         services.AddTransient<LoginForm>();
         services.AddTransient<RegisterForm>();

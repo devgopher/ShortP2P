@@ -1,5 +1,4 @@
 using ShortP2P.Client.Routing;
-using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 using System.Threading.Channels;
 
@@ -10,12 +9,13 @@ namespace ShortP2P.Client.Services;
 /// </summary>
 public sealed class AdaptiveChatTransportLayer(
     Func<TransportAddress?> directPeerAddressProvider,
-    Func<UdpTransport?> udpProvider,
+    Func<TransportAddress, ITransport?> transportResolver,
+    Func<IReadOnlyList<ITransport>> inboundTransportsProvider,
     Func<TransportAddress, bool>? shouldAcceptFrom = null)
 {
     private readonly Channel<TransportReceiveMessage> _inbound = Channel.CreateUnbounded<TransportReceiveMessage>();
     private CancellationTokenSource? _cts;
-    private Task? _directReceiveTask;
+    private readonly List<Task> _directReceiveTasks = [];
 
     public ChannelReader<TransportReceiveMessage> Inbound => _inbound.Reader;
 
@@ -25,8 +25,11 @@ public sealed class AdaptiveChatTransportLayer(
             return ValueTask.CompletedTask;
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var udp = udpProvider() ?? throw new InvalidOperationException("UDP transport is not started.");
-        _directReceiveTask = Task.Run(() => DirectReceiveLoopAsync(udp, _cts.Token), _cts.Token);
+        var inboundTransports = inboundTransportsProvider();
+        if (inboundTransports.Count == 0)
+            throw new InvalidOperationException("No inbound transports are started.");
+        foreach (var transport in inboundTransports)
+            _directReceiveTasks.Add(Task.Run(() => DirectReceiveLoopAsync(transport, _cts.Token), _cts.Token));
 
         return ValueTask.CompletedTask;
     }
@@ -46,19 +49,22 @@ public sealed class AdaptiveChatTransportLayer(
             await _cts.CancelAsync().ConfigureAwait(false);
         }
 
-        if (_directReceiveTask != null)
+        if (_directReceiveTasks.Count > 0)
         {
-            try
+            foreach (var task in _directReceiveTasks)
             {
-                await _directReceiveTask.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // ignore
+                try
+                {
+                    await task.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // ignore
+                }
             }
         }
 
-        _directReceiveTask = null;
+        _directReceiveTasks.Clear();
         _cts.Dispose();
         _cts = null;
         _inbound.Writer.TryComplete();
@@ -66,16 +72,17 @@ public sealed class AdaptiveChatTransportLayer(
 
     public async ValueTask SendPacketAsync(ReadOnlyMemory<byte> packet, CancellationToken cancellationToken = default)
     {
-        var udp = udpProvider() ?? throw new InvalidOperationException("UDP transport is not started.");
         var peerAddress = directPeerAddressProvider() ?? throw new InvalidOperationException("Peer address is not set.");
-        await udp.SendAsync(packet, peerAddress, cancellationToken).ConfigureAwait(false);
+        var transport = transportResolver(peerAddress) ??
+                        throw new InvalidOperationException($"Transport is not started for {peerAddress.Kind}.");
+        await transport.SendAsync(packet, peerAddress, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task DirectReceiveLoopAsync(UdpTransport udp, CancellationToken cancellationToken)
+    private async Task DirectReceiveLoopAsync(ITransport transport, CancellationToken cancellationToken)
     {
         try
         {
-            await foreach (var msg in udp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (var msg in transport.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 var payload = msg.Payload;
                 if (shouldAcceptFrom != null &&

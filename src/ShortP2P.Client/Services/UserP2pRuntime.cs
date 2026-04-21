@@ -16,6 +16,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
     private readonly ChatMediaOptions _chatMedia;
+    private readonly ITransport? _bluetooth;
 
     private readonly object _sessionLock = new();
     private readonly Dictionary<int, ChatP2pSession> _chatSessions = new();
@@ -35,12 +36,13 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     public LocalNetworkScanner LocalScan { get; }
 
     public UserP2pRuntime(P2pRoutingSettingsStore store, AuthService auth, ChatRepository chats,
-        ChatMediaOptions chatMedia)
+        ChatMediaOptions chatMedia, ITransport? bluetooth = null)
     {
         _store = store;
         _auth = auth;
         _chats = chats;
         _chatMedia = chatMedia;
+        _bluetooth = bluetooth;
         LocalScan = new LocalNetworkScanner(Settings);
     }
 
@@ -55,7 +57,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 return existing;
             }
 
-            var s = new ChatP2pSession(chat, user, auth, repo, uiSync, Settings, LocalScan, _chatMedia);
+            var s = new ChatP2pSession(chat, user, auth, repo, uiSync, Settings, LocalScan, _chatMedia, _bluetooth);
             _chatSessions[chat.Id] = s;
             return s;
         }
@@ -160,7 +162,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 }
                 else
                 {
-                    session = new ChatP2pSession(c, user, auth, repo, uiSync, Settings, LocalScan, _chatMedia);
+                    session = new ChatP2pSession(c, user, auth, repo, uiSync, Settings, LocalScan, _chatMedia,
+                        _bluetooth);
                     _chatSessions[c.Id] = session;
                 }
 

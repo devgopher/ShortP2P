@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Drawing.Imaging;
 using Microsoft.Extensions.Logging;
+using ShortP2P.Transport;
 using ShortP2P.Client.Qr;
 
 namespace ShortP2P.WinForms;
@@ -15,7 +16,7 @@ public sealed class AddChatForm : Form
     {
         PlaceholderText = "Peer RSA public key JSON", Multiline = true, Height = 80, ScrollBars = ScrollBars.Vertical
     };
-    private readonly TextBox _host = new() { PlaceholderText = "Peer IP / host" };
+    private readonly TextBox _host = new() { PlaceholderText = "Peer IP / host / Bluetooth MAC (AA:BB:CC:DD:EE:FF)" };
     private readonly TextBox _port = new() { PlaceholderText = "UDP port" };
     private readonly Button _btnOk = new() { Text = "Save" };
     private readonly Button _btnCancel = new() { Text = "Cancel", DialogResult = DialogResult.Cancel };
@@ -165,7 +166,8 @@ public sealed class AddChatForm : Form
             return;
         }
 
-        if (PeerPort <= 0 || PeerPort > 65535)
+        var isBluetoothMac = BluetoothTransportAddress.TryParseMac(PeerHost, out _);
+        if (!isBluetoothMac && (PeerPort <= 0 || PeerPort > 65535))
         {
             MessageBox.Show(this, "Invalid peer port.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
