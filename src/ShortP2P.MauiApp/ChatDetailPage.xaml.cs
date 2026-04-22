@@ -47,6 +47,7 @@ public partial class ChatDetailPage : ContentPage
     private readonly ILogger<ChatDetailPage> _logger;
     private ChatP2pSession? _p2pSession;
     private string? _peerNetworkIdShort;
+    private IDispatcherTimer? _presenceRefreshTimer;
 
     public ChatDetailPage(AuthService auth, ChatRepository repo, UserP2pRuntime p2p, ChatMediaOptions media,
         ILogger<ChatDetailPage> logger)
@@ -84,6 +85,7 @@ public partial class ChatDetailPage : ContentPage
         }
 
         _p2p.LocalScan.ClientsChanged += OnPeerLanPresenceChanged;
+        EnsurePresenceRefreshTimerStarted();
         var uiSync = SynchronizationContext.Current;
         _p2pSession = _p2p.GetOrCreateSession(chat, user, _auth, _repo, uiSync);
         _p2pSession.MessagesChanged += OnP2PMessagesChanged;
@@ -109,6 +111,8 @@ public partial class ChatDetailPage : ContentPage
     {
         base.OnDisappearing();
         _p2p.LocalScan.ClientsChanged -= OnPeerLanPresenceChanged;
+        if (_presenceRefreshTimer != null)
+            _presenceRefreshTimer.Stop();
         _peerNetworkIdShort = null;
         if (_p2pSession != null)
         {
@@ -122,6 +126,18 @@ public partial class ChatDetailPage : ContentPage
 
     private void OnP2PMessagesChanged(object? sender, EventArgs e) =>
         MainThread.BeginInvokeOnMainThread(async () => await ReloadMessagesAsync().ConfigureAwait(true));
+
+    private void EnsurePresenceRefreshTimerStarted()
+    {
+        _presenceRefreshTimer ??= Dispatcher.CreateTimer();
+        _presenceRefreshTimer.Interval = TimeSpan.FromSeconds(2);
+        _presenceRefreshTimer.Tick -= OnPresenceRefreshTimerTick;
+        _presenceRefreshTimer.Tick += OnPresenceRefreshTimerTick;
+        if (!_presenceRefreshTimer.IsRunning)
+            _presenceRefreshTimer.Start();
+    }
+
+    private void OnPresenceRefreshTimerTick(object? sender, EventArgs e) => RefreshPeerPresenceLabel();
 
     private async Task ReloadMessagesAsync()
     {

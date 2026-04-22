@@ -15,6 +15,7 @@ public partial class ChatsPage : ContentPage
     private readonly UserP2pRuntime _p2p;
     private readonly ILogger<ChatsPage> _logger;
     private readonly ObservableCollection<ChatListRowVm> _chatRows = [];
+    private IDispatcherTimer? _presenceRefreshTimer;
 
     public ChatsPage(AuthService auth, ChatRepository chats, UserP2pRuntime p2p, ILogger<ChatsPage> logger)
     {
@@ -65,6 +66,7 @@ public partial class ChatsPage : ContentPage
         _chats.ChatListChanged += OnChatListChangedFromInvite;
         _p2p.LocalScan.ClientsChanged -= OnLanPresenceChanged;
         _p2p.LocalScan.ClientsChanged += OnLanPresenceChanged;
+        EnsurePresenceRefreshTimerStarted();
         var u = _auth.CurrentUser;
         if (u != null)
         {
@@ -86,6 +88,8 @@ public partial class ChatsPage : ContentPage
     protected override void OnDisappearing()
     {
         _p2p.LocalScan.ClientsChanged -= OnLanPresenceChanged;
+        if (_presenceRefreshTimer != null)
+            _presenceRefreshTimer.Stop();
         base.OnDisappearing();
     }
 
@@ -97,6 +101,18 @@ public partial class ChatsPage : ContentPage
         foreach (var row in _chatRows)
             row.IsPeerOnline = _p2p.LocalScan.IsPeerSeenRecentlyOnLan(row.Chat.PeerNetworkIdShort);
     }
+
+    private void EnsurePresenceRefreshTimerStarted()
+    {
+        _presenceRefreshTimer ??= Dispatcher.CreateTimer();
+        _presenceRefreshTimer.Interval = TimeSpan.FromSeconds(2);
+        _presenceRefreshTimer.Tick -= OnPresenceRefreshTimerTick;
+        _presenceRefreshTimer.Tick += OnPresenceRefreshTimerTick;
+        if (!_presenceRefreshTimer.IsRunning)
+            _presenceRefreshTimer.Start();
+    }
+
+    private void OnPresenceRefreshTimerTick(object? sender, EventArgs e) => UpdatePeerOnlineFlags();
 
     private async Task RefreshAsync()
     {
@@ -176,6 +192,8 @@ public partial class ChatsPage : ContentPage
     {
         _chats.ChatListChanged -= OnChatListChangedFromInvite;
         _p2p.LocalScan.ClientsChanged -= OnLanPresenceChanged;
+        if (_presenceRefreshTimer != null)
+            _presenceRefreshTimer.Stop();
         try
         {
             await _p2p.StopAsync().ConfigureAwait(true);
