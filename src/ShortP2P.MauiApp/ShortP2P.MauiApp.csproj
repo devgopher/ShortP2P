@@ -27,13 +27,13 @@
 	</PropertyGroup>
 
 	<!--
-	  Min API 24 = lowest android-* under local SDK (e.g. E:\AndroidSDK\platforms). Must align SupportedOSPlatformVersion
-	  with AndroidMinSdkVersion (XA1036). TargetPlatformVersion must be >= SupportedOSPlatformVersion (NETSDK1135).
+	  Android baseline is API 29 (Android 10). Keep SupportedOSPlatformVersion aligned with AndroidMinSdkVersion (XA1036).
+	  TargetPlatformVersion must be >= SupportedOSPlatformVersion (NETSDK1135).
 	-->
 	<PropertyGroup Condition="$(TargetFramework.Contains('-android'))">
 		<TargetPlatformVersion>34.0</TargetPlatformVersion>
-		<SupportedOSPlatformVersion>24.0</SupportedOSPlatformVersion>
-		<AndroidMinSdkVersion>24</AndroidMinSdkVersion>
+		<SupportedOSPlatformVersion>29.0</SupportedOSPlatformVersion>
+		<AndroidMinSdkVersion>29</AndroidMinSdkVersion>
 	</PropertyGroup>
 
 	<ItemGroup>
