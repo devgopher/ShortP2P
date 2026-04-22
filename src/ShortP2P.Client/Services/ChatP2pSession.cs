@@ -1,12 +1,10 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using ShortP2P.Client;
-using ShortP2P.Client.LocalNetwork;
-using System.Threading;
 using System.Threading.Channels;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
+using ShortP2P.Client.LocalNetwork;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Crypto;
@@ -18,7 +16,7 @@ using ShortP2P.Transport.Abstractions;
 namespace ShortP2P.Client.Services;
 
 /// <summary>
-/// One chat: UDP transport, RSA handshake (0x01 + 128 bytes), encrypted messenger frames (0x02 + ciphertext).
+///     One chat: UDP transport, RSA handshake (0x01 + 128 bytes), encrypted messenger frames (0x02 + ciphertext).
 /// </summary>
 public sealed class ChatP2pSession(
     ChatEntity chat,
@@ -35,34 +33,39 @@ public sealed class ChatP2pSession(
     private const byte FrameHandshake = 0x01;
     private const byte FrameCipher = 0x02;
     public const int MaxMessageChars = 32768;
+    private static readonly TimeSpan DecryptRecoveryCooldown = TimeSpan.FromSeconds(10);
+    private readonly SemaphoreSlim _flushPendingSem = new(1, 1);
 
     private readonly GuaranteedDeliveryPolicy _guaranteedDelivery = new();
     private readonly ChatMediaOptions _media = chatMediaOptions ?? new ChatMediaOptions();
+    private readonly List<int> _pendingOutgoing = [];
 
     private readonly object _pendingSync = new();
-    private readonly List<int> _pendingOutgoing = [];
-    private readonly SemaphoreSlim _flushPendingSem = new(1, 1);
-    private volatile bool _presenceHooked;
+    private readonly SemaphoreSlim _sessionSetup = new(1, 1);
 
     private readonly object _sync = new();
-    private readonly SemaphoreSlim _sessionSetup = new(1, 1);
-    private int _decryptRecoveryGate;
-    private DateTimeOffset _lastDecryptRecoveryUtc = DateTimeOffset.MinValue;
-    private static readonly TimeSpan DecryptRecoveryCooldown = TimeSpan.FromSeconds(10);
-    private UdpTransport? _udp;
     private Channel<TransportReceiveMessage> _bridge = Channel.CreateUnbounded<TransportReceiveMessage>();
-    private PrefixedCipherTransport? _prefixed;
-    private MessengerService? _messenger;
-    private P2PSession? _session;
     private CancellationTokenSource? _cts;
-    private Task? _transportReceiveTask;
-    private Task? _incomingTask;
+    private int _decryptRecoveryGate;
     private bool _incomingStarted;
-    private AdaptiveChatTransportLayer? _transportLayer;
+    private Task? _incomingTask;
+    private DateTimeOffset _lastDecryptRecoveryUtc = DateTimeOffset.MinValue;
+    private MessengerService? _messenger;
 
     private TransportAddress? _peerAddress;
     private List<TransportAddress> _peerEndpoints = [];
     private RsaPublicKey? _peerPublicKey;
+    private PrefixedCipherTransport? _prefixed;
+    private volatile bool _presenceHooked;
+    private P2PSession? _session;
+    private AdaptiveChatTransportLayer? _transportLayer;
+    private Task? _transportReceiveTask;
+    private UdpTransport? _udp;
+
+    public ValueTask DisposeAsync()
+    {
+        return StopAsync();
+    }
 
     public event EventHandler? MessagesChanged;
 
@@ -97,7 +100,6 @@ public sealed class ChatP2pSession(
                 if (ep.Kind == TransportKind.Bluetooth)
                     localNetworkScanner.RememberBluetoothPeer(ep);
                 else if (ep.Kind == TransportKind.Udp)
-                {
                     try
                     {
                         var ip = UdpTransportAddress.ToIPEndPoint(ep).Address.ToString();
@@ -107,7 +109,6 @@ public sealed class ChatP2pSession(
                     {
                         // invalid UDP endpoint payload in storage
                     }
-                }
             }
     }
 
@@ -136,13 +137,9 @@ public sealed class ChatP2pSession(
         {
             var ep = UdpTransportAddress.ToIPEndPoint(from);
             if (ep.Port == chat.PeerPort)
-            {
                 foreach (var h in PeerHostList.ParseCandidates(chat.PeerHost))
-                {
                     if (IPAddress.TryParse(h, out var ip) && ep.Address.Equals(ip))
                         return true;
-                }
-            }
 
             if (!string.IsNullOrEmpty(chat.RelayRouteBlob))
                 return true;
@@ -160,7 +157,7 @@ public sealed class ChatP2pSession(
         await StopAsync(cancellationToken).ConfigureAwait(false);
 
         _bridge = Channel.CreateUnbounded<TransportReceiveMessage>();
-        
+
         RebuildRouteFromChat();
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -171,13 +168,17 @@ public sealed class ChatP2pSession(
             await _udp.StartAsync(cancellationToken).ConfigureAwait(false);
         }
         else
+        {
             _udp = null;
+        }
+
         if (bluetoothTransport != null && IsTransportEnabled(TransportKind.Bluetooth))
             await bluetoothTransport.StartAsync(cancellationToken).ConfigureAwait(false);
-        _prefixed = new PrefixedCipherTransport(_bridge, async (mem, dest, ct) =>
-        {
-            await ResolveTransportForAddress(dest).SendAsync(mem, dest, ct).ConfigureAwait(false);
-        });
+        _prefixed = new PrefixedCipherTransport(_bridge,
+            async (mem, dest, ct) =>
+            {
+                await ResolveTransportForAddress(dest).SendAsync(mem, dest, ct).ConfigureAwait(false);
+            });
 
         _transportLayer = new AdaptiveChatTransportLayer(
             () => _peerEndpoints.ToArray(),
@@ -203,7 +204,8 @@ public sealed class ChatP2pSession(
     /// <summary>
     ///     Сохраняет новый IP/порт пира (прямой UDP), убирает цепочку ретрансляции и сбрасывает шифросессию.
     /// </summary>
-    public async Task ApplyPeerEndpointAsync(string peerHost, int peerPort, CancellationToken cancellationToken = default)
+    public async Task ApplyPeerEndpointAsync(string peerHost, int peerPort,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(peerHost);
         peerHost = peerHost.Trim();
@@ -239,19 +241,7 @@ public sealed class ChatP2pSession(
 
     private static string BuildInviteHosts()
     {
-        var hosts = LocalIPv4Resolver.GetAllUnicastIpv4Ordered();
-        var publicIp = LocalIPv4Resolver.TryGetPublicIpv4(TimeSpan.FromSeconds(2));
-        if (!string.IsNullOrWhiteSpace(publicIp) &&
-            !hosts.Contains(publicIp, StringComparer.OrdinalIgnoreCase))
-            hosts.Add(publicIp);
-
-        if (hosts.Count == 0)
-        {
-            var fallback = LocalEndpointHelper.GetPreferredLanIPv4String();
-            hosts.Add(fallback);
-        }
-
-        return string.Join(", ", hosts);
+        return LocalIPv4Resolver.GetInviteHostsCommaSeparated(TimeSpan.FromSeconds(2));
     }
 
     private async Task SendChatInviteWithRetryAsync(CancellationToken cancellationToken)
@@ -275,17 +265,22 @@ public sealed class ChatP2pSession(
         }
     }
 
-    private static bool IsDeferrableSendFailure(Exception ex) => ex switch
+    private static bool IsDeferrableSendFailure(Exception ex)
     {
-        IOException => true,
-        TimeoutException => true,
-        SocketException => true,
-        TaskCanceledException => true,
-        _ => ex.InnerException != null && IsDeferrableSendFailure(ex.InnerException)
-    };
+        return ex switch
+        {
+            IOException => true,
+            TimeoutException => true,
+            SocketException => true,
+            TaskCanceledException => true,
+            _ => ex.InnerException != null && IsDeferrableSendFailure(ex.InnerException)
+        };
+    }
 
-    private bool CanQueueUntilPeerSeenOnLan() =>
-        localNetworkScanner != null && !string.IsNullOrWhiteSpace(chat.PeerNetworkIdShort);
+    private bool CanQueueUntilPeerSeenOnLan()
+    {
+        return localNetworkScanner != null && !string.IsNullOrWhiteSpace(chat.PeerNetworkIdShort);
+    }
 
     private void HookPresenceForPendingFlush()
     {
@@ -299,7 +294,9 @@ public sealed class ChatP2pSession(
     private void UnhookPresenceAndClearPending()
     {
         lock (_pendingSync)
+        {
             _pendingOutgoing.Clear();
+        }
 
         if (!_presenceHooked || localNetworkScanner == null)
             return;
@@ -311,7 +308,9 @@ public sealed class ChatP2pSession(
     private bool HasPendingOutgoing()
     {
         lock (_pendingSync)
+        {
             return _pendingOutgoing.Count > 0;
+        }
     }
 
     private void OnLanClientsChangedForPendingFlush(object? sender, EventArgs e)
@@ -451,7 +450,9 @@ public sealed class ChatP2pSession(
                     await _messenger!.SendBinaryAsyncExpectAck(wire, dests, ackTimeout, ct).ConfigureAwait(false);
                 }
                 else
+                {
                     await _messenger!.SendBinaryAsync(wire, _peerAddress!, ct).ConfigureAwait(false);
+                }
             },
             null,
             false,
@@ -487,7 +488,10 @@ public sealed class ChatP2pSession(
                                    (ex is OperationCanceledException || IsDeferrableSendFailure(ex)))
         {
             lock (_pendingSync)
+            {
                 _pendingOutgoing.Add(messageId);
+            }
+
             throw new OutboundMessageQueuedException();
         }
         catch (Exception)
@@ -524,7 +528,10 @@ public sealed class ChatP2pSession(
                                    (ex is OperationCanceledException || IsDeferrableSendFailure(ex)))
         {
             lock (_pendingSync)
+            {
                 _pendingOutgoing.Add(messageId);
+            }
+
             throw new OutboundMessageQueuedException();
         }
         catch (Exception)
@@ -566,7 +573,10 @@ public sealed class ChatP2pSession(
                                    (ex is OperationCanceledException || IsDeferrableSendFailure(ex)))
         {
             lock (_pendingSync)
+            {
                 _pendingOutgoing.Add(messageId);
+            }
+
             throw new OutboundMessageQueuedException();
         }
         catch (Exception)
@@ -684,7 +694,8 @@ public sealed class ChatP2pSession(
                 if (_session != null && _messenger != null)
                     return;
                 _session = hs.Session;
-                _messenger = new MessengerService(_prefixed!, _session, CreateMessengerOptions(), OnDecryptFailureAsync);
+                _messenger =
+                    new MessengerService(_prefixed!, _session, CreateMessengerOptions(), OnDecryptFailureAsync);
                 ms = _messenger;
             }
 
@@ -697,18 +708,19 @@ public sealed class ChatP2pSession(
         }
     }
 
-    private MessengerOptions CreateMessengerOptions() =>
-        new MessengerOptions { MaxBinaryMessageBytes = _media.MaxMessengerBinaryBytes };
+    private MessengerOptions CreateMessengerOptions()
+    {
+        return new MessengerOptions { MaxBinaryMessageBytes = _media.MaxMessengerBinaryBytes };
+    }
 
     private async Task TransportReceiveLoopAsync(CancellationToken cancellationToken)
     {
-        try
-        {
-            var layer = _transportLayer;
-            if (layer == null)
-                return;
+        var layer = _transportLayer;
+        if (layer == null)
+            return;
 
-            await foreach (var msg in layer.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        await foreach (var msg in layer.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            try
             {
                 var buf = msg.Payload.ToArray();
                 if (buf.Length == 0)
@@ -720,7 +732,8 @@ public sealed class ChatP2pSession(
                         await IncomingChatInviteHandler.TryAcceptAsync(buf, auth, repo,
                             async (payload, dest, ct) =>
                             {
-                                await ResolveTransportForAddress(dest).SendAsync(payload, dest, ct).ConfigureAwait(false);
+                                await ResolveTransportForAddress(dest).SendAsync(payload, dest, ct)
+                                    .ConfigureAwait(false);
                             }, msg.RemoteAddress, cancellationToken).ConfigureAwait(false);
                         continue;
                     case FrameHandshake when buf.Length == 129:
@@ -732,20 +745,20 @@ public sealed class ChatP2pSession(
                     }
                 }
 
-                if (buf[0] != FrameCipher || buf.Length <= 1) 
+                if (buf[0] != FrameCipher || buf.Length <= 1)
                     continue;
-                
+
                 var inner = new byte[buf.Length - 1];
                 Buffer.BlockCopy(buf, 1, inner, 0, inner.Length);
                 await _bridge.Writer
                     .WriteAsync(new TransportReceiveMessage(inner, msg.RemoteAddress), cancellationToken)
                     .ConfigureAwait(false);
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // shutdown
-        }
+            catch (OperationCanceledException)
+            {
+                // ignore 
+                continue;
+            }
     }
 
     private async Task HandleResponderHandshakeAsync(byte[] handshakePacket, CancellationToken cancellationToken)
@@ -761,7 +774,8 @@ public sealed class ChatP2pSession(
 
                 var localPrivate = auth.GetCurrentPrivateKey();
                 _session = P2PCrypto.CreateSession(localPrivate, handshakePacket);
-                _messenger = new MessengerService(_prefixed!, _session, CreateMessengerOptions(), OnDecryptFailureAsync);
+                _messenger =
+                    new MessengerService(_prefixed!, _session, CreateMessengerOptions(), OnDecryptFailureAsync);
                 created = _messenger;
             }
 
@@ -869,7 +883,6 @@ public sealed class ChatP2pSession(
             await _messenger.StopAsync(cancellationToken).ConfigureAwait(false);
 
         if (_transportReceiveTask != null)
-        {
             try
             {
                 await _transportReceiveTask.ConfigureAwait(false);
@@ -878,10 +891,8 @@ public sealed class ChatP2pSession(
             {
                 // ignore
             }
-        }
 
         if (_incomingTask != null)
-        {
             try
             {
                 await _incomingTask.ConfigureAwait(false);
@@ -890,7 +901,6 @@ public sealed class ChatP2pSession(
             {
                 // ignore
             }
-        }
 
         if (_udp != null)
             await _udp.StopAsync(cancellationToken).ConfigureAwait(false);
@@ -910,8 +920,6 @@ public sealed class ChatP2pSession(
         _incomingStarted = false;
     }
 
-    public ValueTask DisposeAsync() => StopAsync();
-
     private IReadOnlyList<ITransport> GetInboundTransports()
     {
         var list = new List<ITransport>();
@@ -922,24 +930,31 @@ public sealed class ChatP2pSession(
         return list;
     }
 
-    private ITransport ResolveTransportForAddress(TransportAddress destination) =>
-        ResolveTransportForAddressOrNull(destination) ??
-        throw new InvalidOperationException($"Transport is not started for {destination.Kind}.");
+    private ITransport ResolveTransportForAddress(TransportAddress destination)
+    {
+        return ResolveTransportForAddressOrNull(destination) ??
+               throw new InvalidOperationException($"Transport is not started for {destination.Kind}.");
+    }
 
-    private ITransport? ResolveTransportForAddressOrNull(TransportAddress destination) =>
-        destination.Kind switch
+    private ITransport? ResolveTransportForAddressOrNull(TransportAddress destination)
+    {
+        return destination.Kind switch
         {
             TransportKind.Udp when IsTransportEnabled(TransportKind.Udp) => _udp,
             TransportKind.Bluetooth when IsTransportEnabled(TransportKind.Bluetooth) => bluetoothTransport,
             _ => null
         };
+    }
 
-    private bool IsTransportEnabled(TransportKind kind) => kind switch
+    private bool IsTransportEnabled(TransportKind kind)
     {
-        TransportKind.Udp => routingSettings?.EnableUdpTransport ?? true,
-        TransportKind.Bluetooth => routingSettings?.EnableBluetoothTransport ?? true,
-        _ => false
-    };
+        return kind switch
+        {
+            TransportKind.Udp => routingSettings?.EnableUdpTransport ?? true,
+            TransportKind.Bluetooth => routingSettings?.EnableBluetoothTransport ?? true,
+            _ => false
+        };
+    }
 
     private sealed class PrefixedCipherTransport(
         Channel<TransportReceiveMessage> bridge,
@@ -950,9 +965,15 @@ public sealed class ChatP2pSession(
 
         public ChannelReader<TransportReceiveMessage> Inbound => bridge.Reader;
 
-        public ValueTask StartAsync(CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+        public ValueTask StartAsync(CancellationToken cancellationToken = default)
+        {
+            return ValueTask.CompletedTask;
+        }
 
-        public ValueTask StopAsync(CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+        public ValueTask StopAsync(CancellationToken cancellationToken = default)
+        {
+            return ValueTask.CompletedTask;
+        }
 
         public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, TransportAddress destination,
             CancellationToken cancellationToken = default)
@@ -963,6 +984,9 @@ public sealed class ChatP2pSession(
             await sendRaw(buf.AsMemory(0, buf.Length), destination, cancellationToken).ConfigureAwait(false);
         }
 
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public ValueTask DisposeAsync()
+        {
+            return ValueTask.CompletedTask;
+        }
     }
 }

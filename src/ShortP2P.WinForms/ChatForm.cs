@@ -1,6 +1,8 @@
 using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.Diagnostics;
+using NAudio.Vorbis;
+using NAudio.Wave;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client;
 using ShortP2P.Client.ChatMedia;
@@ -47,6 +49,14 @@ public sealed class ChatForm : Form
         BorderStyle = BorderStyle.FixedSingle,
         MaxLength = ChatP2pSession.MaxMessageChars,
     };
+    private readonly Button _attachVoice = new()
+    {
+        Text = "🎤",
+        Dock = DockStyle.Right,
+        Width = 36,
+        Height = 36,
+        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point),
+    };
     private readonly Button _attachImage = new()
     {
         Text = "🖼",
@@ -83,6 +93,19 @@ public sealed class ChatForm : Form
     private ChatP2pSession? _p2PSession;
     private bool _pairingPromptShown;
 
+    private readonly object _voiceCapLock = new();
+    private WaveInEvent? _voiceWaveIn;
+    private WaveFileWriter? _voiceWaveWriter;
+    private MemoryStream? _voiceWaveMs;
+    private DateTime _voiceRecordStartUtc;
+    private System.Windows.Forms.Timer? _voiceRecordTimer;
+    private volatile bool _voiceDiscardNextStop;
+
+    private IWavePlayer? _voicePlaybackOut;
+    private RawSourceWaveStream? _voicePlaybackRaw;
+    private VorbisWaveReader? _voicePlaybackReader;
+    private MemoryStream? _voicePlaybackMem;
+
     public ChatForm(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo, UserP2pRuntime p2PRuntime,
         ILogger<ChatForm> logger, ILogger<UserAction> userActions, ChatMediaOptions media)
     {
@@ -112,18 +135,22 @@ public sealed class ChatForm : Form
         };
         top.Controls.Add(_peerInfoLabel, 0, 0);
 
-        var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 76, ColumnCount = 5 };
+        var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 76, ColumnCount = 6 };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.Controls.Add(_input, 0, 0);
-        bottom.Controls.Add(_attachImage, 1, 0);
-        bottom.Controls.Add(_attachVideo, 2, 0);
-        bottom.Controls.Add(_attachDocument, 3, 0);
-        bottom.Controls.Add(_send, 4, 0);
+        bottom.Controls.Add(_attachVoice, 1, 0);
+        bottom.Controls.Add(_attachImage, 2, 0);
+        bottom.Controls.Add(_attachVideo, 3, 0);
+        bottom.Controls.Add(_attachDocument, 4, 0);
+        bottom.Controls.Add(_send, 5, 0);
 
+        _buttonTooltips.SetToolTip(_attachVoice,
+            "Голосовое (Ogg Opus, моно ~6 kbps, без ffmpeg): нажмите для начала записи, ещё раз — остановить и отправить.");
         _buttonTooltips.SetToolTip(_attachImage, "Отправить изображение");
         _buttonTooltips.SetToolTip(_attachVideo, "Отправить видео");
         _buttonTooltips.SetToolTip(_attachDocument, "Отправить документ");
@@ -134,12 +161,14 @@ public sealed class ChatForm : Form
         Controls.Add(top);
         Controls.Add(bottom);
 
+        _attachVoice.Click += (_, _) => OnAttachVoice();
         _attachImage.Click += async (_, _) => await OnAttachImageAsync().ConfigureAwait(true);
         _attachVideo.Click += async (_, _) => await OnAttachVideoAsync().ConfigureAwait(true);
         _attachDocument.Click += async (_, _) => await OnAttachDocumentAsync().ConfigureAwait(true);
         _send.Click += async (_, _) => await OnSendAsync().ConfigureAwait(true);
         _messages.DrawItem += OnMessagesDrawItem;
         _messages.MeasureItem += OnMessagesMeasureItem;
+        _messages.MouseClick += OnMessagesMouseClick;
         _messages.DoubleClick += OnMessageDoubleClick;
         Shown += async (_, _) => await OnShownAsync().ConfigureAwait(true);
     }
@@ -174,6 +203,10 @@ public sealed class ChatForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        _voiceDiscardNextStop = true;
+        CleanupVoiceRecordingHardware();
+        StopVoicePlaybackInternal();
+
         if (_p2PSession != null)
         {
             _p2PSession.MessagesChanged -= OnP2pMessagesChanged;
@@ -219,7 +252,15 @@ public sealed class ChatForm : Form
                 if (m.Outgoing && ds == MessageDeliveryStatus.NotApplicable)
                     ds = MessageDeliveryStatus.Delivered;
 
-                if (m.PayloadKind == (int)ChatPayloadKind.File && m.ImageBlob is { Length: > 0 } fileBlob)
+                if (m.PayloadKind == (int)ChatPayloadKind.File && m.ImageBlob is { Length: > 0 } voiceBlob &&
+                    string.Equals(m.MimeType, VoiceRecordHelper.VoiceMessageMime, StringComparison.OrdinalIgnoreCase))
+                {
+                    var kb = (voiceBlob.Length + 1023) / 1024;
+                    var caption = $"{whoPrefix} [{ts}] · голосовое · Ogg Opus · ~6 kbps mono · {kb} КБ";
+                    _messages.Items.Add(new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.Voice, voiceBlob,
+                        VoiceRecordHelper.VoiceFileName));
+                }
+                else if (m.PayloadKind == (int)ChatPayloadKind.File && m.ImageBlob is { Length: > 0 } fileBlob)
                 {
                     var kb = (fileBlob.Length + 1023) / 1024;
                     var name = string.IsNullOrEmpty(m.Text) ? "file" : m.Text;
@@ -561,6 +602,403 @@ public sealed class ChatForm : Form
         }
     }
 
+    private const int MaxVoiceRecordSeconds = 120;
+
+    private void OnAttachVoice()
+    {
+        if (_p2PSession == null)
+            return;
+
+        if (_voiceWaveIn != null)
+        {
+            _voiceDiscardNextStop = false;
+            try
+            {
+                _voiceWaveIn.StopRecording();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Stop voice recording");
+                CleanupVoiceRecordingHardware();
+            }
+
+            return;
+        }
+
+        try
+        {
+            _voiceDiscardNextStop = false;
+            _voiceWaveMs = new MemoryStream();
+            var wf = new WaveFormat(16000, 16, 1);
+            _voiceWaveWriter = new WaveFileWriter(_voiceWaveMs, wf);
+            _voiceWaveIn = new WaveInEvent { WaveFormat = wf, BufferMilliseconds = 100 };
+            _voiceWaveIn.DataAvailable += VoiceWaveInOnDataAvailable;
+            _voiceWaveIn.RecordingStopped += VoiceWaveInOnRecordingStopped;
+            _voiceRecordStartUtc = DateTime.UtcNow;
+            _voiceWaveIn.StartRecording();
+            _attachVoice.BackColor = Color.MistyRose;
+            _voiceRecordTimer?.Dispose();
+            _voiceRecordTimer = new System.Windows.Forms.Timer { Interval = 400 };
+            _voiceRecordTimer.Tick += (_, _) =>
+            {
+                if (_voiceWaveIn == null)
+                    return;
+                if ((DateTime.UtcNow - _voiceRecordStartUtc).TotalSeconds >= MaxVoiceRecordSeconds)
+                {
+                    _voiceDiscardNextStop = false;
+                    try
+                    {
+                        _voiceWaveIn.StopRecording();
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
+            };
+            _voiceRecordTimer.Start();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Voice record start failed");
+            CleanupVoiceRecordingHardware();
+            _attachVoice.BackColor = SystemColors.Control;
+            MessageBox.Show(this, ex.Message, "Микрофон", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void VoiceWaveInOnDataAvailable(object? sender, WaveInEventArgs e)
+    {
+        if (e.BytesRecorded <= 0)
+            return;
+        lock (_voiceCapLock)
+        {
+            try
+            {
+                _voiceWaveWriter?.Write(e.Buffer, 0, e.BytesRecorded);
+            }
+            catch
+            {
+                // disposed
+            }
+        }
+    }
+
+    private void VoiceWaveInOnRecordingStopped(object? sender, StoppedEventArgs e)
+    {
+        byte[] wav;
+        lock (_voiceCapLock)
+        {
+            try
+            {
+                _voiceWaveWriter?.Dispose();
+            }
+            catch
+            {
+                // ignore
+            }
+
+            _voiceWaveWriter = null;
+            try
+            {
+                wav = _voiceWaveMs?.ToArray() ?? [];
+            }
+            catch
+            {
+                wav = [];
+            }
+
+            try
+            {
+                _voiceWaveMs?.Dispose();
+            }
+            catch
+            {
+                // ignore
+            }
+
+            _voiceWaveMs = null;
+        }
+
+        try
+        {
+            _voiceWaveIn?.Dispose();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        _voiceWaveIn = null;
+
+        var discard = _voiceDiscardNextStop;
+        _voiceDiscardNextStop = false;
+
+        if (!IsHandleCreated)
+            return;
+
+        BeginInvoke(async () =>
+        {
+            _attachVoice.BackColor = SystemColors.Control;
+            try
+            {
+                _voiceRecordTimer?.Stop();
+            }
+            catch
+            {
+                // ignore
+            }
+
+            try
+            {
+                _voiceRecordTimer?.Dispose();
+            }
+            catch
+            {
+                // ignore
+            }
+
+            _voiceRecordTimer = null;
+
+            if (e.Exception != null)
+            {
+                _logger.LogWarning(e.Exception, "Voice recording stopped with error");
+                MessageBox.Show(this, e.Exception.Message, "Запись", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (discard || wav.Length < 200)
+                return;
+
+            UseWaitCursor = true;
+            try
+            {
+                var (ok, ogg, err) = await VoiceRecordHelper.EncodeWavPcmToOggOpusAsync(wav).ConfigureAwait(true);
+                if (!ok || ogg == null)
+                {
+                    MessageBox.Show(this, err ?? "Кодирование в Ogg не удалось.", "Голосовое", MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+
+                _media.ValidateDocumentMime(VoiceRecordHelper.VoiceMessageMime);
+                _media.ValidateDocumentSize(ogg.Length);
+                await _p2PSession!.SendFileAsync(VoiceRecordHelper.VoiceFileName, ogg, VoiceRecordHelper.VoiceMessageMime)
+                    .ConfigureAwait(true);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Send voice failed");
+                if (HandleBluetoothUnavailable(ex))
+                    return;
+                MessageBox.Show(this, ex.Message, "Голосовое", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                UseWaitCursor = false;
+                await ReloadMessagesAsync().ConfigureAwait(true);
+            }
+        });
+    }
+
+    private void CleanupVoiceRecordingHardware()
+    {
+        try
+        {
+            _voiceRecordTimer?.Stop();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            _voiceRecordTimer?.Dispose();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        _voiceRecordTimer = null;
+        lock (_voiceCapLock)
+        {
+            try
+            {
+                _voiceWaveWriter?.Dispose();
+            }
+            catch
+            {
+                // ignore
+            }
+
+            _voiceWaveWriter = null;
+            try
+            {
+                _voiceWaveMs?.Dispose();
+            }
+            catch
+            {
+                // ignore
+            }
+
+            _voiceWaveMs = null;
+        }
+
+        try
+        {
+            _voiceWaveIn?.Dispose();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        _voiceWaveIn = null;
+    }
+
+    private void StopVoicePlaybackInternal()
+    {
+        try
+        {
+            _voicePlaybackOut?.Stop();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            _voicePlaybackOut?.Dispose();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        _voicePlaybackOut = null;
+        try
+        {
+            _voicePlaybackRaw?.Dispose();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        _voicePlaybackRaw = null;
+        try
+        {
+            _voicePlaybackReader?.Dispose();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        _voicePlaybackReader = null;
+        try
+        {
+            _voicePlaybackMem?.Dispose();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        _voicePlaybackMem = null;
+    }
+
+    private void PlayVoiceMessage(byte[] ogg)
+    {
+        StopVoicePlaybackInternal();
+        try
+        {
+            try
+            {
+                var (pcm, sr) = VoiceRecordHelper.DecodeOpusOggToPcm16(ogg);
+                var pcmMs = new MemoryStream(pcm, writable: false);
+                _voicePlaybackRaw = new RawSourceWaveStream(pcmMs, new WaveFormat(sr, 16, 1));
+                _voicePlaybackOut = new WaveOutEvent();
+                _voicePlaybackOut.Init(_voicePlaybackRaw);
+            }
+            catch
+            {
+                _voicePlaybackRaw?.Dispose();
+                _voicePlaybackRaw = null;
+                _voicePlaybackMem = new MemoryStream(ogg, writable: false);
+                _voicePlaybackReader = new VorbisWaveReader(_voicePlaybackMem);
+                _voicePlaybackOut = new WaveOutEvent();
+                _voicePlaybackOut.Init(_voicePlaybackReader);
+            }
+
+            _voicePlaybackOut.PlaybackStopped += OnVoicePlaybackStopped;
+            _voicePlaybackOut.Play();
+        }
+        catch (Exception ex)
+        {
+            StopVoicePlaybackInternal();
+            _logger.LogWarning(ex, "Voice playback start failed");
+            MessageBox.Show(this, ex.Message, "Воспроизведение", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+    }
+
+    private void OnVoicePlaybackStopped(object? sender, StoppedEventArgs e)
+    {
+        if (InvokeRequired)
+        {
+            try
+            {
+                BeginInvoke(() => OnVoicePlaybackStopped(sender, e));
+            }
+            catch
+            {
+                StopVoicePlaybackInternal();
+            }
+
+            return;
+        }
+
+        StopVoicePlaybackInternal();
+        if (e.Exception != null && IsHandleCreated && !IsDisposed)
+            MessageBox.Show(this, e.Exception.Message, "Воспроизведение", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private void OnMessagesMouseClick(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left)
+            return;
+        var idx = _messages.IndexFromPoint(e.Location);
+        if (idx < 0 || idx >= _messages.Items.Count)
+            return;
+        if (_messages.Items[idx] is not ChatLine { Kind: ChatLineKind.Voice } line)
+            return;
+        if (line.PayloadBytes is not { Length: > 0 })
+            return;
+        if (line.PlayButtonBounds == Rectangle.Empty || !line.PlayButtonBounds.Contains(e.Location))
+            return;
+        _userActions.LogInformation("Chat {Peer}: play voice message", _chat.PeerNickname);
+        PlayVoiceMessage(line.PayloadBytes);
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        _voiceDiscardNextStop = true;
+        try
+        {
+            _voiceWaveIn?.StopRecording();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        StopVoicePlaybackInternal();
+        base.OnFormClosing(e);
+    }
+
     private void RefreshPeerPresenceLabel()
     {
         _peerInfoLabel.Text = PeerInfoText("Статус: офлайн");
@@ -605,6 +1043,13 @@ public sealed class ChatForm : Form
     {
         if (_messages.SelectedItem is not ChatLine line)
             return;
+        if (line.Kind == ChatLineKind.Voice && line.PayloadBytes is { Length: > 0 })
+        {
+            _userActions.LogInformation("Chat {Peer}: play voice message (double-click)", _chat.PeerNickname);
+            PlayVoiceMessage(line.PayloadBytes);
+            return;
+        }
+
         if (line.Kind == ChatLineKind.File && line.PayloadBytes is { Length: > 0 })
         {
             using var sfd = new SaveFileDialog
@@ -680,6 +1125,22 @@ public sealed class ChatForm : Form
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding |
                 TextFormatFlags.SingleLine);
         }
+        else if (line?.Kind == ChatLineKind.Voice)
+        {
+            textBounds = new Rectangle(e.Bounds.X + 4, e.Bounds.Y + 2, textWidth, Math.Max(font.Height, captionH));
+            TextRenderer.DrawText(e.Graphics, text, font, textBounds, color,
+                TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+
+            var playY = textBounds.Bottom + 4;
+            var playRect = new Rectangle(e.Bounds.X + 4, playY, 52, 22);
+            line.PlayButtonBounds = playRect;
+            using (var br = new SolidBrush(Color.WhiteSmoke))
+                e.Graphics.FillRectangle(br, playRect);
+            using var pen = new Pen(Color.SteelBlue, 1);
+            e.Graphics.DrawRectangle(pen, playRect);
+            TextRenderer.DrawText(e.Graphics, "Play", font, playRect, Color.SteelBlue,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
         else
         {
             textBounds = new Rectangle(e.Bounds.X + 4, e.Bounds.Y + 2, textWidth, Math.Max(font.Height, captionH));
@@ -725,6 +1186,8 @@ public sealed class ChatForm : Form
         var h = measured.Height + 8;
         if (line is { Kind: ChatLineKind.Image, Thumbnail: { } thumb })
             h += 4 + thumb.Height + 4;
+        if (line?.Kind == ChatLineKind.Voice)
+            h += 4 + 22 + 4;
         e.ItemHeight = Math.Max(_messages.Font.Height + 8, h);
     }
 
@@ -804,6 +1267,7 @@ public sealed class ChatForm : Form
         Text,
         Image,
         File,
+        Voice,
     }
 
     private sealed class ChatLine : IDisposable
@@ -822,6 +1286,7 @@ public sealed class ChatForm : Form
             Kind = kind;
             PayloadBytes = payloadBytes;
             FileSuggestedName = fileSuggestedName;
+            PlayButtonBounds = Rectangle.Empty;
             if (kind == ChatLineKind.Image && payloadBytes is { Length: > 0 })
                 _thumbnail = TryCreateThumbnail(payloadBytes, ThumbMaxEdge);
         }
@@ -833,6 +1298,7 @@ public sealed class ChatForm : Form
         public ChatLineKind Kind { get; }
         public byte[]? PayloadBytes { get; }
         public string? FileSuggestedName { get; }
+        public Rectangle PlayButtonBounds { get; set; }
         public Bitmap? Thumbnail => _thumbnail;
 
         public void Dispose()

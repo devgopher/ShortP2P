@@ -51,6 +51,7 @@ public sealed class ChatMediaOptions
         "video/x-ms-wmv",
         "video/ogg",
         "video/webm",
+        "audio/ogg",
     ];
 
     public static ChatMediaOptions LoadOrDefault(string? jsonPath)
@@ -86,6 +87,9 @@ public sealed class ChatMediaOptions
         {
             // ignore bad config
         }
+
+        if (!o.AllowedDocumentMimeTypes.Any(a => string.Equals(a, "audio/ogg", StringComparison.OrdinalIgnoreCase)))
+            o.AllowedDocumentMimeTypes.Add("audio/ogg");
 
         return o;
     }

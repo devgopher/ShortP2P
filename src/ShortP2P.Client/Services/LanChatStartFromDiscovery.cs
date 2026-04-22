@@ -1,6 +1,7 @@
 using System.Net;
 using ShortP2P.Client;
 using ShortP2P.Client.Data;
+using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Crypto;
 using ShortP2P.Discovery;
@@ -60,7 +61,7 @@ public static class LanChatStartFromDiscovery
             : UdpTransportAddress.FromIPEndPoint(
                 new IPEndPoint(UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address, ChatInviteCodec.InviteUdpPort));
 
-        var host = LocalEndpointHelper.GetPreferredLanIPv4String();
+        var host = LocalIPv4Resolver.GetInviteHostsCommaSeparated(TimeSpan.FromSeconds(10));
         var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
         var invite = ChatInviteCodec.Build(user.Nickname, nid,
             RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), host, ChatInviteCodec.InviteUdpPort);

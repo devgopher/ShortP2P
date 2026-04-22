@@ -11,7 +11,7 @@ namespace ShortP2P.Client.Qr;
 
 public static class PeerQrService
 {
-    /// <summary>Собирает v1 пейлоад: все обнаруженные IPv4 в <see cref="PeerQrPayload.H"/> (лучший) и <see cref="PeerQrPayload.Ha"/> (остальные), либо один хост из <paramref name="hostOverride"/>.</summary>
+    /// <summary>Собирает v1 пейлоад: IPv4 в <see cref="PeerQrPayload.H"/> (первый — публичный при наличии) и <see cref="PeerQrPayload.Ha"/> (остальные), либо один хост из <paramref name="hostOverride"/>.</summary>
     public static PeerQrPayload BuildPayload(UserEntity user, string rsaPublicKeyJson, string? hostOverride = null)
     {
         List<string> hosts;
@@ -19,15 +19,7 @@ public static class PeerQrService
         if (!string.IsNullOrEmpty(single))
             hosts = [single];
         else
-        {
-            hosts = LocalIPv4Resolver.GetAllUnicastIpv4Ordered();
-            var publicIp = LocalIPv4Resolver.TryGetPublicIpv4(TimeSpan.FromSeconds(2));
-            if (!string.IsNullOrWhiteSpace(publicIp) &&
-                !hosts.Contains(publicIp, StringComparer.OrdinalIgnoreCase))
-                hosts.Add(publicIp);
-            if (hosts.Count == 0)
-                hosts = ["127.0.0.1"];
-        }
+            hosts = LocalIPv4Resolver.GetInviteHostCandidatesOrdered(TimeSpan.FromSeconds(2));
 
         return new PeerQrPayload
         {

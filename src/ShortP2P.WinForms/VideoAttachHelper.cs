@@ -14,6 +14,11 @@ internal static class VideoAttachHelper
     private static string FfprobeExePath => Path.Combine(AppContext.BaseDirectory, "ffmpeg", "ffprobe.exe");
     private static string FfmpegFolderPath => Path.Combine(AppContext.BaseDirectory, "ffmpeg");
 
+    /// <summary>Только ffmpeg (достаточно для кодирования голоса в Ogg).</summary>
+    public static string BundledFfmpegExecutable => FfmpegExePath;
+
+    public static bool IsBundledFfmpegAvailable() => File.Exists(FfmpegExePath);
+
     public static bool AreBundledToolsAvailable() => File.Exists(FfmpegExePath) && File.Exists(FfprobeExePath);
 
     public static async Task<(bool Success, string? Error)> TryDownloadBundledToolsAsync(

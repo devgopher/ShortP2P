@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using ShortP2P.Client.Routing;
 
 namespace ShortP2P.Client.Qr;
 
@@ -96,6 +97,33 @@ public static class LocalIPv4Resolver
 
         return null;
     }
+
+    /// <summary>
+    ///     Хосты для инвайта и QR: сначала публичный IPv4 (если удалось узнать), затем локальные unicast без дубликатов.
+    /// </summary>
+    public static List<string> GetInviteHostCandidatesOrdered(TimeSpan publicLookupTimeout)
+    {
+        var ordered = new List<string>();
+        var publicIp = TryGetPublicIpv4(publicLookupTimeout);
+        if (!string.IsNullOrWhiteSpace(publicIp))
+            ordered.Add(publicIp.Trim());
+
+        foreach (var ip in GetAllUnicastIpv4Ordered())
+        {
+            if (ordered.Contains(ip, StringComparer.OrdinalIgnoreCase))
+                continue;
+            ordered.Add(ip);
+        }
+
+        if (ordered.Count == 0)
+            ordered.Add(LocalEndpointHelper.GetPreferredLanIPv4String());
+
+        return ordered;
+    }
+
+    /// <summary>Список хостов для поля invite/ответа на инвайт (публичный предпочтительнее).</summary>
+    public static string GetInviteHostsCommaSeparated(TimeSpan publicLookupTimeout) =>
+        string.Join(", ", GetInviteHostCandidatesOrdered(publicLookupTimeout));
 
     private static int Score(IPAddress a)
     {

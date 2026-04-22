@@ -1,6 +1,7 @@
 using System.Net;
 using ShortP2P.Client;
 using ShortP2P.Client.Data;
+using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Crypto;
 using ShortP2P.Discovery;
@@ -76,7 +77,7 @@ public static class IncomingChatInviteHandler
     {
         if (sendInviteReplyAsync == null)
             return;
-        var myHost = LocalEndpointHelper.GetPreferredLanIPv4String();
+        var myHost = LocalIPv4Resolver.GetInviteHostsCommaSeparated(TimeSpan.FromSeconds(2));
         var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
         var reply = ChatInviteCodec.Build(user.Nickname, nid,
             RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), myHost, ChatInviteCodec.InviteUdpPort);
