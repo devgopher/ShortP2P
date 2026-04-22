@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Channels;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
+using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Crypto;
 using ShortP2P.Discovery;
@@ -229,11 +230,28 @@ public sealed class ChatP2pSession(
 
     private async Task SendChatInviteAsync(CancellationToken cancellationToken)
     {
-        var host = LocalEndpointHelper.GetPreferredLanIPv4String();
+        var host = BuildInviteHosts();
         var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
         var invite = ChatInviteCodec.Build(user.Nickname, nid,
             RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), host, ChatInviteCodec.InviteUdpPort);
         await SendRouteRawAsync(invite, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string BuildInviteHosts()
+    {
+        var hosts = LocalIPv4Resolver.GetAllUnicastIpv4Ordered();
+        var publicIp = LocalIPv4Resolver.TryGetPublicIpv4(TimeSpan.FromSeconds(2));
+        if (!string.IsNullOrWhiteSpace(publicIp) &&
+            !hosts.Contains(publicIp, StringComparer.OrdinalIgnoreCase))
+            hosts.Add(publicIp);
+
+        if (hosts.Count == 0)
+        {
+            var fallback = LocalEndpointHelper.GetPreferredLanIPv4String();
+            hosts.Add(fallback);
+        }
+
+        return string.Join(", ", hosts);
     }
 
     private async Task SendChatInviteWithRetryAsync(CancellationToken cancellationToken)

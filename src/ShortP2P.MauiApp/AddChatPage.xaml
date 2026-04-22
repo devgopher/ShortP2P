@@ -18,6 +18,7 @@
             <Entry x:Name="PeerHostEntry" Text="127.0.0.1" />
             <Label Text="Peer UDP data port" />
             <Entry x:Name="PeerPortEntry" Text="17201" Keyboard="Numeric" />
+            <Button Text="Scan QR (camera)…" Clicked="OnScanQrCameraClicked" />
             <Button Text="Fill from QR image…" Clicked="OnScanQrClicked" />
             <Button Text="Save" Clicked="OnSaveClicked" />
         </VerticalStackLayout>

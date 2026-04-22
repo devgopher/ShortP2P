@@ -36,6 +36,11 @@
 		<AndroidMinSdkVersion>29</AndroidMinSdkVersion>
 	</PropertyGroup>
 
+	<!-- Debug APK must be installable standalone (without IDE Fast Deployment override folder). -->
+	<PropertyGroup Condition="$(TargetFramework.Contains('-android')) and '$(Configuration)' == 'Debug'">
+		<EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<MauiAsset Include="..\..\sounds\GChord.ogg" Link="Resources\Raw\GChord.ogg" />
 	</ItemGroup>

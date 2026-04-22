@@ -41,7 +41,7 @@ public sealed class AuthService
             PasswordHashBase64 = hash,
             RsaPrivateJson = RsaKeySerializer.SerializePrivate(keys.PrivateKey),
             RsaPublicJson = RsaKeySerializer.SerializePublic(keys.PublicKey),
-            DataUdpPort = 17200,
+            DataUdpPort = 50100,
             CreatedUtcTicks = DateTime.UtcNow.Ticks,
         };
 

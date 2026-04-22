@@ -10,7 +10,7 @@ public static class ChatInviteCodec
     public const byte FrameChatInvite = 0x30;
 
     /// <summary>UDP-порт только для приглашений в чат; data/handshake/сообщения — <see cref="PresencePingCodec.DefaultDataUdpPort" />.</summary>
-    public const int InviteUdpPort = 17300;
+    public const int InviteUdpPort = 50102;
 
     private static ReadOnlySpan<byte> Magic => "SP2I"u8;
     private const byte WireVersion = 1;

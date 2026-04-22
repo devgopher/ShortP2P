@@ -7,7 +7,7 @@ namespace ShortP2P.Discovery;
 /// </summary>
 public sealed class PeerIdentity
 {
-    public PeerIdentity(string nickname, CompressedNetworkId networkId, int dataUdpPort = 17200,
+    public PeerIdentity(string nickname, CompressedNetworkId networkId, int dataUdpPort = 50100,
         int maxNicknameUtf8Bytes = 64)
     {
         ArgumentNullException.ThrowIfNull(nickname);

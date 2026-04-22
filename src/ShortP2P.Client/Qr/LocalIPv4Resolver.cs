@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 
@@ -7,6 +8,13 @@ namespace ShortP2P.Client.Qr;
 /// <summary>Picks a reasonable local IPv4 for QR display (best-effort; user may override).</summary>
 public static class LocalIPv4Resolver
 {
+    private static readonly string[] PublicIpLookupUrls =
+    [
+        "https://api.ipify.org",
+        "https://ipv4.icanhazip.com",
+        "https://ifconfig.me/ip",
+    ];
+
     public static string? TryGetPreferredUnicastIpv4()
     {
         var scored = new List<(string Ip, int Score)>();
@@ -62,6 +70,31 @@ public static class LocalIPv4Resolver
             .Select(x => x.Ip)
             .Distinct()
             .ToList();
+    }
+
+    /// <summary>Best-effort public IPv4 via external HTTP echo services; null if unavailable.</summary>
+    public static string? TryGetPublicIpv4(TimeSpan timeout)
+    {
+        using var http = new HttpClient { Timeout = timeout };
+        foreach (var url in PublicIpLookupUrls)
+        {
+            try
+            {
+                var text = http.GetStringAsync(url).GetAwaiter().GetResult();
+                var candidate = text.Trim();
+                if (!IPAddress.TryParse(candidate, out var ip))
+                    continue;
+                if (ip.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(ip))
+                    continue;
+                return ip.ToString();
+            }
+            catch
+            {
+                // try next endpoint
+            }
+        }
+
+        return null;
     }
 
     private static int Score(IPAddress a)

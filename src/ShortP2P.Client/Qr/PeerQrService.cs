@@ -21,6 +21,10 @@ public static class PeerQrService
         else
         {
             hosts = LocalIPv4Resolver.GetAllUnicastIpv4Ordered();
+            var publicIp = LocalIPv4Resolver.TryGetPublicIpv4(TimeSpan.FromSeconds(2));
+            if (!string.IsNullOrWhiteSpace(publicIp) &&
+                !hosts.Contains(publicIp, StringComparer.OrdinalIgnoreCase))
+                hosts.Add(publicIp);
             if (hosts.Count == 0)
                 hosts = ["127.0.0.1"];
         }

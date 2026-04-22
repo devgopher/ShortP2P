@@ -84,6 +84,15 @@ public partial class ChatDetailPage : ContentPage
             return;
         }
 
+        try
+        {
+            await _p2p.EnsureStartedAsync(user).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Ensure P2P (invite listener) on chat detail");
+        }
+
         _p2p.LocalScan.ClientsChanged += OnPeerLanPresenceChanged;
         EnsurePresenceRefreshTimerStarted();
         var uiSync = SynchronizationContext.Current;

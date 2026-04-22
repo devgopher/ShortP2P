@@ -13,7 +13,7 @@ namespace ShortP2P.Client.Services;
 public static class IncomingChatInviteHandler
 {
     /// <param name="sendInviteReplyAsync">
-    ///     Если задано, после создания нового чата отправляет пиру обратное приглашение с нашим ключом (уведомление о контакте).
+    ///     Если задано, отправляет пиру обратное приглашение с нашим ключом (новый чат или обновление маршрута).
     /// </param>
     public static async Task TryAcceptAsync(ReadOnlyMemory<byte> datagram, AuthService auth, ChatRepository repo,
         Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, Task>? sendInviteReplyAsync,
@@ -57,21 +57,33 @@ public static class IncomingChatInviteHandler
             existing.RelayRouteBlob = null;
             existing.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
             repo.NotifyChatListChanged();
+            await TrySendInviteReplyAsync(auth, user, host, port, sourceAddress, sendInviteReplyAsync, cancellationToken)
+                .ConfigureAwait(false);
             return;
         }
 
         await repo.AddChatAsync(user.Id, nick, idShort, pubJson, effectiveHost, PresencePingCodec.DefaultDataUdpPort)
             .ConfigureAwait(false);
 
-        if (sendInviteReplyAsync != null)
-        {
-            var myHost = LocalEndpointHelper.GetPreferredLanIPv4String();
-            var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
-            var reply = ChatInviteCodec.Build(user.Nickname, nid,
-                RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), myHost, ChatInviteCodec.InviteUdpPort);
-            var back = sourceAddress ?? UdpTransportAddress.FromIPEndPoint(new IPEndPoint(IPAddress.Parse(host), port));
-            await sendInviteReplyAsync(reply, back, cancellationToken).ConfigureAwait(false);
-        }
+        await TrySendInviteReplyAsync(auth, user, host, port, sourceAddress, sendInviteReplyAsync, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static async Task TrySendInviteReplyAsync(AuthService auth, UserEntity user, string inviteHostList,
+        int invitePacketPort, TransportAddress? sourceAddress,
+        Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, Task>? sendInviteReplyAsync,
+        CancellationToken cancellationToken)
+    {
+        if (sendInviteReplyAsync == null)
+            return;
+        var myHost = LocalEndpointHelper.GetPreferredLanIPv4String();
+        var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
+        var reply = ChatInviteCodec.Build(user.Nickname, nid,
+            RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), myHost, ChatInviteCodec.InviteUdpPort);
+        var parseHost = PeerHostList.PrimaryHost(inviteHostList);
+        var back = sourceAddress ?? UdpTransportAddress.FromIPEndPoint(
+            new IPEndPoint(IPAddress.Parse(parseHost), invitePacketPort));
+        await sendInviteReplyAsync(reply, back, cancellationToken).ConfigureAwait(false);
     }
 
     private static string ResolvePeerHost(string inviteHost, TransportAddress? sourceAddress)
@@ -79,7 +91,10 @@ public static class IncomingChatInviteHandler
         if (sourceAddress?.Kind == TransportKind.Bluetooth)
             return BluetoothTransportAddress.ToMacString(sourceAddress.Data);
         if (sourceAddress?.Kind == TransportKind.Udp)
-            return UdpTransportAddress.ToIPEndPoint(sourceAddress).Address.ToString();
+        {
+            var seenIp = UdpTransportAddress.ToIPEndPoint(sourceAddress).Address.ToString();
+            return PeerHostList.WithPrimaryFirst(inviteHost, seenIp);
+        }
         return inviteHost;
     }
 }

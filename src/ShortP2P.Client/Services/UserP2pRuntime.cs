@@ -33,7 +33,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     public P2pRoutingSettings Settings { get; } = new();
     public ITransport? BluetoothTransport => _bluetooth;
 
-    /// <summary>Сканирование LAN по discovery-пингам (UDP 565, broadcast).</summary>
+    /// <summary>Сканирование LAN по discovery-пингам (UDP 50101, broadcast).</summary>
     public LocalNetworkScanner LocalScan { get; }
 
     public UserP2pRuntime(P2pRoutingSettingsStore store, AuthService auth, ChatRepository chats,
@@ -270,7 +270,17 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         Settings.EnableBluetoothTransport = persisted.EnableBluetoothTransport;
         Settings.SuggestBluetoothPairing = persisted.SuggestBluetoothPairing;
 
-        await LocalScan.StartAsync(user, cancellationToken).ConfigureAwait(false);
+        // Инвайты (отдельный UDP) должны работать даже если presence/LAN bind на Android не удался.
+        await EnsureInviteListenerRunningAsync(user, cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await LocalScan.StartAsync(user, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            return;
+        }
 
         if (!_discoveryHooked)
         {
@@ -278,8 +288,6 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             LocalScan.DiscoveryPingReceived += OnDiscoveryPingReceived;
             _discoveryHooked = true;
         }
-
-        await EnsureInviteListenerRunningAsync(user, cancellationToken).ConfigureAwait(false);
     }
 
     private void OnDiscoveryPingReceived(object? sender, DiscoveryPingReceivedEventArgs e)
