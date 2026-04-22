@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Discovery;
@@ -36,6 +37,7 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
     private CancellationTokenSource? _cts;
     private UdpTransport? _presenceUdp;
     private readonly ConcurrentDictionary<string, TransportAddress> _bluetoothTargets = new();
+    private readonly ConcurrentDictionary<string, string> _udpPresenceTargets = new(StringComparer.OrdinalIgnoreCase);
     private Task? _presenceReceiveLoop;
     private Task? _presenceBluetoothReceiveLoop;
     private Task? _periodicScanLoop;
@@ -151,6 +153,7 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
         _user = null;
         _entries.Clear();
         _bluetoothTargets.Clear();
+        _udpPresenceTargets.Clear();
         _isBluetoothListening = false;
         lock (_snapshotSync)
             _snapshot = [];
@@ -172,6 +175,22 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
         if (address.Kind != TransportKind.Bluetooth || address.Data.Length == 0)
             return;
         _bluetoothTargets[Convert.ToBase64String(address.Data)] = address;
+    }
+
+    /// <summary>
+    ///     Запоминает IP-адрес пира, чтобы отправлять presence-пинги напрямую (в т.ч. для non-LAN адресов после Add/QR).
+    /// </summary>
+    public void RememberUdpPresenceTarget(string host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+            return;
+        host = host.Trim();
+        if (!IPAddress.TryParse(host, out var ip))
+            return;
+        if (IPAddress.IsLoopback(ip))
+            return;
+        var normalized = ip.ToString();
+        _udpPresenceTargets[normalized] = normalized;
     }
 
     private bool IsTransportEnabled(TransportKind kind) => kind switch
@@ -315,6 +334,7 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
             PresencePeerCapabilities.Chat);
         
         if (presenceUdp != null && IsTransportEnabled(TransportKind.Udp))
+        {
             foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(PresencePingCodec.UdpPort))
             {
                 try
@@ -327,6 +347,21 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
                     // один broadcast может быть недоступен
                 }
             }
+            foreach (var host in _udpPresenceTargets.Values)
+            {
+                try
+                {
+                    if (!IPAddress.TryParse(host, out var ip))
+                        continue;
+                    var addr = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(ip, PresencePingCodec.UdpPort));
+                    await presenceUdp.SendAsync(payload, addr, cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // peer может быть офлайн / IP устарел
+                }
+            }
+        }
 
         var bt = bluetoothTransport;
         if (bt == null || !IsTransportEnabled(TransportKind.Bluetooth))

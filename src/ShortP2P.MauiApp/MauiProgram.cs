@@ -4,6 +4,8 @@ using Microsoft.Maui.Storage;
 using NLog.Extensions.Logging;
 using NLog;
 using NLog.Config;
+using NLog.Targets;
+using NLog.Targets.Wrappers;
 using ShortP2P.Client;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
@@ -16,11 +18,13 @@ namespace ShortP2P.MauiApp;
 public static class MauiProgram
 {
     public static IServiceProvider Services { get; private set; } = null!;
+    private static bool _globalExceptionHandlersInstalled;
 
     public static global::Microsoft.Maui.Hosting.MauiApp CreateMauiApp()
     {
         SQLitePCL.Batteries_V2.Init();
         ConfigureNLog();
+        ConfigureGlobalExceptionHandlers();
 
         var builder = global::Microsoft.Maui.Hosting.MauiApp.CreateBuilder();
         builder
@@ -68,7 +72,65 @@ public static class MauiProgram
 
     private static void ConfigureNLog()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "nlog.config");
-        LogManager.Configuration = new XmlLoggingConfiguration(path);
+        try
+        {
+            var configPath = Path.Combine(AppContext.BaseDirectory, "nlog.config");
+            if (File.Exists(configPath))
+            {
+                LogManager.Configuration = new XmlLoggingConfiguration(configPath);
+                LogManager.GetCurrentClassLogger().Info("Loaded NLog config from {Path}", configPath);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to load nlog.config: {ex}");
+        }
+
+        var logsDir = Path.Combine(FileSystem.AppDataDirectory, "logs");
+        Directory.CreateDirectory(logsDir);
+
+        var fallbackConfig = new LoggingConfiguration();
+        var fileTarget = new FileTarget("gui-logfile")
+        {
+            FileName = Path.Combine(logsDir, "${date:format=yyyy-MM-dd}.log"),
+            Layout = "${longdate}|${uppercase:${level}}|${logger}|${message}${onexception:inner=|${exception:format=tostring}}",
+            Encoding = System.Text.Encoding.UTF8,
+            KeepFileOpen = false,
+            ConcurrentWrites = true,
+            CreateDirs = true
+        };
+
+        // Async wrapper avoids blocking UI thread during app startup/log bursts.
+        var asyncTarget = new AsyncTargetWrapper(fileTarget, 1000, AsyncTargetWrapperOverflowAction.Discard);
+        fallbackConfig.AddTarget(asyncTarget);
+        fallbackConfig.AddRuleForAllLevels(asyncTarget);
+        LogManager.Configuration = fallbackConfig;
+        LogManager.GetCurrentClassLogger().Info("Using fallback NLog file target: {Path}", logsDir);
+    }
+
+    private static void ConfigureGlobalExceptionHandlers()
+    {
+        if (_globalExceptionHandlersInstalled)
+        {
+            return;
+        }
+
+        _globalExceptionHandlersInstalled = true;
+        var logger = LogManager.GetLogger("GlobalExceptions");
+
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            var ex = args.ExceptionObject as Exception;
+            logger.Error(ex, "UnhandledException. IsTerminating={IsTerminating}", args.IsTerminating);
+            LogManager.Flush();
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            logger.Error(args.Exception, "UnobservedTaskException");
+            args.SetObserved();
+            LogManager.Flush();
+        };
     }
 }

@@ -42,7 +42,7 @@ public static class LanChatStartFromDiscovery
             var seenIp = peer.TransportKind == TransportKind.Bluetooth
                 ? BluetoothTransportAddress.ToMacString(peer.SourceAddress.Data)
                 : UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address.ToString();
-            var mergedHost = PeerHostList.MergeAppend(existing.PeerHost, seenIp);
+            var mergedHost = PeerHostList.WithPrimaryFirst(existing.PeerHost, seenIp);
             if (!string.Equals(mergedHost, existing.PeerHost, StringComparison.Ordinal))
             {
                 await chats.UpdateChatP2pRouteAsync(existing.Id, mergedHost, existing.PeerPort, existing.RelayRouteBlob)

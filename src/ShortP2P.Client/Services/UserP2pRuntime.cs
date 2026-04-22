@@ -308,7 +308,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
         if (!string.IsNullOrEmpty(chat.RelayRouteBlob))
         {
-            var mergedRelay = PeerHostList.MergeAppend(chat.PeerHost, seenIp);
+            var mergedRelay = PeerHostList.WithPrimaryFirst(chat.PeerHost, seenIp);
             if (string.Equals(mergedRelay, chat.PeerHost, StringComparison.Ordinal))
                 return;
             await _chats.UpdateChatP2pRouteAsync(chat.Id, mergedRelay, chat.PeerPort, chat.RelayRouteBlob)
@@ -335,7 +335,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             return;
         }
 
-        var mergedHost = PeerHostList.MergeAppend(chat.PeerHost, seenIp);
+        var mergedHost = PeerHostList.WithPrimaryFirst(chat.PeerHost, seenIp);
         if (string.Equals(mergedHost, chat.PeerHost, StringComparison.Ordinal))
             return;
 

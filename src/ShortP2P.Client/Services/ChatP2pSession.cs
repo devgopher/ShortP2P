@@ -91,8 +91,23 @@ public sealed class ChatP2pSession(
 
         _peerAddress = _peerEndpoints[0];
         foreach (var ep in _peerEndpoints)
-            if (ep.Kind == TransportKind.Bluetooth && localNetworkScanner != null)
-                localNetworkScanner.RememberBluetoothPeer(ep);
+            if (localNetworkScanner != null)
+            {
+                if (ep.Kind == TransportKind.Bluetooth)
+                    localNetworkScanner.RememberBluetoothPeer(ep);
+                else if (ep.Kind == TransportKind.Udp)
+                {
+                    try
+                    {
+                        var ip = UdpTransportAddress.ToIPEndPoint(ep).Address.ToString();
+                        localNetworkScanner.RememberUdpPresenceTarget(ip);
+                    }
+                    catch
+                    {
+                        // invalid UDP endpoint payload in storage
+                    }
+                }
+            }
     }
 
     /// <summary>Обновляет строку чата из БД (тот же Id), не создавая новую сессию.</summary>

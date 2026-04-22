@@ -46,7 +46,7 @@ public static class IncomingChatInviteHandler
         var existing = await repo.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);
         if (existing != null)
         {
-            var mergedHost = PeerHostList.MergeAppend(existing.PeerHost, effectiveHost);
+            var mergedHost = PeerHostList.WithPrimaryFirst(existing.PeerHost, effectiveHost);
             var chatPeerPort = existing.PeerPort is < 1 or > 65535 || existing.PeerPort == ChatInviteCodec.InviteUdpPort
                 ? PresencePingCodec.DefaultDataUdpPort
                 : existing.PeerPort;
@@ -78,6 +78,8 @@ public static class IncomingChatInviteHandler
     {
         if (sourceAddress?.Kind == TransportKind.Bluetooth)
             return BluetoothTransportAddress.ToMacString(sourceAddress.Data);
+        if (sourceAddress?.Kind == TransportKind.Udp)
+            return UdpTransportAddress.ToIPEndPoint(sourceAddress).Address.ToString();
         return inviteHost;
     }
 }
