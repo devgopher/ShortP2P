@@ -135,11 +135,17 @@ public sealed class ChatP2pSession(
             return true;
         try
         {
-            var ep = UdpTransportAddress.ToIPEndPoint(from);
-            if (ep.Port == chat.PeerPort)
+            if (from.Kind == TransportKind.Udp)
+            {
+                var ep = UdpTransportAddress.ToIPEndPoint(from);
                 foreach (var h in PeerHostList.ParseCandidates(chat.PeerHost))
-                    if (IPAddress.TryParse(h, out var ip) && ep.Address.Equals(ip))
+                {
+                    if (!IPAddress.TryParse(h, out var ip))
+                        continue;
+                    if (ep.Address.Equals(ip))
                         return true;
+                }
+            }
 
             if (!string.IsNullOrEmpty(chat.RelayRouteBlob))
                 return true;

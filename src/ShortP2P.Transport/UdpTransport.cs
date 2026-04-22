@@ -7,6 +7,8 @@ namespace ShortP2P.Transport;
 
 /// <summary>
 ///     UDP-транспорт (кроссплатформенный). Один датаграмма = один блок для верхнего слоя.
+///     Привязка к <see cref="IPAddress.Any"/> — приём со всех локальных IPv4, включая датаграммы,
+///     доставленные на этот хост после DNAT с внешнего (WAN) адреса при пробросе портов на роутере.
 /// </summary>
 public sealed class UdpTransport(int listenPort, bool enableBroadcast = false) : ITransport
 {

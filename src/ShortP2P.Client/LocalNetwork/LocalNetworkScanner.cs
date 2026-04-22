@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using ShortP2P.Client.Data;
+using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Discovery;
 using ShortP2P.Transport;
@@ -12,7 +13,8 @@ namespace ShortP2P.Client.LocalNetwork;
 ///     Сканирование локальной сети по discovery-пингам: UDP на broadcast-адрес каждой локальной IPv4-подсети
 ///     и на 255.255.255.255, порт <see cref="PresencePingCodec.UdpPort" />; фоновая рассылка по периоду
 ///     <see cref="LinkTechnologyPresetExtensions.GetPresencePingPeriod" /> (5 или 15 с от пресета канала),
-///     дополнительно по запросу UI (<see cref="ScanAsync" />, <see cref="TriggerScanAsync" />). Приём на порту 50101;
+///     дополнительно по запросу UI (<see cref="ScanAsync" />, <see cref="TriggerScanAsync" />). Приём на порту 50101
+///     (bind 0.0.0.0 — в т.ч. датаграммы после DNAT с внешнего адреса при пробросе портов);
 ///     сырые пинги чужих пиров — в <see cref="DiscoveryPingReceived" /> (подписчик не должен блокировать цикл приёма).
 /// </summary>
 public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITransport? bluetoothTransport = null) : IAsyncDisposable
@@ -44,6 +46,7 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
     private Task? _staleLoop;
     private UserEntity? _user;
     private bool _isBluetoothListening;
+    private DateTimeOffset _nextPublicIpv4PresenceLookupUtc = DateTimeOffset.MinValue;
 
     /// <summary>Снимок последних найденных пиров (кроме текущего пользователя).</summary>
     public IReadOnlyList<DiscoveredLocalPeer> Clients
@@ -86,6 +89,8 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
         if (_cts != null)
             return;
         _user = user;
+        _nextPublicIpv4PresenceLookupUtc = DateTimeOffset.MinValue;
+        EnsurePublicIpv4InPresenceTargets();
         _presenceUdp = new UdpTransport(PresencePingCodec.UdpPort, enableBroadcast: true);
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _cts.Token;
@@ -321,11 +326,34 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
             _snapshot = list;
     }
 
+    /// <summary>
+    ///     Добавляет публичный IPv4 в цели unicast-пингов (hairpin/NAT и пиры, достижимые по белому адресу).
+    ///     HTTP-запрос ограничен по частоте.
+    /// </summary>
+    private void EnsurePublicIpv4InPresenceTargets()
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (now < _nextPublicIpv4PresenceLookupUtc)
+            return;
+        _nextPublicIpv4PresenceLookupUtc = now.AddMinutes(3);
+        try
+        {
+            var pub = LocalIPv4Resolver.TryGetPublicIpv4(TimeSpan.FromSeconds(1));
+            if (!string.IsNullOrWhiteSpace(pub))
+                RememberUdpPresenceTarget(pub.Trim());
+        }
+        catch
+        {
+            // сеть / таймаут echo-сервиса
+        }
+    }
+
     private async Task SendDiscoveryBroadcastRoundAsync(CancellationToken cancellationToken)
     {
         var u = _user;
         var presenceUdp = _presenceUdp;
         if (u == null) return;
+        EnsurePublicIpv4InPresenceTargets();
         var payload = PresencePingCodec.Build(
             CompressedNetworkId.FromShortString(u.NetworkIdShort).Value,
             u.Nickname,
