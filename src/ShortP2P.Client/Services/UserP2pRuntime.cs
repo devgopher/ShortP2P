@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.LocalNetwork;
+using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Discovery;
 using ShortP2P.Transport;
@@ -21,6 +22,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private readonly object _sessionLock = new();
     private readonly Dictionary<int, ChatP2pSession> _chatSessions = new();
     private readonly HashSet<int> _sessionsStarted = [];
+    private readonly HashSet<string> _selfUdpAddresses = new(StringComparer.OrdinalIgnoreCase);
 
     private volatile bool _discoveryHooked;
     private CancellationTokenSource? _presencePingWorkCts;
@@ -195,6 +197,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         {
             await foreach (var msg in udp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
+                if (IsOwnInviteDatagram(msg))
+                    continue;
                 var buf = msg.Payload.ToArray();
                 if (buf.Length == 0 || buf[0] != ChatInviteCodec.FrameChatInvite)
                     continue;
@@ -209,6 +213,37 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         catch (OperationCanceledException)
         {
             // ignore
+        }
+    }
+
+    private void RefreshSelfUdpAddresses()
+    {
+        _selfUdpAddresses.Clear();
+        foreach (var ip in LocalIPv4Resolver.GetAllUnicastIpv4Ordered())
+        {
+            if (System.Net.IPAddress.TryParse(ip, out var parsed))
+                _selfUdpAddresses.Add(parsed.ToString());
+        }
+
+        _selfUdpAddresses.Add(System.Net.IPAddress.Loopback.ToString());
+        _selfUdpAddresses.Add(System.Net.IPAddress.Any.ToString());
+    }
+
+    private bool IsOwnInviteDatagram(TransportReceiveMessage msg)
+    {
+        if (msg.RemoteAddress.Kind != TransportKind.Udp)
+            return false;
+        var user = _auth.CurrentUser;
+        if (user == null)
+            return false;
+        try
+        {
+            var ep = UdpTransportAddress.ToIPEndPoint(msg.RemoteAddress);
+            return ep.Port == user.DataUdpPort && _selfUdpAddresses.Contains(ep.Address.ToString());
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -260,6 +295,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
     public async Task EnsureStartedAsync(UserEntity user, CancellationToken cancellationToken = default)
     {
+        RefreshSelfUdpAddresses();
         var persisted = await _store.LoadAsync().ConfigureAwait(false);
         Settings.MaxSearchHops = persisted.MaxSearchHops;
         Settings.SendFailureSearchAttempts = persisted.SendFailureSearchAttempts;

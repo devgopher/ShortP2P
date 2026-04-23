@@ -66,9 +66,6 @@ public static class PeerHostList
     public static string WithPrimaryFirst(string? existingPeerHost, string primaryHost)
     {
         primaryHost = primaryHost.Trim();
-        if (!IPAddress.TryParse(primaryHost, out _))
-            throw new ArgumentException("Invalid IP address.", nameof(primaryHost));
-
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var list = new List<string>();
         if (seen.Add(primaryHost))
