@@ -12,6 +12,7 @@ internal sealed class CameraRecordForm : Form
     private readonly int _captureWidth;
     private readonly int _captureHeight;
     private readonly int _audioBitrate;
+    private readonly string? _videoDeviceId;
     private readonly WebView2 _web = new() { Dock = DockStyle.Fill };
     private readonly Label _status = new() { Dock = DockStyle.Top, Height = 26, TextAlign = ContentAlignment.MiddleLeft };
     private readonly Button _record = new() { Text = "Record", AutoSize = true };
@@ -27,9 +28,10 @@ internal sealed class CameraRecordForm : Form
 
     public CameraRecordedVideo? Result { get; private set; }
 
-    public CameraRecordForm(bool trafficSavingEnabled)
+    public CameraRecordForm(bool trafficSavingEnabled, string? videoDeviceId)
     {
         _trafficSavingEnabled = trafficSavingEnabled;
+        _videoDeviceId = string.IsNullOrWhiteSpace(videoDeviceId) ? null : videoDeviceId.Trim();
         var resolution = VideoAttachHelper.GetRequiredResolution(_trafficSavingEnabled);
         _captureWidth = resolution.Width;
         _captureHeight = resolution.Height;
@@ -239,6 +241,7 @@ internal sealed class CameraRecordForm : Form
                     const targetWidth = {{_captureWidth}};
                     const targetHeight = {{_captureHeight}};
                     const defaultAudioBps = {{_audioBitrate}};
+                    const preferredDeviceId = {{JsonSerializer.Serialize(_videoDeviceId)}};
                     let stream = null;
                     let rec = null;
                     let chunks = [];
@@ -250,8 +253,11 @@ internal sealed class CameraRecordForm : Form
 
                     async function ensureStream() {
                       if (stream) return stream;
+                      const videoConstraints = preferredDeviceId
+                        ? { deviceId: { exact: preferredDeviceId }, width: { ideal: targetWidth }, height: { ideal: targetHeight } }
+                        : { width: { ideal: targetWidth }, height: { ideal: targetHeight } };
                       stream = await navigator.mediaDevices.getUserMedia({
-                        video: { width: { ideal: targetWidth }, height: { ideal: targetHeight } },
+                        video: videoConstraints,
                         audio: true
                       });
                       v.srcObject = stream;

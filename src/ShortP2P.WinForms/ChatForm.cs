@@ -376,7 +376,8 @@ public sealed class ChatForm : Form
     {
         if (_p2PSession == null)
             return;
-        using var win = new CameraRecordForm(_appSettings.Current.TrafficSavingEnabled);
+        using var win = new CameraRecordForm(_appSettings.Current.TrafficSavingEnabled,
+            _appSettings.Current.VideoInputDeviceId);
         if (win.ShowDialog(this) != DialogResult.OK || win.Result == null)
             return;
 
@@ -995,17 +996,35 @@ public sealed class ChatForm : Form
             return;
         if (line.PayloadBytes is not { Length: > 0 })
             return;
-        if (line.PlayButtonBounds == Rectangle.Empty || !line.PlayButtonBounds.Contains(e.Location))
-            return;
         if (line.Kind == ChatLineKind.Voice)
         {
+            if (line.PlayButtonBounds == Rectangle.Empty || !line.PlayButtonBounds.Contains(e.Location))
+                return;
             _userActions.LogInformation("Chat {Peer}: play voice message", _chat.PeerNickname);
             PlayVoiceMessage(line.PayloadBytes);
             return;
         }
 
-        _userActions.LogInformation("Chat {Peer}: play video message", _chat.PeerNickname);
-        PlayVideoMessage(line.PayloadBytes, line.FileSuggestedName);
+        if (line.PlayButtonBounds != Rectangle.Empty && line.PlayButtonBounds.Contains(e.Location))
+        {
+            _userActions.LogInformation("Chat {Peer}: play video message", _chat.PeerNickname);
+            PlayVideoMessage(line.PayloadBytes, line.FileSuggestedName);
+            return;
+        }
+
+        if (line.SaveButtonBounds == Rectangle.Empty || !line.SaveButtonBounds.Contains(e.Location))
+            return;
+        using var sfd = new SaveFileDialog
+        {
+            Title = "Сохранить видео",
+            FileName = string.IsNullOrEmpty(line.FileSuggestedName) ? "video.webm" : line.FileSuggestedName,
+            Filter = "Все файлы|*.*",
+            OverwritePrompt = true,
+        };
+        if (sfd.ShowDialog(this) != DialogResult.OK)
+            return;
+        _userActions.LogInformation("Chat {Peer}: save video to {Path}", _chat.PeerNickname, sfd.FileName);
+        File.WriteAllBytes(sfd.FileName, line.PayloadBytes);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
@@ -1172,6 +1191,21 @@ public sealed class ChatForm : Form
             e.Graphics.DrawRectangle(pen, playRect);
             TextRenderer.DrawText(e.Graphics, "Play", font, playRect, Color.SteelBlue,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+            if (line.Kind == ChatLineKind.Video)
+            {
+                var saveRect = new Rectangle(playRect.Right + 8, playY, 52, 22);
+                line.SaveButtonBounds = saveRect;
+                using var saveBrush = new SolidBrush(Color.WhiteSmoke);
+                e.Graphics.FillRectangle(saveBrush, saveRect);
+                e.Graphics.DrawRectangle(pen, saveRect);
+                TextRenderer.DrawText(e.Graphics, "Save", font, saveRect, Color.SteelBlue,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
+            else
+            {
+                line.SaveButtonBounds = Rectangle.Empty;
+            }
         }
         else
         {
@@ -1338,6 +1372,7 @@ public sealed class ChatForm : Form
         public byte[]? PayloadBytes { get; }
         public string? FileSuggestedName { get; }
         public Rectangle PlayButtonBounds { get; set; }
+        public Rectangle SaveButtonBounds { get; set; }
         public Bitmap? Thumbnail => _thumbnail;
 
         public void Dispose()
