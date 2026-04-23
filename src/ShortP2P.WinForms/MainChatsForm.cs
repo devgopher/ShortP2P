@@ -27,6 +27,7 @@ public sealed class MainChatsForm : Form
     private readonly ILogger<LocalNetworkScanForm> _lanScanLog;
     private readonly ILogger<UserAction> _userActions;
     private readonly ChatMediaOptions _chatMedia;
+    private readonly AppSettingsStore _appSettings;
     private readonly Label _udpTransportIndicator = new() { AutoSize = true };
     private readonly Label _bluetoothTransportIndicator = new() { AutoSize = true };
     private int? _focusedChatId;
@@ -35,7 +36,7 @@ public sealed class MainChatsForm : Form
     public MainChatsForm(AuthService auth, ChatRepository chats, UserP2pRuntime p2P,
         P2pRoutingSettingsStore routingStore, IServiceProvider services, ILogger<MainChatsForm> logger,
         ILogger<ChatForm> chatLog, ILogger<LocalNetworkScanForm> lanScanLog, ILogger<UserAction> userActions,
-        ChatMediaOptions chatMedia)
+        ChatMediaOptions chatMedia, AppSettingsStore appSettings)
     {
         _auth = auth;
         _chats = chats;
@@ -47,6 +48,7 @@ public sealed class MainChatsForm : Form
         _lanScanLog = lanScanLog;
         _userActions = userActions;
         _chatMedia = chatMedia;
+        _appSettings = appSettings;
         Text = "ShortP2P — Chats";
         StartPosition = FormStartPosition.CenterScreen;
         Width = 560;
@@ -79,6 +81,7 @@ public sealed class MainChatsForm : Form
         var btnCopy = new Button { Text = "Copy keys", AutoSize = true };
         var btnLogout = new Button { Text = "Logout", AutoSize = true };
         var btnRouting = new Button { Text = "P2P routing", AutoSize = true };
+        var btnSettings = new Button { Text = "Настройки", AutoSize = true };
         var btnLanScan = new Button { Text = "LAN scan", AutoSize = true };
         var btnDelete = new Button { Text = "Delete chat", AutoSize = true };
         toolbar.Controls.Add(btnAdd);
@@ -87,6 +90,7 @@ public sealed class MainChatsForm : Form
         toolbar.Controls.Add(btnCopy);
         toolbar.Controls.Add(btnLanScan);
         toolbar.Controls.Add(btnRouting);
+        toolbar.Controls.Add(btnSettings);
         toolbar.Controls.Add(btnLogout);
 
         btnAdd.Click += async (_, _) => await OnAddChatAsync().ConfigureAwait(true);
@@ -95,6 +99,7 @@ public sealed class MainChatsForm : Form
         btnCopy.Click += OnCopyKeys;
         btnLanScan.Click += OnLanScan;
         btnRouting.Click += OnRoutingSettings;
+        btnSettings.Click += OnAppSettings;
         btnLogout.Click += OnLogout;
 
         var transportIndicators = new FlowLayoutPanel
@@ -305,7 +310,8 @@ public sealed class MainChatsForm : Form
                 _focusedChatId = chat.Id;
                 _unreadChatIds.Remove(chat.Id);
                 _list.Invalidate();
-                using var win = new ChatForm(chat, u, _auth, _chats, _p2P, _chatLog, _userActions, _chatMedia);
+                using var win = new ChatForm(chat, u, _auth, _chats, _p2P, _chatLog, _userActions, _chatMedia,
+                    _appSettings);
                 win.ShowDialog(owner);
                 _focusedChatId = null;
             },
@@ -318,6 +324,13 @@ public sealed class MainChatsForm : Form
     {
         _userActions.LogInformation("Chats: open P2P routing settings");
         using var f = _services.GetRequiredService<RoutingSettingsForm>();
+        f.ShowDialog(this);
+    }
+
+    private void OnAppSettings(object? sender, EventArgs e)
+    {
+        _userActions.LogInformation("Chats: open app settings");
+        using var f = _services.GetRequiredService<AppSettingsForm>();
         f.ShowDialog(this);
     }
 
@@ -451,7 +464,7 @@ public sealed class MainChatsForm : Form
         if (u == null) return;
 
         _focusedChatId = chat.Id;
-        using var win = new ChatForm(chat, u, _auth, _chats, _p2P, _chatLog, _userActions, _chatMedia);
+        using var win = new ChatForm(chat, u, _auth, _chats, _p2P, _chatLog, _userActions, _chatMedia, _appSettings);
         win.ShowDialog(this);
         _focusedChatId = null;
         await RefreshAsync().ConfigureAwait(true);

@@ -34,6 +34,7 @@ internal static class Program
         services.AddSingleton<AuthService>();
         services.AddSingleton<ChatRepository>();
         services.AddSingleton<P2pRoutingSettingsStore>();
+        services.AddSingleton<AppSettingsStore>();
         services.AddSingleton<BluetoothTransportRegistration>();
         services.AddSingleton(sp => new UserP2pRuntime(
             sp.GetRequiredService<P2pRoutingSettingsStore>(),
@@ -48,6 +49,7 @@ internal static class Program
         services.AddTransient<AddChatForm>();
         services.AddTransient<MyQrForm>();
         services.AddTransient<RoutingSettingsForm>();
+        services.AddTransient<AppSettingsForm>();
 
         using var provider = services.BuildServiceProvider();
         var hostLogger = provider.GetRequiredService<ILogger<WinFormsHost>>();
@@ -59,9 +61,11 @@ internal static class Program
         hostLogger.LogInformation("WinForms application started");
 
         var p2p = provider.GetRequiredService<UserP2pRuntime>();
+        var appSettings = provider.GetRequiredService<AppSettingsStore>();
         var bluetoothRegistration = provider.GetRequiredService<BluetoothTransportRegistration>();
         try
         {
+            appSettings.InitializeAsync().GetAwaiter().GetResult();
             while (true)
             {
                 using var login = provider.GetRequiredService<LoginForm>();

@@ -25,6 +25,7 @@ public sealed class ChatForm : Form
     private readonly ChatRepository _repo;
     private readonly UserP2pRuntime _p2PRuntime;
     private readonly ChatMediaOptions _media;
+    private readonly AppSettingsStore _appSettings;
     private readonly ILogger<ChatForm> _logger;
     private readonly ILogger<UserAction> _userActions;
     private readonly Label _peerInfoLabel = new()
@@ -107,7 +108,7 @@ public sealed class ChatForm : Form
     private MemoryStream? _voicePlaybackMem;
 
     public ChatForm(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo, UserP2pRuntime p2PRuntime,
-        ILogger<ChatForm> logger, ILogger<UserAction> userActions, ChatMediaOptions media)
+        ILogger<ChatForm> logger, ILogger<UserAction> userActions, ChatMediaOptions media, AppSettingsStore appSettings)
     {
         _chat = chat;
         _user = user;
@@ -115,6 +116,7 @@ public sealed class ChatForm : Form
         _repo = repo;
         _p2PRuntime = p2PRuntime;
         _media = media;
+        _appSettings = appSettings;
         _logger = logger;
         _userActions = userActions;
         Text = chat.PeerNickname;
@@ -631,7 +633,27 @@ public sealed class ChatForm : Form
             _voiceWaveMs = new MemoryStream();
             var wf = new WaveFormat(16000, 16, 1);
             _voiceWaveWriter = new WaveFileWriter(_voiceWaveMs, wf);
-            _voiceWaveIn = new WaveInEvent { WaveFormat = wf, BufferMilliseconds = 100 };
+            var selectedDevice = _appSettings.Current.VoiceInputDeviceNumber;
+            if (selectedDevice.HasValue)
+            {
+                if (selectedDevice.Value >= WaveIn.DeviceCount)
+                {
+                    MessageBox.Show(this,
+                        "Выбранный источник звука недоступен. Откройте Настройки -> Звук и выберите доступное устройство.",
+                        "Микрофон",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+            }
+
+            _voiceWaveIn = new WaveInEvent
+            {
+                WaveFormat = wf,
+                BufferMilliseconds = 100,
+            };
+            if (selectedDevice.HasValue)
+                _voiceWaveIn.DeviceNumber = selectedDevice.Value;
             _voiceWaveIn.DataAvailable += VoiceWaveInOnDataAvailable;
             _voiceWaveIn.RecordingStopped += VoiceWaveInOnRecordingStopped;
             _voiceRecordStartUtc = DateTime.UtcNow;
