@@ -42,7 +42,6 @@ public sealed class ChatP2pSession(
 
     private readonly object _pendingSync = new();
     private readonly SemaphoreSlim _sessionSetup = new(1, 1);
-    private readonly HashSet<string> _selfUdpAddresses = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly object _sync = new();
     private Channel<TransportReceiveMessage> _bridge = Channel.CreateUnbounded<TransportReceiveMessage>();
@@ -130,8 +129,6 @@ public sealed class ChatP2pSession(
 
     private bool ShouldAcceptIncomingFrom(TransportAddress from)
     {
-        if (IsOwnUdpDatagram(from))
-            return false;
         if (!IsTransportEnabled(from.Kind))
             return false;
         if (_peerEndpoints.Any(x => x.Kind == from.Kind && x.Data.AsSpan().SequenceEqual(from.Data)))
@@ -166,7 +163,6 @@ public sealed class ChatP2pSession(
         await StopAsync(cancellationToken).ConfigureAwait(false);
 
         _bridge = Channel.CreateUnbounded<TransportReceiveMessage>();
-        RefreshSelfUdpAddresses();
 
         RebuildRouteFromChat();
 
@@ -209,34 +205,6 @@ public sealed class ChatP2pSession(
         }
 
         HookPresenceForPendingFlush();
-    }
-
-    private void RefreshSelfUdpAddresses()
-    {
-        _selfUdpAddresses.Clear();
-        foreach (var ip in LocalIPv4Resolver.GetAllUnicastIpv4Ordered())
-        {
-            if (IPAddress.TryParse(ip, out var parsed))
-                _selfUdpAddresses.Add(parsed.ToString());
-        }
-
-        _selfUdpAddresses.Add(IPAddress.Loopback.ToString());
-        _selfUdpAddresses.Add(IPAddress.Any.ToString());
-    }
-
-    private bool IsOwnUdpDatagram(TransportAddress from)
-    {
-        if (from.Kind != TransportKind.Udp)
-            return false;
-        try
-        {
-            var ep = UdpTransportAddress.ToIPEndPoint(from);
-            return ep.Port == user.DataUdpPort && _selfUdpAddresses.Contains(ep.Address.ToString());
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     /// <summary>
