@@ -8,7 +8,8 @@ namespace ShortP2P.Client.Routing;
 ///     Формат: [0]=frame, [1..16]=Guid, [17..18]=длина ника, [19..]=UTF-8 ник, uint16 BE dataUdpPort,
 ///     [+1]=<see cref="LinkTechnologyPreset" /> (опционально), [+2]=uint16 BE <see cref="PresencePeerCapabilities" /> (опционально, на будущее).
 ///     Совместимость: 17 байт только Guid; 19+nick — ник без порта; без байта скорости — <see cref="LinkTechnologyPreset.Unlimited" />;
-///     без двух байт маски — считается только <see cref="PresencePeerCapabilities.Chat" /> у отправителя legacy-клиента.
+///     без двух байт маски — считается только Messaging (<see cref="PresencePeerCapabilities.Chat" />) у отправителя legacy-клиента.
+///     Полный перечень ролей узла — README ShortP2P.Discovery, раздел «Узел и возможности».
 /// </summary>
 public static class PresencePingCodec
 {
