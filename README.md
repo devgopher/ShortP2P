@@ -33,9 +33,9 @@ src/
   ShortP2P.Transport.Abstractions/
   ShortP2P.Transport/         # UDP, заглушка BT, serial
   ShortP2P.Transport.Bluetooth.Windows/
-  ShortP2P.Discovery/         # UDP discovery
+  ShortP2P.Discovery/         # Overlay: UDP discovery (ретрансляция — отдельная сборка того же слоя, не Client)
   ShortP2P.Messenger/         # Шифрованный бинарный обмен поверх транспорта
-  ShortP2P.Client/            # Сценарии пользователя, маршрутизация, БД, QR
+  ShortP2P.Client/            # Сценарии пользователя, БД, QR; подключает Messenger и overlay-слой
   ShortP2P.UI/                # Заготовка UI
   ShortP2P.WinForms/          # Десктоп Windows
   ShortP2P.MauiApp/           # MAUI-клиент
