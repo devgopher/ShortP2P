@@ -25,7 +25,7 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
     /// <summary>Удалять пира из списка, если не было пинга дольше этого (несколько периодов рассылки).</summary>
     private TimeSpan DiscoveryStaleAfter =>
         TimeSpan.FromTicks(Math.Max(TimeSpan.FromSeconds(45).Ticks,
-            routingSettings.LinkTechnology.GetPresencePingPeriod().Ticks * 6));
+            routingSettings.LinkTechnology.GetPresencePingPeriod(routingSettings.TrafficSavingEnabled).Ticks * 6));
 
     /// <summary>Длительность приёма пингов при ручном сканировании по умолчанию.</summary>
     public static readonly TimeSpan DefaultScanListenDuration = TimeSpan.FromSeconds(45);
@@ -436,7 +436,7 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            var period = routingSettings.LinkTechnology.GetPresencePingPeriod();
+            var period = routingSettings.LinkTechnology.GetPresencePingPeriod(routingSettings.TrafficSavingEnabled);
             try
             {
                 await SendDiscoveryBroadcastRoundAsync(cancellationToken).ConfigureAwait(false);

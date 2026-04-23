@@ -1,10 +1,14 @@
 using Microsoft.Extensions.Logging;
+using ShortP2P.Client.Routing;
+using ShortP2P.Client.Services;
 
 namespace ShortP2P.WinForms;
 
 public sealed class AppSettingsForm : Form
 {
     private readonly AppSettingsStore _settings;
+    private readonly P2pRoutingSettingsStore _routingStore;
+    private readonly UserP2pRuntime _runtime;
     private readonly ILogger<UserAction> _userActions;
     private readonly ComboBox _audioSourceCombo = new()
     {
@@ -12,12 +16,20 @@ public sealed class AppSettingsForm : Form
         Width = 440,
     };
     private readonly Button _refreshAudioSourcesButton = new() { Text = "Обновить список", AutoSize = true };
+    private readonly CheckBox _trafficSavingEnabled = new()
+    {
+        AutoSize = true,
+        Text = "Включить экономию трафика",
+    };
     private readonly Button _saveButton = new() { Text = "Сохранить", AutoSize = true };
     private readonly Button _cancelButton = new() { Text = "Отмена", AutoSize = true };
 
-    public AppSettingsForm(AppSettingsStore settings, ILogger<UserAction> userActions)
+    public AppSettingsForm(AppSettingsStore settings, P2pRoutingSettingsStore routingStore, UserP2pRuntime runtime,
+        ILogger<UserAction> userActions)
     {
         _settings = settings;
+        _routingStore = routingStore;
+        _runtime = runtime;
         _userActions = userActions;
         Text = "Настройки приложения";
         StartPosition = FormStartPosition.CenterParent;
@@ -30,6 +42,8 @@ public sealed class AppSettingsForm : Form
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var soundTab = new TabPage("Звук");
         tabs.TabPages.Add(soundTab);
+        var trafficTab = new TabPage("Экономия трафика");
+        tabs.TabPages.Add(trafficTab);
 
         var soundRoot = new TableLayoutPanel
         {
@@ -69,6 +83,28 @@ public sealed class AppSettingsForm : Form
         soundRoot.Controls.Add(sourceRow, 0, 1);
         soundRoot.Controls.Add(sourceHint, 0, 2);
 
+        var trafficRoot = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            Padding = new Padding(12),
+        };
+        trafficRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        trafficRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        trafficRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var trafficHint = new Label
+        {
+            AutoSize = true,
+            ForeColor = SystemColors.GrayText,
+            MaximumSize = new Size(500, 0),
+            Text = "В режиме экономии трафика голосовые сообщения кодируются с битрейтом 6 kbit/s " +
+                   "(вместо 24 kbit/s), а presence-пинги отправляются раз в 10 секунд.",
+        };
+        trafficRoot.Controls.Add(_trafficSavingEnabled, 0, 0);
+        trafficRoot.Controls.Add(trafficHint, 0, 1);
+        trafficTab.Controls.Add(trafficRoot);
+
         var bottomButtons = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
@@ -92,6 +128,7 @@ public sealed class AppSettingsForm : Form
     {
         await _settings.InitializeAsync().ConfigureAwait(true);
         ReloadAudioInputs(keepCurrentSelection: false);
+        _trafficSavingEnabled.Checked = _settings.Current.TrafficSavingEnabled;
     }
 
     private void ReloadAudioInputs(bool keepCurrentSelection)
@@ -125,8 +162,15 @@ public sealed class AppSettingsForm : Form
         if (_audioSourceCombo.SelectedItem is not AudioInputOptionItem selected)
             return;
         await _settings.SetVoiceInputDeviceNumberAsync(selected.DeviceNumber).ConfigureAwait(true);
+        await _settings.SetTrafficSavingEnabledAsync(_trafficSavingEnabled.Checked).ConfigureAwait(true);
+        var routing = await _routingStore.LoadAsync().ConfigureAwait(true);
+        routing.TrafficSavingEnabled = _trafficSavingEnabled.Checked;
+        await _routingStore.SaveAsync(routing).ConfigureAwait(true);
+        _runtime.Settings.TrafficSavingEnabled = routing.TrafficSavingEnabled;
         _userActions.LogInformation("Settings: voice input device changed to {DeviceNumber} ({DeviceLabel})",
             selected.DeviceNumber, selected.DisplayText);
+        _userActions.LogInformation("Settings: traffic saving mode {Mode}",
+            _trafficSavingEnabled.Checked ? "enabled" : "disabled");
         DialogResult = DialogResult.OK;
         Close();
     }

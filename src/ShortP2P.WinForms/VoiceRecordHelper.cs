@@ -13,12 +13,16 @@ internal static class VoiceRecordHelper
 
     private const int OpusDecodeSampleRate = 48000;
 
-    /// <summary>WAV (RIFF) в памяти → Ogg Opus mono ~6 kbps.</summary>
-    public static Task<(bool Ok, byte[]? OggBytes, string? Error)> EncodeWavPcmToOggOpusAsync(byte[] wavBytes,
-        CancellationToken cancellationToken = default) =>
-        Task.Run(() => EncodeWavPcmToOggOpus(wavBytes), cancellationToken);
+    public const int TrafficSavingBitrate = 6_000;
+    public const int DefaultBitrate = 24_000;
 
-    private static (bool Ok, byte[]? OggBytes, string? Error) EncodeWavPcmToOggOpus(byte[] wavBytes)
+    /// <summary>WAV (RIFF) в памяти → Ogg Opus mono (6 или 24 kbps в зависимости от настроек).</summary>
+    public static Task<(bool Ok, byte[]? OggBytes, string? Error)> EncodeWavPcmToOggOpusAsync(byte[] wavBytes,
+        bool trafficSavingEnabled, CancellationToken cancellationToken = default) =>
+        Task.Run(() => EncodeWavPcmToOggOpus(wavBytes, trafficSavingEnabled), cancellationToken);
+
+    private static (bool Ok, byte[]? OggBytes, string? Error) EncodeWavPcmToOggOpus(byte[] wavBytes,
+        bool trafficSavingEnabled)
     {
         if (wavBytes.Length < 44)
             return (false, null, "Слишком короткая запись.");
@@ -68,7 +72,7 @@ internal static class VoiceRecordHelper
 
             var oggMs = new MemoryStream();
             var encoder = OpusCodecFactory.CreateEncoder(OpusDecodeSampleRate, 1, OpusApplication.OPUS_APPLICATION_VOIP);
-            encoder.Bitrate = 6000;
+            encoder.Bitrate = trafficSavingEnabled ? TrafficSavingBitrate : DefaultBitrate;
             var tags = new OpusTags();
             var oggOut = new OpusOggWriteStream(encoder, oggMs, tags, inputSampleRate: sampleRate);
             oggOut.WriteSamples(monoPcm, 0, monoPcm.Length);

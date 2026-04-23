@@ -30,6 +30,7 @@ internal sealed class RoutingSettingsForm : Form
     private readonly CheckBox _enableUdpTransport = new() { AutoSize = true, Text = "UDP", Anchor = AnchorStyles.Left };
     private readonly CheckBox _enableBluetoothTransport = new()
         { AutoSize = true, Text = "Bluetooth", Anchor = AnchorStyles.Left };
+    private bool _trafficSavingEnabled;
 
     public RoutingSettingsForm(P2pRoutingSettingsStore store, UserP2pRuntime runtime,
         ILogger<RoutingSettingsForm> logger,
@@ -150,6 +151,7 @@ internal sealed class RoutingSettingsForm : Form
         _enableUdpTransport.Checked = s.EnableUdpTransport;
         _enableBluetoothTransport.Checked = s.EnableBluetoothTransport;
         _suggestBluetoothPairing.Checked = s.SuggestBluetoothPairing;
+        _trafficSavingEnabled = s.TrafficSavingEnabled;
     }
 
     private async Task SaveAsync()
@@ -168,6 +170,7 @@ internal sealed class RoutingSettingsForm : Form
             EnableUdpTransport = _enableUdpTransport.Checked,
             EnableBluetoothTransport = _enableBluetoothTransport.Checked,
             SuggestBluetoothPairing = _suggestBluetoothPairing.Checked,
+            TrafficSavingEnabled = _trafficSavingEnabled,
         };
         await _store.SaveAsync(s).ConfigureAwait(true);
         _userActions.LogInformation(
@@ -182,5 +185,6 @@ internal sealed class RoutingSettingsForm : Form
         _runtime.Settings.EnableUdpTransport = s.EnableUdpTransport;
         _runtime.Settings.EnableBluetoothTransport = s.EnableBluetoothTransport;
         _runtime.Settings.SuggestBluetoothPairing = s.SuggestBluetoothPairing;
+        _runtime.Settings.TrafficSavingEnabled = s.TrafficSavingEnabled;
     }
 }

@@ -795,7 +795,9 @@ public sealed class ChatForm : Form
             UseWaitCursor = true;
             try
             {
-                var (ok, ogg, err) = await VoiceRecordHelper.EncodeWavPcmToOggOpusAsync(wav).ConfigureAwait(true);
+                var (ok, ogg, err) = await VoiceRecordHelper
+                    .EncodeWavPcmToOggOpusAsync(wav, _appSettings.Current.TrafficSavingEnabled)
+                    .ConfigureAwait(true);
                 if (!ok || ogg == null)
                 {
                     MessageBox.Show(this, err ?? "Кодирование в Ogg не удалось.", "Голосовое", MessageBoxButtons.OK,

@@ -13,6 +13,7 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
     private const string KEnableUdpTransport = "p2p_transport_udp_enabled";
     private const string KEnableBluetoothTransport = "p2p_transport_bluetooth_enabled";
     private const string KBluetoothPairingPrompt = "p2p_bluetooth_pairing_prompt";
+    private const string KTrafficSavingEnabled = "p2p_traffic_saving_enabled";
 
     private readonly ISessionStorage _storage = storage ?? throw new ArgumentNullException(nameof(storage));
 
@@ -36,6 +37,8 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
             s.EnableBluetoothTransport = bt;
         if (bool.TryParse(await _storage.GetAsync(KBluetoothPairingPrompt).ConfigureAwait(false), out var bp))
             s.SuggestBluetoothPairing = bp;
+        if (bool.TryParse(await _storage.GetAsync(KTrafficSavingEnabled).ConfigureAwait(false), out var ts))
+            s.TrafficSavingEnabled = ts;
         return s;
     }
 
@@ -52,6 +55,8 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
         await _storage.SetAsync(KEnableBluetoothTransport, settings.EnableBluetoothTransport.ToString())
             .ConfigureAwait(false);
         await _storage.SetAsync(KBluetoothPairingPrompt, settings.SuggestBluetoothPairing.ToString())
+            .ConfigureAwait(false);
+        await _storage.SetAsync(KTrafficSavingEnabled, settings.TrafficSavingEnabled.ToString())
             .ConfigureAwait(false);
     }
 }

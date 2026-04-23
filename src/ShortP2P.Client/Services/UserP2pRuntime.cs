@@ -269,6 +269,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         Settings.EnableUdpTransport = persisted.EnableUdpTransport;
         Settings.EnableBluetoothTransport = persisted.EnableBluetoothTransport;
         Settings.SuggestBluetoothPairing = persisted.SuggestBluetoothPairing;
+        Settings.TrafficSavingEnabled = persisted.TrafficSavingEnabled;
 
         // Инвайты (отдельный UDP) должны работать даже если presence/LAN bind на Android не удался.
         await EnsureInviteListenerRunningAsync(user, cancellationToken).ConfigureAwait(false);
