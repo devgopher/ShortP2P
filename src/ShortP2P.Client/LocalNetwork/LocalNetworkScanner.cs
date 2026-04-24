@@ -13,11 +13,14 @@ namespace ShortP2P.Client.LocalNetwork;
 ///     Сканирование локальной сети по discovery-пингам: UDP на broadcast-адрес каждой локальной IPv4-подсети
 ///     и на 255.255.255.255, порт <see cref="PresencePingCodec.UdpPort" />; фоновая рассылка по периоду
 ///     <see cref="LinkTechnologyPresetExtensions.GetPresencePingPeriod" /> (5 или 15 с от пресета канала),
-///     дополнительно по запросу UI (<see cref="ScanAsync" />, <see cref="TriggerScanAsync" />). Приём на порту 50101
+///     дополнительно по запросу UI (<see cref="ScanAsync" />, <see cref="TriggerScanAsync" />). Приём на порту 51010
 ///     (bind 0.0.0.0 — в т.ч. датаграммы после DNAT с внешнего адреса при пробросе портов);
 ///     сырые пинги чужих пиров — в <see cref="DiscoveryPingReceived" /> (подписчик не должен блокировать цикл приёма).
 /// </summary>
-public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITransport? bluetoothTransport = null) : IAsyncDisposable
+public sealed class LocalNetworkScanner(
+    P2pRoutingSettings routingSettings,
+    ITransport? bluetoothTransport = null,
+    IEnumerable<ITransport>? additionalDiscoveryTransports = null) : IAsyncDisposable
 {
     public bool IsUdpListening => _presenceUdp != null;
     public bool IsBluetoothListening => _isBluetoothListening;
@@ -38,10 +41,12 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
 
     private CancellationTokenSource? _cts;
     private UdpTransport? _presenceUdp;
+    private readonly List<ITransport> _secondaryPresenceTransports = BuildSecondaryPresenceTransports(bluetoothTransport,
+        additionalDiscoveryTransports);
     private readonly ConcurrentDictionary<string, TransportAddress> _bluetoothTargets = new();
     private readonly ConcurrentDictionary<string, string> _udpPresenceTargets = new(StringComparer.OrdinalIgnoreCase);
     private Task? _presenceReceiveLoop;
-    private Task? _presenceBluetoothReceiveLoop;
+    private readonly List<Task> _secondaryPresenceReceiveLoops = [];
     private Task? _periodicScanLoop;
     private Task? _staleLoop;
     private UserEntity? _user;
@@ -95,14 +100,15 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _cts.Token;
         await _presenceUdp.StartAsync(cancellationToken).ConfigureAwait(false);
-        if (bluetoothTransport != null)
+        foreach (var transport in _secondaryPresenceTransports)
         {
-            await bluetoothTransport.StartAsync(cancellationToken).ConfigureAwait(false);
-            _isBluetoothListening = true;
+            await transport.StartAsync(cancellationToken).ConfigureAwait(false);
+            if (transport.Kind == TransportKind.Bluetooth)
+                _isBluetoothListening = true;
         }
         _presenceReceiveLoop = Task.Run(() => PresenceReceiveLoopAsync(token), token);
-        if (bluetoothTransport != null)
-            _presenceBluetoothReceiveLoop = Task.Run(() => PresenceBluetoothReceiveLoopAsync(token), token);
+        foreach (var transport in _secondaryPresenceTransports)
+            _secondaryPresenceReceiveLoops.Add(Task.Run(() => PresenceSecondaryReceiveLoopAsync(transport, token), token));
         _periodicScanLoop = Task.Run(() => PeriodicScanLoopAsync(token), token);
         _staleLoop = Task.Run(() => StaleLoopAsync(token), token);
     }
@@ -121,17 +127,23 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
             await _cts.CancelAsync().ConfigureAwait(false);
         }
 
-        var loops = new[] { _presenceReceiveLoop, _presenceBluetoothReceiveLoop, _periodicScanLoop, _staleLoop }
-            .Where(t => t != null).ToArray();
+        var loops = new List<Task?>(_secondaryPresenceReceiveLoops.Count + 3)
+        {
+            _presenceReceiveLoop,
+            _periodicScanLoop,
+            _staleLoop
+        };
+        loops.AddRange(_secondaryPresenceReceiveLoops);
+        var activeLoops = loops.Where(t => t != null).ToArray();
         _presenceReceiveLoop = null;
-        _presenceBluetoothReceiveLoop = null;
+        _secondaryPresenceReceiveLoops.Clear();
         _periodicScanLoop = null;
         _staleLoop = null;
-        if (loops.Length > 0)
+        if (activeLoops.Length > 0)
         {
             try
             {
-                await Task.WhenAll(loops!).ConfigureAwait(false);
+                await Task.WhenAll(activeLoops!).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -162,6 +174,18 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
         _isBluetoothListening = false;
         lock (_snapshotSync)
             _snapshot = [];
+
+        foreach (var transport in _secondaryPresenceTransports)
+        {
+            try
+            {
+                await transport.StopAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
     }
 
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
@@ -202,7 +226,7 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
     {
         TransportKind.Udp => routingSettings.EnableUdpTransport,
         TransportKind.Bluetooth => routingSettings.EnableBluetoothTransport,
-        _ => false
+        _ => true
     };
 
     /// <summary>Один раунд discovery: UDP broadcast по каждой подсети (+ limited broadcast).</summary>
@@ -271,13 +295,11 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
         }
     }
 
-    private async Task PresenceBluetoothReceiveLoopAsync(CancellationToken cancellationToken)
+    private async Task PresenceSecondaryReceiveLoopAsync(ITransport transport, CancellationToken cancellationToken)
     {
-        if (bluetoothTransport == null)
-            return;
         try
         {
-            await foreach (var msg in bluetoothTransport.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (var msg in transport.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 if (!IsTransportEnabled(msg.RemoteAddress.Kind))
                     continue;
@@ -391,31 +413,48 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
             }
         }
 
-        var bt = bluetoothTransport;
-        if (bt == null || !IsTransportEnabled(TransportKind.Bluetooth))
-            return;
-        if (_bluetoothTargets.IsEmpty)
+        var bt = _secondaryPresenceTransports.FirstOrDefault(t => t.Kind == TransportKind.Bluetooth);
+        if (bt != null && IsTransportEnabled(TransportKind.Bluetooth))
         {
-            try
+            if (_bluetoothTargets.IsEmpty)
             {
-                var paired = await TryGetPairedBluetoothAddressesAsync(bt, cancellationToken).ConfigureAwait(false);
-                foreach (var addr in paired)
-                    RememberBluetoothPeer(addr);
+                try
+                {
+                    var paired = await TryGetPairedBluetoothAddressesAsync(bt, cancellationToken).ConfigureAwait(false);
+                    foreach (var addr in paired)
+                        RememberBluetoothPeer(addr);
+                }
+                catch
+                {
+                    // bluetooth subsystem unavailable
+                }
             }
-            catch
+
+            foreach (var target in _bluetoothTargets.Values)
             {
-                // bluetooth subsystem unavailable
+                try
+                {
+                    await bt.SendAsync(payload, target, cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // устройство выключено/вне зоны/не сопряжено
+                }
             }
         }
-        foreach (var target in _bluetoothTargets.Values)
+
+        foreach (var transport in _secondaryPresenceTransports.Where(t => t.Kind != TransportKind.Bluetooth))
         {
+            if (!IsTransportEnabled(transport.Kind))
+                continue;
             try
             {
-                await bt.SendAsync(payload, target, cancellationToken).ConfigureAwait(false);
+                await transport.SendAsync(payload, new TransportAddress(transport.Kind, []), cancellationToken)
+                    .ConfigureAwait(false);
             }
             catch
             {
-                // устройство выключено/вне зоны/не сопряжено
+                // транспорт может требовать предварительной доступности канала/устройства
             }
         }
     }
@@ -488,5 +527,26 @@ public sealed class LocalNetworkScanner(P2pRoutingSettings routingSettings, ITra
                 continue;
             ClientsChanged?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    private static List<ITransport> BuildSecondaryPresenceTransports(ITransport? bluetoothTransport,
+        IEnumerable<ITransport>? additionalDiscoveryTransports)
+    {
+        var list = new List<ITransport>();
+        if (bluetoothTransport != null && bluetoothTransport.Kind != TransportKind.Udp)
+            list.Add(bluetoothTransport);
+        if (additionalDiscoveryTransports == null)
+            return list;
+
+        foreach (var transport in additionalDiscoveryTransports)
+        {
+            if (transport == null || transport.Kind == TransportKind.Udp)
+                continue;
+            if (list.Contains(transport))
+                continue;
+            list.Add(transport);
+        }
+
+        return list;
     }
 }
