@@ -7,6 +7,7 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Discovery.RouteTables;
 using NLog;
 
 namespace ShortP2P.WinForms;
@@ -30,6 +31,7 @@ internal static class Program
             "ShortP2P", "WinForms");
         services.AddSingleton(_ => ChatMediaOptions.LoadOrDefault(Path.Combine(appRoot, "chat-media.json")));
         services.AddSingleton(_ => new AppDatabase(Path.Combine(appRoot, "shortp2p.db")));
+        services.AddRouteDbContextWithPeerExpiryCleanup(Path.Combine(appRoot, "routes.db"), registerHostedCleanup: false);
         services.AddSingleton<ISessionStorage>(_ => new FileSessionStorage(Path.Combine(appRoot, "session")));
         services.AddSingleton<AuthService>();
         services.AddSingleton<ChatRepository>();
@@ -52,6 +54,7 @@ internal static class Program
         services.AddTransient<AppSettingsForm>();
 
         using var provider = services.BuildServiceProvider();
+        provider.StartRoutePeerRoutesExpiryCleanupDetached();
         var hostLogger = provider.GetRequiredService<ILogger<WinFormsHost>>();
         var userActionLogger = provider.GetRequiredService<ILogger<UserAction>>();
         RegisterGlobalExceptionLogging(hostLogger);

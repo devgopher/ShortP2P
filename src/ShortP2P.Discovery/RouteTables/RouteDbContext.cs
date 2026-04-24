@@ -12,6 +12,28 @@ public class RouteDbContext : DbContext
 
     public DbSet<Route> Routes => Set<Route>();
 
+    public override int SaveChanges()
+    {
+        StampPeerRouteLastSeen();
+        return base.SaveChanges();
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        StampPeerRouteLastSeen();
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
+    private void StampPeerRouteLastSeen()
+    {
+        var now = DateTime.UtcNow;
+        foreach (var entry in ChangeTracker.Entries<PeerIdentityAddress>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+                entry.Entity.LastSeen = now;
+        }
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Route>(entity =>

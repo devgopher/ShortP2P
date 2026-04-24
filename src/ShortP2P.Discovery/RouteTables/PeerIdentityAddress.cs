@@ -21,7 +21,7 @@ public class PeerIdentityAddress
     public required string PeerAddress { get; init; }
 
     /// <summary>
-    ///     Дата последней актуализации адреса
+    ///     Момент последней актуализации адреса (UTC).
     /// </summary>
-    public DateTime LastSeen { get; init; }
+    public DateTime LastSeen { get; set; }
 }

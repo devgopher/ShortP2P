@@ -11,6 +11,7 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Discovery.RouteTables;
 using ShortP2P.MauiApp.Services;
 
 namespace ShortP2P.MauiApp;
@@ -42,6 +43,8 @@ public static class MauiProgram
         builder.Services.AddSingleton(_ =>
             ChatMediaOptions.LoadOrDefault(Path.Combine(FileSystem.AppDataDirectory, "chat-media.json")));
         builder.Services.AddSingleton(_ => new AppDatabase(Path.Combine(FileSystem.AppDataDirectory, "shortp2p.db")));
+        builder.Services.AddRouteDbContextWithPeerExpiryCleanup(
+            Path.Combine(FileSystem.AppDataDirectory, "routes.db"));
         builder.Services.AddSingleton<ISessionStorage, MauiSecureStorage>();
         builder.Services.AddSingleton<AuthService>();
         builder.Services.AddSingleton<ChatRepository>();
