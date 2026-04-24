@@ -14,6 +14,7 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
     private const string KEnableBluetoothTransport = "p2p_transport_bluetooth_enabled";
     private const string KBluetoothPairingPrompt = "p2p_bluetooth_pairing_prompt";
     private const string KTrafficSavingEnabled = "p2p_traffic_saving_enabled";
+    private const string KAdvertisedCaps = "p2p_advertised_caps";
 
     private readonly ISessionStorage _storage = storage ?? throw new ArgumentNullException(nameof(storage));
 
@@ -39,6 +40,13 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
             s.SuggestBluetoothPairing = bp;
         if (bool.TryParse(await _storage.GetAsync(KTrafficSavingEnabled).ConfigureAwait(false), out var ts))
             s.TrafficSavingEnabled = ts;
+        if (int.TryParse(await _storage.GetAsync(KAdvertisedCaps).ConfigureAwait(false), out var capsRaw) &&
+            capsRaw is >= 0 and <= ushort.MaxValue)
+        {
+            var masked = (PresencePeerCapabilities)((ushort)capsRaw & (ushort)PresencePeerCapabilities.AllDefined);
+            s.AdvertisedPeerCapabilities = masked | PresencePeerCapabilities.Chat;
+        }
+
         return s;
     }
 
@@ -58,5 +66,7 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
             .ConfigureAwait(false);
         await _storage.SetAsync(KTrafficSavingEnabled, settings.TrafficSavingEnabled.ToString())
             .ConfigureAwait(false);
+        var caps = settings.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
+        await _storage.SetAsync(KAdvertisedCaps, ((ushort)caps).ToString()).ConfigureAwait(false);
     }
 }

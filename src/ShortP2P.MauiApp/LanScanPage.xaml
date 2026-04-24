@@ -5,7 +5,7 @@
              Title="LAN scan">
     <Grid RowDefinitions="Auto,*" Padding="12" RowSpacing="10">
         <VerticalStackLayout Grid.Row="0" Spacing="8">
-            <Label Text="Discovery on UDP port 50101. Tap Scan, then double-tap a peer to start a chat (UDP)."
+            <Label Text="LAN: presence UDP 50101; discovery wire 17890. Tap Scan, then double-tap a peer to start a chat (UDP)."
                    FontSize="12" TextColor="Gray" />
             <Button x:Name="ScanButton" Text="Scan" Clicked="OnScanClicked" />
             <Label x:Name="StatusLabel" FontSize="12" TextColor="Gray" Text="" />

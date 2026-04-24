@@ -5,6 +5,7 @@ using ShortP2P.Client.LocalNetwork;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Discovery;
+using ShortP2P.Discovery.RouteTables;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
@@ -35,19 +36,21 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     public P2pRoutingSettings Settings { get; } = new();
     public ITransport? BluetoothTransport => _bluetooth;
 
-    /// <summary>Сканирование LAN по discovery-пингам (UDP 51010, broadcast).</summary>
+    /// <summary>Сканирование LAN: presence UDP 50101; wire discovery (gossip / маршруты) — <see cref="UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort" />.</summary>
     public LocalNetworkScanner LocalScan { get; }
 
     public UserP2pRuntime(P2pRoutingSettingsStore store, AuthService auth, ChatRepository chats,
         ChatMediaOptions chatMedia, ITransport? bluetooth = null,
-        IEnumerable<ITransport>? additionalDiscoveryTransports = null)
+        IEnumerable<ITransport>? additionalDiscoveryTransports = null,
+        IRouteTableSnapshotSource? routeTableSnapshotSource = null)
     {
         _store = store;
         _auth = auth;
         _chats = chats;
         _chatMedia = chatMedia;
         _bluetooth = bluetooth;
-        LocalScan = new LocalNetworkScanner(Settings, bluetooth, additionalDiscoveryTransports);
+        LocalScan = new LocalNetworkScanner(Settings, bluetooth, additionalDiscoveryTransports,
+            routeTableSnapshotSource);
     }
 
     public ChatP2pSession GetOrCreateSession(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo,
@@ -307,6 +310,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         Settings.EnableBluetoothTransport = persisted.EnableBluetoothTransport;
         Settings.SuggestBluetoothPairing = persisted.SuggestBluetoothPairing;
         Settings.TrafficSavingEnabled = persisted.TrafficSavingEnabled;
+        Settings.AdvertisedPeerCapabilities = persisted.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
 
         // Инвайты (отдельный UDP) должны работать даже если presence/LAN bind на Android не удался.
         await EnsureInviteListenerRunningAsync(user, cancellationToken).ConfigureAwait(false);

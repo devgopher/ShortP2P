@@ -43,7 +43,9 @@ internal static class Program
             sp.GetRequiredService<AuthService>(),
             sp.GetRequiredService<ChatRepository>(),
             sp.GetRequiredService<ChatMediaOptions>(),
-            sp.GetRequiredService<BluetoothTransportRegistration>().Instance));
+            sp.GetRequiredService<BluetoothTransportRegistration>().Instance,
+            additionalDiscoveryTransports: null,
+            sp.GetService<IRouteTableSnapshotSource>()));
 
         services.AddTransient<LoginForm>();
         services.AddTransient<RegisterForm>();

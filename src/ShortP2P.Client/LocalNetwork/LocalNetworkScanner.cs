@@ -4,6 +4,8 @@ using ShortP2P.Client.Data;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Discovery;
+using ShortP2P.Discovery.Gossip;
+using ShortP2P.Discovery.RouteTables;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
@@ -11,16 +13,17 @@ namespace ShortP2P.Client.LocalNetwork;
 
 /// <summary>
 ///     Сканирование локальной сети по discovery-пингам: UDP на broadcast-адрес каждой локальной IPv4-подсети
-///     и на 255.255.255.255, порт <see cref="PresencePingCodec.UdpPort" />; фоновая рассылка по периоду
-///     <see cref="LinkTechnologyPresetExtensions.GetPresencePingPeriod" /> (5 или 15 с от пресета канала),
-///     дополнительно по запросу UI (<see cref="ScanAsync" />, <see cref="TriggerScanAsync" />). Приём на порту 51010
-///     (bind 0.0.0.0 — в т.ч. датаграммы после DNAT с внешнего адреса при пробросе портов);
-///     сырые пинги чужих пиров — в <see cref="DiscoveryPingReceived" /> (подписчик не должен блокировать цикл приёма).
+///     и на 255.255.255.255, порт <see cref="PresencePingCodec.UdpPort" />; wire discovery (gossip, маршрутная таблица) —
+///     UDP <see cref="UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort" />. Фоновая рассылка presence по периоду
+///     <see cref="LinkTechnologyPresetExtensions.GetPresencePingPeriod" />; ручное сканирование —
+///     <see cref="ScanAsync" />, <see cref="TriggerScanAsync" />. Bind 0.0.0.0 на обоих портах;
+///     сырые пинги чужих пиров — в <see cref="DiscoveryPingReceived" />.
 /// </summary>
 public sealed class LocalNetworkScanner(
     P2pRoutingSettings routingSettings,
     ITransport? bluetoothTransport = null,
-    IEnumerable<ITransport>? additionalDiscoveryTransports = null) : IAsyncDisposable
+    IEnumerable<ITransport>? additionalDiscoveryTransports = null,
+    IRouteTableSnapshotSource? routeTableSnapshotSource = null) : IAsyncDisposable
 {
     public bool IsUdpListening => _presenceUdp != null;
     public bool IsBluetoothListening => _isBluetoothListening;
@@ -41,11 +44,13 @@ public sealed class LocalNetworkScanner(
 
     private CancellationTokenSource? _cts;
     private UdpTransport? _presenceUdp;
+    private UdpTransport? _discoveryWireUdp;
     private readonly List<ITransport> _secondaryPresenceTransports = BuildSecondaryPresenceTransports(bluetoothTransport,
         additionalDiscoveryTransports);
     private readonly ConcurrentDictionary<string, TransportAddress> _bluetoothTargets = new();
     private readonly ConcurrentDictionary<string, string> _udpPresenceTargets = new(StringComparer.OrdinalIgnoreCase);
     private Task? _presenceReceiveLoop;
+    private Task? _discoveryWireReceiveLoop;
     private readonly List<Task> _secondaryPresenceReceiveLoops = [];
     private Task? _periodicScanLoop;
     private Task? _staleLoop;
@@ -97,9 +102,11 @@ public sealed class LocalNetworkScanner(
         _nextPublicIpv4PresenceLookupUtc = DateTimeOffset.MinValue;
         EnsurePublicIpv4InPresenceTargets();
         _presenceUdp = new UdpTransport(PresencePingCodec.UdpPort, enableBroadcast: true);
+        _discoveryWireUdp = new UdpTransport(UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort, enableBroadcast: true);
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _cts.Token;
         await _presenceUdp.StartAsync(cancellationToken).ConfigureAwait(false);
+        await _discoveryWireUdp.StartAsync(cancellationToken).ConfigureAwait(false);
         foreach (var transport in _secondaryPresenceTransports)
         {
             await transport.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -107,6 +114,7 @@ public sealed class LocalNetworkScanner(
                 _isBluetoothListening = true;
         }
         _presenceReceiveLoop = Task.Run(() => PresenceReceiveLoopAsync(token), token);
+        _discoveryWireReceiveLoop = Task.Run(() => DiscoveryWireReceiveLoopAsync(token), token);
         foreach (var transport in _secondaryPresenceTransports)
             _secondaryPresenceReceiveLoops.Add(Task.Run(() => PresenceSecondaryReceiveLoopAsync(transport, token), token));
         _periodicScanLoop = Task.Run(() => PeriodicScanLoopAsync(token), token);
@@ -127,15 +135,17 @@ public sealed class LocalNetworkScanner(
             await _cts.CancelAsync().ConfigureAwait(false);
         }
 
-        var loops = new List<Task?>(_secondaryPresenceReceiveLoops.Count + 3)
+        var loops = new List<Task?>(_secondaryPresenceReceiveLoops.Count + 4)
         {
             _presenceReceiveLoop,
+            _discoveryWireReceiveLoop,
             _periodicScanLoop,
             _staleLoop
         };
         loops.AddRange(_secondaryPresenceReceiveLoops);
         var activeLoops = loops.Where(t => t != null).ToArray();
         _presenceReceiveLoop = null;
+        _discoveryWireReceiveLoop = null;
         _secondaryPresenceReceiveLoops.Clear();
         _periodicScanLoop = null;
         _staleLoop = null;
@@ -158,6 +168,20 @@ public sealed class LocalNetworkScanner(
             try
             {
                 await p.StopAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        if (_discoveryWireUdp != null)
+        {
+            var d = _discoveryWireUdp;
+            _discoveryWireUdp = null;
+            try
+            {
+                await d.StopAsync(cancellationToken).ConfigureAwait(false);
             }
             catch
             {
@@ -295,6 +319,31 @@ public sealed class LocalNetworkScanner(
         }
     }
 
+    private async Task DiscoveryWireReceiveLoopAsync(CancellationToken cancellationToken)
+    {
+        if (_discoveryWireUdp == null)
+            return;
+        try
+        {
+            await foreach (var msg in _discoveryWireUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (!IsTransportEnabled(TransportKind.Udp))
+                    continue;
+                if (await TryReplyToGossipProbeAsync(_discoveryWireUdp, msg.Payload, msg.RemoteAddress, cancellationToken)
+                        .ConfigureAwait(false))
+                    continue;
+
+                if (await TryReplyToRouteTableRequestAsync(_discoveryWireUdp, msg.Payload, msg.RemoteAddress,
+                        cancellationToken).ConfigureAwait(false))
+                    continue;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // ignore
+        }
+    }
+
     private async Task PresenceSecondaryReceiveLoopAsync(ITransport transport, CancellationToken cancellationToken)
     {
         try
@@ -327,6 +376,86 @@ public sealed class LocalNetworkScanner(
         {
             // ignore
         }
+    }
+
+    private async Task<bool> TryReplyToGossipProbeAsync(ITransport replyTransport, ReadOnlyMemory<byte> payload,
+        TransportAddress remote, CancellationToken cancellationToken)
+    {
+        var buf = payload.ToArray();
+        if (!GossipWireCodec.TryParseProbe(buf, out var nonce, out var sender, out var target))
+            return false;
+
+        var u = _user;
+        if (u == null)
+            return true;
+
+        Guid myGuid;
+        try
+        {
+            myGuid = CompressedNetworkId.FromShortString(u.NetworkIdShort).Value;
+        }
+        catch (FormatException)
+        {
+            return true;
+        }
+
+        if (sender == myGuid)
+            return true;
+
+        if (target != Guid.Empty && target != myGuid)
+            return true;
+
+        var nick = string.IsNullOrWhiteSpace(u.Nickname) ? "?" : u.Nickname.Trim();
+        var port = u.DataUdpPort is >= 1 and <= 65535 ? u.DataUdpPort : PresencePingCodec.DefaultDataUdpPort;
+        var ack = GossipWireCodec.BuildAck(nonce, myGuid, port, nick);
+        await replyTransport.SendAsync(ack, remote, cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    private async Task<bool> TryReplyToRouteTableRequestAsync(ITransport replyTransport, ReadOnlyMemory<byte> payload,
+        TransportAddress remote, CancellationToken cancellationToken)
+    {
+        var buf = payload.ToArray();
+        if (!RouteTableWireCodec.TryParseRequest(buf, out var nonce, out var sender))
+            return false;
+
+        var u = _user;
+        if (u == null)
+            return true;
+
+        Guid myGuid;
+        try
+        {
+            myGuid = CompressedNetworkId.FromShortString(u.NetworkIdShort).Value;
+        }
+        catch (FormatException)
+        {
+            return true;
+        }
+
+        if (sender == myGuid)
+            return true;
+
+        var caps = routingSettings.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
+        if (!caps.HasFlag(PresencePeerCapabilities.PeerSearch))
+            return true;
+
+        IReadOnlyList<Route> routes = Array.Empty<Route>();
+        if (routeTableSnapshotSource != null)
+        {
+            try
+            {
+                routes = await routeTableSnapshotSource.GetRoutesAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                routes = Array.Empty<Route>();
+            }
+        }
+
+        var reply = RouteTableWireCodec.BuildReply(nonce, myGuid, routes);
+        await replyTransport.SendAsync(reply, remote, cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     private void OnDiscoveryPingReceived(DiscoveredLocalPeer peer)
@@ -376,12 +505,13 @@ public sealed class LocalNetworkScanner(
         var presenceUdp = _presenceUdp;
         if (u == null) return;
         EnsurePublicIpv4InPresenceTargets();
+        var caps = routingSettings.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
         var payload = PresencePingCodec.Build(
             CompressedNetworkId.FromShortString(u.NetworkIdShort).Value,
             u.Nickname,
             u.DataUdpPort,
             routingSettings.LinkTechnology,
-            PresencePeerCapabilities.Chat);
+            caps);
         
         if (presenceUdp != null && IsTransportEnabled(TransportKind.Udp))
         {

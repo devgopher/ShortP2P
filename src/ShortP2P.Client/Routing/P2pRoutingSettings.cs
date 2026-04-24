@@ -29,4 +29,10 @@ public sealed class P2pRoutingSettings
 
     /// <summary>Режим экономии трафика: более редкие presence-пинги и экономный голосовой битрейт.</summary>
     public bool TrafficSavingEnabled { get; set; }
+
+    /// <summary>
+    ///     Возможности, заявляемые в presence-пинге (всегда включается <see cref="PresencePeerCapabilities.Chat" /> в кодеке).
+    ///     <see cref="PresencePeerCapabilities.PeerSearch" /> — ответ на UDP-запрос маршрутной таблицы.
+    /// </summary>
+    public PresencePeerCapabilities AdvertisedPeerCapabilities { get; set; } = PresencePeerCapabilities.Chat;
 }

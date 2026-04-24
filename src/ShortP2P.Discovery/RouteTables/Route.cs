@@ -7,5 +7,5 @@ public class Route
     [Key]
     public required string RouteId { get; set; }
     
-    public List<PeerIdentityAddress>? PeerRoutes { get; init; }
+    public required List<PeerIdentityAddress> PeerRoutes { get; init; }
 }

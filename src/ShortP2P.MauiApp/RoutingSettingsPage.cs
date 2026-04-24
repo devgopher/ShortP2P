@@ -16,6 +16,7 @@ public class RoutingSettingsPage : ContentPage
     private readonly P2pRoutingSettingsStore _store;
     private readonly ILogger<RoutingSettingsPage> _logger;
     private bool _trafficSavingEnabled;
+    private readonly Switch _advertisePeerSearch = new();
 
     public RoutingSettingsPage(P2pRoutingSettingsStore store, UserP2pRuntime runtime,
         ILogger<RoutingSettingsPage> logger)
@@ -44,6 +45,8 @@ public class RoutingSettingsPage : ContentPage
                     _searchTimeoutMs,
                     new Label { Text = "Connection speed (in presence ping; affects ping interval)" },
                     _linkTechnology,
+                    new Label { Text = "Share route table on UDP request (PeerSearch)" },
+                    _advertisePeerSearch,
                     new Button { Text = "Save", Command = new Command(async () => await SaveAsync()) }
                 }
             }
@@ -63,6 +66,7 @@ public class RoutingSettingsPage : ContentPage
             var idx = Array.IndexOf(LinkTechnologyPresetExtensions.AllPresets, s.LinkTechnology);
             _linkTechnology.SelectedIndex = idx >= 0 ? idx : 0;
             _trafficSavingEnabled = s.TrafficSavingEnabled;
+            _advertisePeerSearch.IsToggled = s.AdvertisedPeerCapabilities.HasFlag(PresencePeerCapabilities.PeerSearch);
         }
         catch (Exception ex)
         {
@@ -100,6 +104,10 @@ public class RoutingSettingsPage : ContentPage
         if (li < 0 || li >= LinkTechnologyPresetExtensions.AllPresets.Length)
             li = 0;
 
+        var cap = (_runtime.Settings.AdvertisedPeerCapabilities & ~PresencePeerCapabilities.PeerSearch) |
+                  PresencePeerCapabilities.Chat;
+        if (_advertisePeerSearch.IsToggled)
+            cap |= PresencePeerCapabilities.PeerSearch;
         var settings = new P2pRoutingSettings
         {
             MaxSearchHops = mh,
@@ -107,7 +115,11 @@ public class RoutingSettingsPage : ContentPage
             SendFailureRetryDelay = TimeSpan.FromMilliseconds(dm),
             SearchWaitTimeout = TimeSpan.FromMilliseconds(st),
             LinkTechnology = LinkTechnologyPresetExtensions.AllPresets[li],
-            TrafficSavingEnabled = _trafficSavingEnabled
+            TrafficSavingEnabled = _trafficSavingEnabled,
+            EnableUdpTransport = _runtime.Settings.EnableUdpTransport,
+            EnableBluetoothTransport = _runtime.Settings.EnableBluetoothTransport,
+            SuggestBluetoothPairing = _runtime.Settings.SuggestBluetoothPairing,
+            AdvertisedPeerCapabilities = cap,
         };
         await _store.SaveAsync(settings).ConfigureAwait(true);
         _runtime.Settings.MaxSearchHops = settings.MaxSearchHops;
@@ -116,6 +128,10 @@ public class RoutingSettingsPage : ContentPage
         _runtime.Settings.SearchWaitTimeout = settings.SearchWaitTimeout;
         _runtime.Settings.LinkTechnology = settings.LinkTechnology;
         _runtime.Settings.TrafficSavingEnabled = settings.TrafficSavingEnabled;
+        _runtime.Settings.EnableUdpTransport = settings.EnableUdpTransport;
+        _runtime.Settings.EnableBluetoothTransport = settings.EnableBluetoothTransport;
+        _runtime.Settings.SuggestBluetoothPairing = settings.SuggestBluetoothPairing;
+        _runtime.Settings.AdvertisedPeerCapabilities = settings.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
         await Navigation.PopAsync().ConfigureAwait(true);
     }
 }

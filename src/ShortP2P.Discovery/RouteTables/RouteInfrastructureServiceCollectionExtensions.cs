@@ -17,7 +17,10 @@ public static class RouteInfrastructureServiceCollectionExtensions
         bool registerHostedCleanup = true,
         Action<RoutePeerRoutesExpiryOptions>? configureExpiry = null)
     {
-        services.AddDbContext<RouteDbContext>(o => o.UseSqlite($"Data Source={sqliteDatabasePath}"));
+        var dbPath = $"Data Source={sqliteDatabasePath}";
+        services.AddDbContext<RouteDbContext>(o => o.UseSqlite(dbPath));
+        services.AddDbContextFactory<RouteDbContext>(o => o.UseSqlite(dbPath), ServiceLifetime.Singleton);
+        services.AddSingleton<IRouteTableSnapshotSource, EfRouteTableSnapshotSource>();
         services.AddSingleton(_ =>
         {
             var options = new RoutePeerRoutesExpiryOptions();

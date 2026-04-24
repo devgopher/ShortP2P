@@ -30,6 +30,12 @@ internal sealed class RoutingSettingsForm : Form
     private readonly CheckBox _enableUdpTransport = new() { AutoSize = true, Text = "UDP", Anchor = AnchorStyles.Left };
     private readonly CheckBox _enableBluetoothTransport = new()
         { AutoSize = true, Text = "Bluetooth", Anchor = AnchorStyles.Left };
+    private readonly CheckBox _advertisePeerSearch = new()
+    {
+        AutoSize = true,
+        Text = "Discovery: отдавать маршрутную таблицу по UDP (PeerSearch)",
+        Anchor = AnchorStyles.Left,
+    };
     private bool _trafficSavingEnabled;
 
     public RoutingSettingsForm(P2pRoutingSettingsStore store, UserP2pRuntime runtime,
@@ -45,7 +51,7 @@ internal sealed class RoutingSettingsForm : Form
         Text = "P2P routing";
         StartPosition = FormStartPosition.CenterParent;
         Width = 520;
-        Height = 320;
+        Height = 360;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -54,7 +60,7 @@ internal sealed class RoutingSettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 8,
+            RowCount = 9,
             Padding = new Padding(12),
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
@@ -71,6 +77,7 @@ internal sealed class RoutingSettingsForm : Form
         Row(2, "Pause between attempts (ms)", _delayMs);
         Row(3, "FIND wait timeout (ms)", _searchTimeoutMs);
         Row(4, "Connection speed (presence ping, min bitrate)", _linkTechnology);
+        Row(5, "Маршрутизация", _advertisePeerSearch);
         var transportPanel = new FlowLayoutPanel
         {
             AutoSize = true,
@@ -79,8 +86,8 @@ internal sealed class RoutingSettingsForm : Form
         };
         transportPanel.Controls.Add(_enableUdpTransport);
         transportPanel.Controls.Add(_enableBluetoothTransport);
-        Row(5, "Транспорт", transportPanel);
-        Row(6, "Bluetooth", _suggestBluetoothPairing);
+        Row(6, "Транспорт", transportPanel);
+        Row(7, "Bluetooth", _suggestBluetoothPairing);
 
         var bluetoothTools = new FlowLayoutPanel
         {
@@ -95,7 +102,7 @@ internal sealed class RoutingSettingsForm : Form
         };
         openBluetoothSettings.Click += (_, _) => OpenBluetoothSettings();
         bluetoothTools.Controls.Add(openBluetoothSettings);
-        Row(7, "Быстрое действие", bluetoothTools);
+        Row(8, "Быстрое действие", bluetoothTools);
 
         var buttons = new FlowLayoutPanel
         {
@@ -152,6 +159,7 @@ internal sealed class RoutingSettingsForm : Form
         _enableBluetoothTransport.Checked = s.EnableBluetoothTransport;
         _suggestBluetoothPairing.Checked = s.SuggestBluetoothPairing;
         _trafficSavingEnabled = s.TrafficSavingEnabled;
+        _advertisePeerSearch.Checked = s.AdvertisedPeerCapabilities.HasFlag(PresencePeerCapabilities.PeerSearch);
     }
 
     private async Task SaveAsync()
@@ -160,6 +168,10 @@ internal sealed class RoutingSettingsForm : Form
         if (li < 0 || li >= LinkTechnologyPresetExtensions.AllPresets.Length)
             li = 0;
 
+        var cap = (_runtime.Settings.AdvertisedPeerCapabilities & ~PresencePeerCapabilities.PeerSearch) |
+                  PresencePeerCapabilities.Chat;
+        if (_advertisePeerSearch.Checked)
+            cap |= PresencePeerCapabilities.PeerSearch;
         var s = new P2pRoutingSettings
         {
             MaxSearchHops = (int)_maxHops.Value,
@@ -171,6 +183,7 @@ internal sealed class RoutingSettingsForm : Form
             EnableBluetoothTransport = _enableBluetoothTransport.Checked,
             SuggestBluetoothPairing = _suggestBluetoothPairing.Checked,
             TrafficSavingEnabled = _trafficSavingEnabled,
+            AdvertisedPeerCapabilities = cap,
         };
         await _store.SaveAsync(s).ConfigureAwait(true);
         _userActions.LogInformation(
@@ -186,5 +199,6 @@ internal sealed class RoutingSettingsForm : Form
         _runtime.Settings.EnableBluetoothTransport = s.EnableBluetoothTransport;
         _runtime.Settings.SuggestBluetoothPairing = s.SuggestBluetoothPairing;
         _runtime.Settings.TrafficSavingEnabled = s.TrafficSavingEnabled;
+        _runtime.Settings.AdvertisedPeerCapabilities = s.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
     }
 }

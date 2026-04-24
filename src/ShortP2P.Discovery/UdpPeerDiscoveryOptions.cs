@@ -5,8 +5,11 @@ namespace ShortP2P.Discovery;
 /// </summary>
 public sealed class UdpPeerDiscoveryOptions
 {
-    /// <summary>Порт, на котором слушаются и рассылаются beacon-пакеты.</summary>
-    public int DiscoveryPort { get; set; } = 17890;
+    /// <summary>Порт по умолчанию: beacon <see cref="UdpPeerDiscoveryService" />, gossip и запрос маршрутной таблицы (wire).</summary>
+    public const int DefaultDiscoveryUdpPort = 17890;
+
+    /// <summary>Порт, на котором слушаются и рассылаются beacon-пакеты и wire-запросы discovery.</summary>
+    public int DiscoveryPort { get; set; } = DefaultDiscoveryUdpPort;
 
     public TimeSpan AnnounceInterval { get; set; } = TimeSpan.FromSeconds(30);
 
