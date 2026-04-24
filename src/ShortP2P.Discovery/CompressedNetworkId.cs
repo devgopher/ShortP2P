@@ -41,9 +41,7 @@ public readonly struct CompressedNetworkId(Guid value) : IEquatable<CompressedNe
     public string ToShortString()
     {
         Span<byte> buf = stackalloc byte[16];
-        if (!Value.TryWriteBytes(buf))
-            throw new InvalidOperationException();
-        return ToBase64Url(buf);
+        return !Value.TryWriteBytes(buf) ? throw new InvalidOperationException() : ToBase64Url(buf);
     }
 
     public static CompressedNetworkId FromShortString(string text)
@@ -103,8 +101,7 @@ public readonly struct CompressedNetworkId(Guid value) : IEquatable<CompressedNe
         }
 
         var bytes = Convert.FromBase64String(t);
-        if (bytes.Length != 16)
-            throw new FormatException("Decoded id must be 16 bytes.");
-        return bytes;
+        
+        return bytes.Length != 16 ? throw new FormatException("Decoded id must be 16 bytes.") : bytes;
     }
 }

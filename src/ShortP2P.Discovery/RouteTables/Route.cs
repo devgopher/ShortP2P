@@ -9,12 +9,3 @@ public class Route
     
     public List<PeerIdentityAddress>? PeerRoutes { get; init; }
 }
-
-/// <summary>
-/// Конкретный адрес peer
-/// </summary>
-public class PeerIdentityAddress
-{
-    public required PeerIdentity PeerIdentity { get; init; }
-    public required string PeerAddress { get; init; }
-}

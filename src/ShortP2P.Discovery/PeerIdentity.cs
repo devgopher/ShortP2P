@@ -7,6 +7,12 @@ namespace ShortP2P.Discovery;
 /// </summary>
 public sealed class PeerIdentity
 {
+#pragma warning disable CS8618 // materialization (EF Core)
+    private PeerIdentity()
+    {
+    }
+#pragma warning restore CS8618
+
     public PeerIdentity(string nickname, CompressedNetworkId networkId, int dataUdpPort = 50100,
         int maxNicknameUtf8Bytes = 64)
     {
@@ -25,10 +31,10 @@ public sealed class PeerIdentity
         DataUdpPort = dataUdpPort;
     }
 
-    public string Nickname { get; }
+    public string Nickname { get; init; } = null!;
 
-    public CompressedNetworkId NetworkId { get; }
+    public CompressedNetworkId NetworkId { get; init; }
 
     /// <summary>Порт UDP для данных мессенджера (объявляется в beacon для построения маршрутов).</summary>
-    public int DataUdpPort { get; }
+    public int DataUdpPort { get; init; }
 }
