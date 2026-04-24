@@ -10,13 +10,15 @@ namespace ShortP2P.Messenger;
 /// <summary>
 ///     Бэкенд мессенджера на устройстве пользователя: шифрует бинарные сообщения (с фрагментацией под лимит
 ///     <see cref="P2PSession" />)
-///     и собирает входящие фрагменты обратно. Поддерживает квитанции доставки и дедупликацию по id сообщения.
+///     и собирает входящие фрагменты обратно. Поддерживает квитанции доставки, дедупликацию по id сообщения
+///     и отбрасывание пакетов с id исходящих сообщений этого клиента (эхо на тот же ключ сессии).
 /// </summary>
 public sealed class MessengerService(ITransport transport, P2PSession session, MessengerOptions? options = null,
     Func<ValueTask>? onDecryptFailure = null)
     : IAsyncDisposable
 {
     private const int MaxTrackedDeliveredIds = 8192;
+    private const int MaxTrackedOutboundIds = 8192;
 
     private readonly Channel<IncomingBinaryMessage> _incoming = Channel.CreateUnbounded<IncomingBinaryMessage>();
     private readonly MessengerOptions _options = options ?? new MessengerOptions();
@@ -26,6 +28,8 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
     private readonly ITransport _transport = transport ?? throw new ArgumentNullException(nameof(transport));
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource> _ackWaiters = new();
     private readonly HashSet<Guid> _deliveredMessageIds = [];
+    /// <summary>Идентификаторы сообщений, отправленных этим экземпляром (защита от приёма собственного эха/hairpin).</summary>
+    private readonly HashSet<Guid> _ownOutboundMessageIds = [];
 
     private CancellationTokenSource? _cts;
     private Task? _receiveTask;
@@ -108,6 +112,13 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
         var maxPayload = ChunkCodec.MaxPayloadPerChunk(_session);
         var totalChunks = data.Length == 0 ? 1 : (data.Length + maxPayload - 1) / maxPayload;
 
+        lock (_sync)
+        {
+            if (_ownOutboundMessageIds.Count >= MaxTrackedOutboundIds)
+                _ownOutboundMessageIds.Clear();
+            _ownOutboundMessageIds.Add(messageId);
+        }
+
         for (var i = 0; i < totalChunks; i++)
         {
             var offset = i * maxPayload;
@@ -174,6 +185,9 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
 
         lock (_sync)
         {
+            if (_ownOutboundMessageIds.Contains(messageId))
+                return;
+
             if (!_pending.TryGetValue(messageId, out var state))
             {
                 state = new Reassembly(totalChunks);
