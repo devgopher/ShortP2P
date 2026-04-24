@@ -14,7 +14,7 @@ internal static class VoiceRecordHelper
     private const int OpusDecodeSampleRate = 48000;
 
     public const int TrafficSavingBitrate = 6_000;
-    public const int DefaultBitrate = 24_000;
+    public const int DefaultBitrate = 18_000;
 
     /// <summary>WAV (RIFF) в памяти → Ogg Opus mono (6 или 24 kbps в зависимости от настроек).</summary>
     public static Task<(bool Ok, byte[]? OggBytes, string? Error)> EncodeWavPcmToOggOpusAsync(byte[] wavBytes,
