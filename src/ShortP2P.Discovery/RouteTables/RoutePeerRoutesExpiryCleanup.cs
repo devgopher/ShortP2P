@@ -5,12 +5,13 @@ using Microsoft.Extensions.Logging;
 namespace ShortP2P.Discovery.RouteTables;
 
 /// <summary>
-///     Периодическое удаление <see cref="PeerIdentityAddress" />, у которых истёк срок по <see cref="PeerIdentityAddress.LastSeen" />.
+///     Периодическое удаление устаревших <see cref="PeerIdentityAddress" /> и <see cref="PeerChain" />.
 /// </summary>
 public static class RoutePeerRoutesExpiryCleanup
 {
     /// <summary>
-    ///     Удаляет строки, у которых <see cref="PeerIdentityAddress.LastSeen" /> старше <paramref name="staleAfter" /> от текущего UTC.
+    ///     Удаляет строки, у которых срок годности истёк относительно текущего UTC:
+    ///     <see cref="PeerIdentityAddress.LastSeen" /> и <see cref="PeerChain.UpdatedAtUtc" />.
     /// </summary>
     public static async Task RunOnceAsync(RouteDbContext db, TimeSpan staleAfter, CancellationToken cancellationToken = default)
     {
@@ -18,6 +19,9 @@ public static class RoutePeerRoutesExpiryCleanup
         await db.Routes
             .SelectMany(r => r.PeerRoutes!)
             .Where(p => p.LastSeen < cutoff)
+            .ExecuteDeleteAsync(cancellationToken);
+        await db.PeerChains
+            .Where(c => c.UpdatedAtUtc < cutoff)
             .ExecuteDeleteAsync(cancellationToken);
     }
 

@@ -4,7 +4,7 @@ using ShortP2P.Discovery.RouteTables;
 namespace ShortP2P.Discovery.Strategies;
 
 /// <summary>
-///     <see cref="FindAsync" /> — маршрут из локальной БД. <see cref="LookupAsync" /> — не реализован.
+///     <see cref="FindAsync" /> — маршрут из локальной БД. <see cref="UpdateRoutesAsync" /> — не реализован.
 /// </summary>
 public sealed class GossipStrategy(IDbContextFactory<RouteDbContext> dbContextFactory) : IDiscoveryStrategy
 {
@@ -14,10 +14,9 @@ public sealed class GossipStrategy(IDbContextFactory<RouteDbContext> dbContextFa
 
     public string Name => "gossip";
 
-    public Task<Route[]> LookupAsync(int deepness = 3, CancellationToken cancellationToken = default)
+    public Task<Route[]> UpdateRoutesAsync(int deepness = 3, CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException(
-            "LookupAsync будет возвращать маршруты исключительно из локальной базы; реализация позже.");
+        throw new NotImplementedException("LookupAsync будет возвращать маршруты исключительно из локальной базы; реализация позже.");
     }
 
     public async Task<PeerChain[]> FindAsync(CompressedNetworkId networkId, int deepness = 5,

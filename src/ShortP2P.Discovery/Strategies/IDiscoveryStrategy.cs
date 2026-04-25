@@ -12,7 +12,7 @@ public interface IDiscoveryStrategy
     /// <summary>
     ///     Список маршрутов из локальной базы (без сетевых запросов). Пока не реализовано.
     /// </summary>
-    Task<Route[]> LookupAsync(int deepness = 3, CancellationToken cancellationToken = default);
+    Task<Route[]> UpdateRoutesAsync(int deepness = 3, CancellationToken cancellationToken = default);
 
     /// <summary>
     ///     Маршрут к пиру из локальной базы по сетевому идентификатору.
