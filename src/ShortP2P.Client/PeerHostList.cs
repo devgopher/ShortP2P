@@ -2,7 +2,10 @@ using System.Net;
 
 namespace ShortP2P.Client;
 
-/// <summary>Парсинг поля <see cref="Data.ChatEntity.PeerHost"/>: один или несколько IP через запятую, точку с запятой, вертикальную черту или пробел.</summary>
+/// <summary>
+///     Парсинг поля <see cref="Data.ChatEntity.PeerHost" />: один или несколько IP через запятую, точку с запятой,
+///     вертикальную черту или пробел.
+/// </summary>
 public static class PeerHostList
 {
     private static readonly char[] Separators = [',', ';', '|', ' ', '\n', '\r', '\t'];
@@ -10,24 +13,13 @@ public static class PeerHostList
     /// <summary>Уникальные корректные IP в порядке появления.</summary>
     public static IReadOnlyList<string> ParseCandidates(string? peerHost)
     {
-        if (string.IsNullOrWhiteSpace(peerHost))
-            return [];
-
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var list = new List<string>();
-        foreach (var part in peerHost.Split(Separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (!IPAddress.TryParse(part, out _))
-                continue;
-            if (!seen.Add(part))
-                continue;
-            list.Add(part);
-        }
-
-        return list;
+        return !string.IsNullOrWhiteSpace(peerHost)
+            ? peerHost.Split(Separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(part => IPAddress.TryParse(part, out _)).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+            : [];
     }
 
-    /// <summary>Первый адрес из списка или <paramref name="fallback"/>.</summary>
+    /// <summary>Первый адрес из списка или <paramref name="fallback" />.</summary>
     public static string PrimaryHost(string? peerHost, string fallback = "127.0.0.1")
     {
         var c = ParseCandidates(peerHost);
@@ -37,13 +29,9 @@ public static class PeerHostList
     /// <summary>Добавляет новые IP в конец списка без дубликатов (регистр не важен).</summary>
     public static string MergeAppend(string? existingPeerHost, params string?[] additionalHostTexts)
     {
-        var list = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var x in ParseCandidates(existingPeerHost))
-        {
-            if (seen.Add(x))
-                list.Add(x);
-        }
+
+        var list = ParseCandidates(existingPeerHost).Where(x => seen.Add(x)).ToList();
 
         foreach (var raw in additionalHostTexts)
         {
@@ -71,11 +59,7 @@ public static class PeerHostList
         if (seen.Add(primaryHost))
             list.Add(primaryHost);
 
-        foreach (var x in ParseCandidates(existingPeerHost))
-        {
-            if (seen.Add(x))
-                list.Add(x);
-        }
+        list.AddRange(ParseCandidates(existingPeerHost).Where(x => seen.Add(x)));
 
         return string.Join(", ", list);
     }
