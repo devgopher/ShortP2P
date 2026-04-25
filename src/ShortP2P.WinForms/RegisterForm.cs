@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using ShortP2P.Auth;
 using ShortP2P.Client.Services;
 
 namespace ShortP2P.WinForms;

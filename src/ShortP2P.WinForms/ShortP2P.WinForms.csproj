@@ -31,6 +31,7 @@
     <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260330" />
     <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260302" />
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
+    <ProjectReference Include="..\ShortP2P.Auth\ShortP2P.Auth.csproj" />
     <ProjectReference Include="..\ShortP2P.Client\ShortP2P.Client.csproj" />
     <ProjectReference Include="..\ShortP2P.Transport.Bluetooth.Windows\ShortP2P.Transport.Bluetooth.Windows.csproj" />
   </ItemGroup>

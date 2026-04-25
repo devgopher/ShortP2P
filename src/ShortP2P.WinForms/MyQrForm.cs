@@ -1,6 +1,8 @@
 using System.Drawing;
 using Microsoft.Extensions.Logging;
+using ShortP2P.Auth;
 using ShortP2P.Client.Qr;
+using ShortP2P.Crypto;
 using ShortP2P.Client.Services;
 
 namespace ShortP2P.WinForms;

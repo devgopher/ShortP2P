@@ -3,6 +3,7 @@ using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Devices;
+using ShortP2P.Auth;
 using ShortP2P.Client;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;

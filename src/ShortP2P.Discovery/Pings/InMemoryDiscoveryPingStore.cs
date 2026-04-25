@@ -7,16 +7,16 @@ public sealed class InMemoryDiscoveryPingStore : IDiscoveryPingStore
 {
     private readonly ConcurrentDictionary<string, DiscoveryPingEntry> _entries = new(StringComparer.Ordinal);
 
-    public void Write(Guid networkId, TransportAddress address, DateTimeOffset pingedAtUtc)
+    public void Write(PeerIdentity identity, TransportAddress address, DateTimeOffset pingedAtUtc)
     {
-        var key = BuildKey(networkId, address);
-        var entry = new DiscoveryPingEntry(networkId, address, pingedAtUtc);
+        var key = BuildKey(identity.NetworkId.Value, address);
+        var entry = new DiscoveryPingEntry(identity, address, pingedAtUtc);
         _entries.AddOrUpdate(key, entry, (_, _) => entry);
     }
 
     public IReadOnlyList<DiscoveryPingEntry> GetSnapshot() =>
         _entries.Values
-            .OrderByDescending(e => e.PingedAtUtc)
+            .OrderByDescending(e => e.LastSeenUtc)
             .ToArray();
 
     private static string BuildKey(Guid networkId, TransportAddress address) =>

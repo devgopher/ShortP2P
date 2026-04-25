@@ -75,6 +75,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\ShortP2P.Auth\ShortP2P.Auth.csproj" />
 		<ProjectReference Include="..\ShortP2P.Client\ShortP2P.Client.csproj" />
 	</ItemGroup>
 

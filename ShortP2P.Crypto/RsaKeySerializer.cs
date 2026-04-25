@@ -1,7 +1,8 @@
+using System.Security.Cryptography;
+using System.Security.Cryptography;
 using System.Text.Json;
-using ShortP2P.Crypto;
 
-namespace ShortP2P.Client.Services;
+namespace ShortP2P.Crypto;
 
 public static class RsaKeySerializer
 {
@@ -58,7 +59,7 @@ public static class RsaKeySerializer
     public static RsaPrivateKey DeserializePrivate(string json)
     {
         var dto = JsonSerializer.Deserialize<PrivateDto>(json) ?? throw new FormatException("Invalid private key JSON.");
-        var p = new System.Security.Cryptography.RSAParameters
+        var p = new RSAParameters
         {
             Modulus = Convert.FromBase64String(dto.M),
             Exponent = Convert.FromBase64String(dto.E),

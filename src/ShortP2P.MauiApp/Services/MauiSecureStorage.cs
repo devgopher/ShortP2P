@@ -1,9 +1,10 @@
 using Microsoft.Maui.Storage;
+using ShortP2P.Auth;
 
 namespace ShortP2P.MauiApp.Services;
 
-/// <summary>Maps MAUI secure storage to <see cref="ShortP2P.Client.ISessionStorage"/>.</summary>
-public sealed class MauiSecureStorage : ShortP2P.Client.ISessionStorage
+/// <summary>Maps MAUI secure storage to <see cref="ISessionStorage"/>.</summary>
+public sealed class MauiSecureStorage : ISessionStorage
 {
     public Task<string?> GetAsync(string key) => SecureStorage.Default.GetAsync(key);
 

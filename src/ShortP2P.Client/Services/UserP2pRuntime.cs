@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using ShortP2P.Auth;
+using ShortP2P.Auth.Data;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Qr;

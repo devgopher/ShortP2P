@@ -3,7 +3,7 @@ using System.Linq;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using ShortP2P.Client.Services;
+using ShortP2P.Crypto;
 
 namespace ShortP2P.Client.Qr;
 

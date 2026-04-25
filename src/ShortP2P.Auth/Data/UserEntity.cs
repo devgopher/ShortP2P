@@ -1,6 +1,6 @@
 using SQLite;
 
-namespace ShortP2P.Client.Data;
+namespace ShortP2P.Auth.Data;
 
 [Table("users")]
 public class UserEntity

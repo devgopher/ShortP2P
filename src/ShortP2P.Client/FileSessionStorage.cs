@@ -1,3 +1,5 @@
+using ShortP2P.Auth;
+
 namespace ShortP2P.Client;
 
 /// <summary>File-based session storage under a directory (one file per key).</summary>

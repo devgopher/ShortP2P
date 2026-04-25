@@ -3,6 +3,6 @@ using ShortP2P.Transport.Abstractions;
 namespace ShortP2P.Discovery.Pings;
 
 public sealed record DiscoveryPingEntry(
-    Guid NetworkId,
+    PeerIdentity Identity,
     TransportAddress Address,
-    DateTimeOffset PingedAtUtc);
+    DateTimeOffset LastSeenUtc);

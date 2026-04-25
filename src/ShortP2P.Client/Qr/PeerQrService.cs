@@ -3,7 +3,7 @@ using System.Linq;
 using QRCoder;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
-using ShortP2P.Client.Data;
+using ShortP2P.Auth.Data;
 using ZXing;
 using ZXing.Common;
 

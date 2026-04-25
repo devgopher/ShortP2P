@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\ShortP2P.Crypto\ShortP2P.Crypto.csproj" />
+    <ProjectReference Include="..\ShortP2P.Auth\ShortP2P.Auth.csproj" />
     <ProjectReference Include="..\ShortP2P.Transport\ShortP2P.Transport.csproj" />
     <ProjectReference Include="..\ShortP2P.Messenger\ShortP2P.Messenger.csproj" />
     <ProjectReference Include="..\ShortP2P.Discovery\ShortP2P.Discovery.csproj" />

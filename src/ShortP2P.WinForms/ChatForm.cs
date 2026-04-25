@@ -4,6 +4,8 @@ using System.Diagnostics;
 using NAudio.Vorbis;
 using NAudio.Wave;
 using Microsoft.Extensions.Logging;
+using ShortP2P.Auth;
+using ShortP2P.Auth.Data;
 using ShortP2P.Client;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;

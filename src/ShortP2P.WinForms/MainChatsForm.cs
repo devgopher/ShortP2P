@@ -1,7 +1,9 @@
 using System.Drawing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using ShortP2P.Auth;
 using ShortP2P.Client.ChatMedia;
+using ShortP2P.Crypto;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
@@ -19,7 +21,6 @@ public sealed class MainChatsForm : Form
     private readonly UserP2pRuntime _p2P;
     private readonly Label _profile = new() { AutoSize = true };
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
-    private readonly P2pRoutingSettingsStore _routingStore;
     private readonly HashSet<int> _unreadChatIds = [];
     private readonly IServiceProvider _services;
     private readonly ILogger<MainChatsForm> _logger;
@@ -41,7 +42,6 @@ public sealed class MainChatsForm : Form
         _auth = auth;
         _chats = chats;
         _p2P = p2P;
-        _routingStore = routingStore;
         _services = services;
         _logger = logger;
         _chatLog = chatLog;

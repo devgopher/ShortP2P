@@ -2,6 +2,7 @@
 using System.Net;
 using Microsoft.EntityFrameworkCore;
 using ShortP2P.Discovery.Gossip;
+using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
@@ -14,19 +15,20 @@ namespace ShortP2P.Discovery.Strategies;
 /// </summary>
 public sealed class GossipStrategy(
     IDbContextFactory<RouteDbContext> dbContextFactory,
-    IPeerDiscoveryService? peerDiscoveryService = null) : IDiscoveryStrategy
+    IDiscoveryPingStore discoveryPingStore,
+    IPeerDiscoveryService peerDiscoveryService) : IDiscoveryStrategy
 {
     private const int MaxPeerChainDepth = 5;
     private readonly IDbContextFactory<RouteDbContext> _dbContextFactory =
         dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
-    private readonly IPeerDiscoveryService? _peerDiscoveryService = peerDiscoveryService;
+
 
     public string Name => "gossip";
 
     public async Task<Route[]> UpdateRoutesAsync(int deepness = 3, CancellationToken cancellationToken = default)
     {
         var cappedDepth = Math.Clamp(deepness, 1, MaxPeerChainDepth);
-        var pings = _peerDiscoveryService?.GetPeersSnapshot() ?? [];
+        var pings = discoveryPingStore.GetSnapshot().ToArray();
 
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         await UpsertRoutesByPingsAsync(db, pings, cancellationToken).ConfigureAwait(false);
@@ -39,7 +41,7 @@ public sealed class GossipStrategy(
             fetchedChains.TryAdd(chain.ChainKey, chain);
 
         var allKnownAddresses = await CollectAddressesByPeerAsync(db, pings, cancellationToken).ConfigureAwait(false);
-        var localSenderId = _peerDiscoveryService?.LocalPeer.NetworkId.Value ?? Guid.Empty;
+        var localSenderId = peerDiscoveryService?.LocalPeer.NetworkId.Value ?? Guid.Empty;
         foreach (var remoteEndpoint in allKnownAddresses.SelectMany(kv => kv.Value))
         {
             var routes = await RouteTableWireClient.QueryRoutesAsync(
@@ -125,7 +127,7 @@ public sealed class GossipStrategy(
         };
     }
 
-    private static async Task UpsertRoutesByPingsAsync(RouteDbContext db, IReadOnlyCollection<DiscoveredPeer> pings,
+    private static async Task UpsertRoutesByPingsAsync(RouteDbContext db, IReadOnlyCollection<DiscoveryPingEntry> pings,
         CancellationToken cancellationToken)
     {
         if (pings.Count == 0)
@@ -133,8 +135,9 @@ public sealed class GossipStrategy(
 
         var routeIds = pings
             .Select(p => p.Identity.NetworkId.ToShortString())
-            .Distinct(StringComparer.Ordinal)
+            .Distinct()
             .ToArray();
+        
         var existingRoutes = await db.Routes
             .Include(r => r.PeerRoutes)
             .Where(r => routeIds.Contains(r.RouteId))
@@ -144,7 +147,7 @@ public sealed class GossipStrategy(
         foreach (var ping in pings)
         {
             var routeId = ping.Identity.NetworkId.ToShortString();
-            var address = ToIpString(ping.DataReachableAt) ?? ToIpString(ping.ReachableAt);
+            var address = ToIpString(ping.Address);
             if (string.IsNullOrWhiteSpace(address))
                 continue;
 
@@ -181,14 +184,13 @@ public sealed class GossipStrategy(
     }
 
     private static async Task<Dictionary<Guid, HashSet<IPEndPoint>>> CollectAddressesByPeerAsync(RouteDbContext db,
-        IReadOnlyCollection<DiscoveredPeer> pings, CancellationToken cancellationToken)
+        IReadOnlyCollection<DiscoveryPingEntry> pings, CancellationToken cancellationToken)
     {
         var result = new Dictionary<Guid, HashSet<IPEndPoint>>();
         var targetIds = pings.Select(p => p.Identity.NetworkId.Value).ToHashSet();
         foreach (var ping in pings)
         {
-            AddUdpEndpoint(result, ping.Identity.NetworkId.Value, ping.ReachableAt);
-            AddUdpEndpoint(result, ping.Identity.NetworkId.Value, ping.DataReachableAt);
+            AddUdpEndpoint(result, ping.Identity.NetworkId.Value, ping.Address);
         }
 
         if (targetIds.Count == 0)
@@ -319,13 +321,13 @@ public sealed class GossipStrategy(
         await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private IReadOnlyCollection<PeerChain> BuildDirectPeerChainsFromPings(IReadOnlyCollection<DiscoveredPeer> pings)
+    private IReadOnlyCollection<PeerChain> BuildDirectPeerChainsFromPings(IReadOnlyCollection<DiscoveryPingEntry> pings)
     {
-        var sourceRouteId = _peerDiscoveryService?.LocalPeer.NetworkId.ToShortString() ?? "local";
+        var sourceRouteId = peerDiscoveryService?.LocalPeer.NetworkId.ToShortString() ?? "local";
         var result = new Dictionary<string, PeerChain>(StringComparer.Ordinal);
         foreach (var ping in pings)
         {
-            var address = ToIpString(ping.DataReachableAt) ?? ToIpString(ping.ReachableAt);
+            var address = ToIpString(ping.Address);
             if (string.IsNullOrWhiteSpace(address))
                 continue;
             var node = new PeerIdentityAddress

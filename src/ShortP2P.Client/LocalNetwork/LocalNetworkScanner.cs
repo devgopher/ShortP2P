@@ -444,7 +444,9 @@ public sealed class LocalNetworkScanner(
 
     private void OnDiscoveryPingReceived(DiscoveredLocalPeer peer)
     {
-        discoveryPingStore?.Write(peer.NetworkId, peer.SourceAddress, peer.LastSeenUtc);
+        discoveryPingStore?.Write(
+            new PeerIdentity(peer.Nickname, new CompressedNetworkId(peer.NetworkId), peer.PeerDataUdpPort),
+            peer.SourceAddress, peer.LastSeenUtc);
         _entries.AddOrUpdate(peer.NetworkId, peer, (_, _) => peer);
         if (_scanSessionActive)
             return;

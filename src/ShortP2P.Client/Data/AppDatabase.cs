@@ -1,4 +1,5 @@
 using SQLite;
+using ShortP2P.Auth.Data;
 
 namespace ShortP2P.Client.Data;
 

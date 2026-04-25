@@ -1,19 +1,19 @@
-using ShortP2P.Client.Data;
+using ShortP2P.Auth.Data;
 using ShortP2P.Crypto;
 using ShortP2P.Discovery;
 
-namespace ShortP2P.Client.Services;
+namespace ShortP2P.Auth;
 
 public sealed class AuthService
 {
     private const string SessionUserIdKey = "shortp2p_session_user_id";
 
-    private readonly AppDatabase _db;
+    private readonly IUserAuthRepository _users;
     private readonly ISessionStorage _sessionStorage;
 
-    public AuthService(AppDatabase db, ISessionStorage sessionStorage)
+    public AuthService(IUserAuthRepository users, ISessionStorage sessionStorage)
     {
-        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _users = users ?? throw new ArgumentNullException(nameof(users));
         _sessionStorage = sessionStorage ?? throw new ArgumentNullException(nameof(sessionStorage));
     }
 
@@ -24,8 +24,7 @@ public sealed class AuthService
         if (string.IsNullOrWhiteSpace(nickname) || string.IsNullOrWhiteSpace(password))
             return (false, "Nickname and password are required.");
 
-        var conn = await _db.GetConnectionAsync();
-        var existing = await conn.Table<UserEntity>().Where(u => u.Nickname == nickname).FirstOrDefaultAsync();
+        var existing = await _users.FindByNicknameAsync(nickname.Trim()).ConfigureAwait(false);
         if (existing != null)
             return (false, "This nickname is already registered.");
 
@@ -45,8 +44,8 @@ public sealed class AuthService
             CreatedUtcTicks = DateTime.UtcNow.Ticks,
         };
 
-        await conn.InsertAsync(user);
-        await PersistSessionAsync(user.Id);
+        await _users.InsertUserAsync(user).ConfigureAwait(false);
+        await PersistSessionAsync(user.Id).ConfigureAwait(false);
         CurrentUser = user;
         return (true, null);
     }
@@ -56,12 +55,11 @@ public sealed class AuthService
         if (string.IsNullOrWhiteSpace(nickname) || string.IsNullOrWhiteSpace(password))
             return (false, "Nickname and password are required.");
 
-        var conn = await _db.GetConnectionAsync();
-        var user = await conn.Table<UserEntity>().Where(u => u.Nickname == nickname).FirstOrDefaultAsync();
+        var user = await _users.FindByNicknameAsync(nickname.Trim()).ConfigureAwait(false);
         if (user == null || !PasswordHasher.Verify(password, user.PasswordSaltBase64, user.PasswordHashBase64))
             return (false, "Invalid nickname or password.");
 
-        await PersistSessionAsync(user.Id);
+        await PersistSessionAsync(user.Id).ConfigureAwait(false);
         CurrentUser = user;
         return (true, null);
     }
@@ -70,7 +68,7 @@ public sealed class AuthService
     {
         CurrentUser = null;
         _sessionStorage.Remove(SessionUserIdKey);
-        await Task.CompletedTask;
+        await Task.CompletedTask.ConfigureAwait(false);
     }
 
     public async Task<bool> TryRestoreSessionAsync()
@@ -79,20 +77,11 @@ public sealed class AuthService
         if (string.IsNullOrEmpty(idStr) || !int.TryParse(idStr, out var id))
             return false;
 
-        var conn = await _db.GetConnectionAsync();
-        var user = await conn.FindAsync<UserEntity>(id).ConfigureAwait(false);
+        var user = await _users.FindByIdAsync(id).ConfigureAwait(false);
         if (user == null)
             return false;
         CurrentUser = user;
         return true;
-    }
-
-    public async Task UpdateDataPortAsync(int port)
-    {
-        if (CurrentUser == null) return;
-        CurrentUser.DataUdpPort = port;
-        var conn = await _db.GetConnectionAsync();
-        await conn.UpdateAsync(CurrentUser);
     }
 
     private Task PersistSessionAsync(int userId) =>
@@ -100,13 +89,15 @@ public sealed class AuthService
 
     public RsaPrivateKey GetCurrentPrivateKey()
     {
-        if (CurrentUser == null) throw new InvalidOperationException("Not logged in.");
-        return RsaKeySerializer.DeserializePrivate(CurrentUser.RsaPrivateJson);
+        return CurrentUser == null
+            ? throw new InvalidOperationException("Not logged in.")
+            : RsaKeySerializer.DeserializePrivate(CurrentUser.RsaPrivateJson);
     }
 
     public RsaPublicKey GetCurrentPublicKey()
     {
-        if (CurrentUser == null) throw new InvalidOperationException("Not logged in.");
-        return RsaKeySerializer.DeserializePublic(CurrentUser.RsaPublicJson);
+        return CurrentUser == null
+            ? throw new InvalidOperationException("Not logged in.")
+            : RsaKeySerializer.DeserializePublic(CurrentUser.RsaPublicJson);
     }
 }

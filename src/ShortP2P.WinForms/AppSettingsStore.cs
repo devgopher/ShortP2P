@@ -1,5 +1,5 @@
 using NAudio.Wave;
-using ShortP2P.Client;
+using ShortP2P.Auth;
 using Windows.Devices.Enumeration;
 
 namespace ShortP2P.WinForms;

@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 
-namespace ShortP2P.Client.Services;
+namespace ShortP2P.Crypto;
 
 public static class PasswordHasher
 {

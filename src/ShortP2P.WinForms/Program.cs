@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NLog.Config;
 using NLog.Extensions.Logging;
+using ShortP2P.Auth;
 using ShortP2P.Client;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
@@ -31,6 +32,7 @@ internal static class Program
             "ShortP2P", "WinForms");
         services.AddSingleton(_ => ChatMediaOptions.LoadOrDefault(Path.Combine(appRoot, "chat-media.json")));
         services.AddSingleton(_ => new AppDatabase(Path.Combine(appRoot, "shortp2p.db")));
+        services.AddSingleton<IUserAuthRepository, SqliteUserAuthRepository>();
         services.AddRouteDbContextWithPeerExpiryCleanup(Path.Combine(appRoot, "routes.db"), enableDiscovery: true);
         services.AddSingleton<ISessionStorage>(_ => new FileSessionStorage(Path.Combine(appRoot, "session")));
         services.AddSingleton<AuthService>();
