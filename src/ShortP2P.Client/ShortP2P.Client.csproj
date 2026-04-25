@@ -23,4 +23,16 @@
     <ProjectReference Include="..\ShortP2P.Discovery\ShortP2P.Discovery.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="LocalNetwork\LocalNetworkScanner.cs" />
+    <Compile Remove="LocalNetwork\LanBroadcastHelper.cs" />
+    <Compile Remove="Qr\LocalIPv4Resolver.cs" />
+    <Compile Remove="Routing\P2pRoutingSettings.cs" />
+    <Compile Remove="Routing\LinkTechnologyPreset.cs" />
+    <Compile Remove="Routing\PresencePeerCapabilities.cs" />
+    <Compile Remove="Routing\PresencePingCodec.cs" />
+    <Compile Remove="Routing\DiscoveredLocalPeer.cs" />
+    <Compile Remove="Routing\LocalEndpointHelper.cs" />
+  </ItemGroup>
+
 </Project>

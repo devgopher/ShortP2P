@@ -8,6 +8,7 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
 using NLog;
 
@@ -44,7 +45,8 @@ internal static class Program
             sp.GetRequiredService<ChatMediaOptions>(),
             sp.GetRequiredService<BluetoothTransportRegistration>().Instance,
             additionalDiscoveryTransports: null,
-            sp.GetService<IRouteTableSnapshotSource>()));
+            sp.GetService<IRouteTableSnapshotSource>(),
+            sp.GetService<IDiscoveryPingStore>()));
 
         services.AddTransient<LoginForm>();
         services.AddTransient<RegisterForm>();

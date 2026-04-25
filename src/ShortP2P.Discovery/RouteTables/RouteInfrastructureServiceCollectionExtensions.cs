@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.Strategies;
 
 namespace ShortP2P.Discovery.RouteTables;
@@ -24,6 +25,7 @@ public static class RouteInfrastructureServiceCollectionExtensions
         services.AddDbContext<RouteDbContext>(o => o.UseSqlite(dbPath));
         services.AddDbContextFactory<RouteDbContext>(o => o.UseSqlite(dbPath), ServiceLifetime.Singleton);
         services.AddSingleton<IRouteTableSnapshotSource, EfRouteTableSnapshotSource>();
+        services.AddSingleton<IDiscoveryPingStore, InMemoryDiscoveryPingStore>();
         services.AddSingleton<IDiscoveryStrategy, GossipStrategy>();
         services.AddSingleton(_ =>
         {

@@ -14,6 +14,18 @@
         <ProjectReference Include="..\ShortP2P.Transport\ShortP2P.Transport.csproj"/>
     </ItemGroup>
 
+    <ItemGroup>
+        <Compile Include="..\ShortP2P.Client\LocalNetwork\LocalNetworkScanner.cs" Link="LocalNetwork\LocalNetworkScanner.cs" />
+        <Compile Include="..\ShortP2P.Client\LocalNetwork\LanBroadcastHelper.cs" Link="LocalNetwork\LanBroadcastHelper.cs" />
+        <Compile Include="..\ShortP2P.Client\Qr\LocalIPv4Resolver.cs" Link="Qr\LocalIPv4Resolver.cs" />
+        <Compile Include="..\ShortP2P.Client\Routing\P2pRoutingSettings.cs" Link="Routing\P2pRoutingSettings.cs" />
+        <Compile Include="..\ShortP2P.Client\Routing\LinkTechnologyPreset.cs" Link="Routing\LinkTechnologyPreset.cs" />
+        <Compile Include="..\ShortP2P.Client\Routing\PresencePeerCapabilities.cs" Link="Routing\PresencePeerCapabilities.cs" />
+        <Compile Include="..\ShortP2P.Client\Routing\PresencePingCodec.cs" Link="Routing\PresencePingCodec.cs" />
+        <Compile Include="..\ShortP2P.Client\Routing\DiscoveredLocalPeer.cs" Link="Routing\DiscoveredLocalPeer.cs" />
+        <Compile Include="..\ShortP2P.Client\Routing\LocalEndpointHelper.cs" Link="Routing\LocalEndpointHelper.cs" />
+    </ItemGroup>
+
     <PropertyGroup>
         <TargetFramework>net8.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>

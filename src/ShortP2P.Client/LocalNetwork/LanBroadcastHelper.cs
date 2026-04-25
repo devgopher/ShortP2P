@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 
-namespace ShortP2P.Client.LocalNetwork;
+namespace ShortP2P.Discovery;
 
 /// <summary>
 ///     IPv4 directed broadcast по локальным интерфейсам (адрес «.255» подсети) + limited broadcast 255.255.255.255.

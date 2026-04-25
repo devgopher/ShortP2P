@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Data;
-using ShortP2P.Client.LocalNetwork;
 using ShortP2P.Client.Routing;
 using ShortP2P.Discovery;
 using ShortP2P.Client.Services;
@@ -11,7 +10,7 @@ namespace ShortP2P.WinForms;
 /// <summary>Ручное сканирование LAN: presence UDP 50101; discovery wire — UdpPeerDiscoveryOptions (17890).</summary>
 public sealed class LocalNetworkScanForm : Form
 {
-    private readonly UserP2pRuntime _p2p;
+    private readonly UserP2pRuntime _p2P;
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
     private readonly ILogger<LocalNetworkScanForm> _logger;
@@ -31,11 +30,11 @@ public sealed class LocalNetworkScanForm : Form
     private readonly Button _scan = new() { Text = "Сканировать", AutoSize = true };
     private readonly Button _close = new() { Text = "Закрыть", DialogResult = DialogResult.OK };
 
-    public LocalNetworkScanForm(UserP2pRuntime p2p, AuthService auth, ChatRepository chats,
+    public LocalNetworkScanForm(UserP2pRuntime p2P, AuthService auth, ChatRepository chats,
         ILogger<LocalNetworkScanForm> logger, ILogger<UserAction> userActions,
         Action<ChatEntity, IWin32Window> openChat, Func<Task>? refreshMainChatsAsync = null)
     {
-        _p2p = p2p;
+        _p2P = p2P;
         _auth = auth;
         _chats = chats;
         _logger = logger;
@@ -94,10 +93,10 @@ public sealed class LocalNetworkScanForm : Form
 
         Shown += (_, _) =>
         {
-            _p2p.LocalScan.ClientsChanged += OnClientsChanged;
+            _p2P.LocalScan.ClientsChanged += OnClientsChanged;
             RefreshList();
         };
-        FormClosed += (_, _) => _p2p.LocalScan.ClientsChanged -= OnClientsChanged;
+        FormClosed += (_, _) => _p2P.LocalScan.ClientsChanged -= OnClientsChanged;
     }
 
     private void OnClientsChanged(object? sender, EventArgs e)
@@ -119,7 +118,7 @@ public sealed class LocalNetworkScanForm : Form
         try
         {
             _list.Items.Clear();
-            foreach (var p in _p2p.LocalScan.Clients)
+            foreach (var p in _p2P.LocalScan.Clients)
             {
                 var idShort = CompressedNetworkId.FromGuid(p.NetworkId).ToShortString();
                 var row = new ListViewItem(string.IsNullOrEmpty(p.Nickname) ? "—" : p.Nickname)
@@ -157,7 +156,7 @@ public sealed class LocalNetworkScanForm : Form
         try
         {
             var result = await LanChatStartFromDiscovery
-                .TryStartAsync(peer, _auth, _chats, _p2p, CancellationToken.None).ConfigureAwait(true);
+                .TryStartAsync(peer, _auth, _chats, _p2P, CancellationToken.None).ConfigureAwait(true);
             
             switch (result.Kind)
             {
@@ -200,7 +199,7 @@ public sealed class LocalNetworkScanForm : Form
         _status.Text = $"Слушаем пинги {sec} с…";
         try
         {
-            await _p2p.LocalScan.ScanAsync(LocalNetworkScanner.DefaultScanListenDuration).ConfigureAwait(true);
+            await _p2P.LocalScan.ScanAsync(LocalNetworkScanner.DefaultScanListenDuration).ConfigureAwait(true);
             RefreshList();
             _userActions.LogInformation("LAN scan: scan finished ({Count} peers in list)", _list.Items.Count);
         }

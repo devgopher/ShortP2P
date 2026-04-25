@@ -1,10 +1,10 @@
 using System.Collections.Generic;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
-using ShortP2P.Client.LocalNetwork;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Discovery;
+using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
@@ -36,13 +36,17 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     public P2pRoutingSettings Settings { get; } = new();
     public ITransport? BluetoothTransport => _bluetooth;
 
-    /// <summary>Сканирование LAN: presence UDP 50101; wire discovery (gossip / маршруты) — <see cref="UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort" />.</summary>
+    /// <summary>
+    ///     Сканирование LAN: presence UDP 50101; wire discovery (gossip / маршруты)
+    ///     <see cref="UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort" />
+    /// </summary>
     public LocalNetworkScanner LocalScan { get; }
 
     public UserP2pRuntime(P2pRoutingSettingsStore store, AuthService auth, ChatRepository chats,
         ChatMediaOptions chatMedia, ITransport? bluetooth = null,
         IEnumerable<ITransport>? additionalDiscoveryTransports = null,
-        IRouteTableSnapshotSource? routeTableSnapshotSource = null)
+        IRouteTableSnapshotSource? routeTableSnapshotSource = null,
+        IDiscoveryPingStore? discoveryPingStore = null)
     {
         _store = store;
         _auth = auth;
@@ -50,7 +54,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         _chatMedia = chatMedia;
         _bluetooth = bluetooth;
         LocalScan = new LocalNetworkScanner(Settings, bluetooth, additionalDiscoveryTransports,
-            routeTableSnapshotSource);
+            routeTableSnapshotSource, discoveryPingStore);
     }
 
     public ChatP2pSession GetOrCreateSession(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo,
@@ -64,9 +68,9 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 return existing;
             }
 
-            var s = new ChatP2pSession(chat, user, auth, repo, uiSync, Settings, LocalScan, _chatMedia, _bluetooth);
-            _chatSessions[chat.Id] = s;
-            return s;
+            var session = new ChatP2pSession(chat, user, auth, repo, uiSync, Settings, LocalScan, _chatMedia, _bluetooth);
+            _chatSessions[chat.Id] = session;
+            return session;
         }
     }
 
@@ -317,7 +321,10 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
         try
         {
-            await LocalScan.StartAsync(user, cancellationToken).ConfigureAwait(false);
+            var localPeer = new PeerIdentity(user.Nickname,
+                CompressedNetworkId.FromShortString(user.NetworkIdShort),
+                user.DataUdpPort);
+            await LocalScan.StartAsync(localPeer, cancellationToken).ConfigureAwait(false);
         }
         catch
         {

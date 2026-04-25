@@ -4,7 +4,6 @@ using System.Text;
 using System.Threading.Channels;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
-using ShortP2P.Client.LocalNetwork;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Crypto;
