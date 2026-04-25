@@ -10,7 +10,7 @@ namespace ShortP2P.Discovery.Gossip;
 public static class RouteTableWireClient
 {
     /// <returns>Маршруты и признак усечения или <see langword="null" /> по таймауту.</returns>
-    public static async Task<(IReadOnlyList<Route> Routes, bool Truncated)?> QueryRoutesAsync(
+    public static async Task<IReadOnlyList<Route>> QueryRoutesAsync(
         IPEndPoint remoteHost,
         Guid localSenderNetworkId,
         TimeSpan waitTimeout,
@@ -18,26 +18,26 @@ public static class RouteTableWireClient
     {
         using var udp = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
         var nonce = Random.Shared.NextInt64();
-        var req = RouteTableWireCodec.BuildRequest(nonce, localSenderNetworkId);
+        var request = RouteTableWireCodec.BuildRequest(nonce, localSenderNetworkId);
         var target = new IPEndPoint(remoteHost.Address, GossipWireCodec.UdpPort);
-        await udp.SendAsync(req, target, cancellationToken).ConfigureAwait(false);
+        await udp.SendAsync(request, target, cancellationToken).ConfigureAwait(false);
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(waitTimeout);
         try
         {
             while (true)
             {
-                var r = await udp.ReceiveAsync(cts.Token).ConfigureAwait(false);
-                if (!RouteTableWireCodec.TryParseReply(r.Buffer, out var n, out _, out var routes, out var truncated))
+                var result = await udp.ReceiveAsync(cts.Token).ConfigureAwait(false);
+                if (!RouteTableWireCodec.TryParseReply(result.Buffer, out var n, out var routes))
                     continue;
                 if (n != nonce)
                     continue;
-                return (routes, truncated);
+                return routes;
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return null;
+            return [];
         }
     }
 }

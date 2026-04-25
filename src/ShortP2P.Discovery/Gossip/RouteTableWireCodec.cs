@@ -86,19 +86,15 @@ public static class RouteTableWireCodec
         return buf.ToArray();
     }
 
-    public static bool TryParseReply(ReadOnlySpan<byte> datagram, out long nonce, out Guid responderNetworkId,
-        out List<Route> routes, out bool truncated)
+    public static bool TryParseReply(ReadOnlySpan<byte> datagram, out long nonce,
+        out List<Route> routes)
     {
         nonce = 0;
-        responderNetworkId = Guid.Empty;
         routes = [];
-        truncated = false;
         if (datagram.Length < ReplyHeaderLength || datagram[0] != FrameReply)
             return false;
         nonce = BinaryPrimitives.ReadInt64LittleEndian(datagram.Slice(1, 8));
-        responderNetworkId = new Guid(datagram.Slice(9, 16));
-        var wireFlags = BinaryPrimitives.ReadUInt16BigEndian(datagram.Slice(25, 2));
-        truncated = (wireFlags & FlagTruncated) != 0;
+
         var routeCount = BinaryPrimitives.ReadUInt16BigEndian(datagram.Slice(27, 2));
         var off = ReplyHeaderLength;
         for (var i = 0; i < routeCount; i++)
@@ -138,6 +134,7 @@ public static class RouteTableWireCodec
 
             if (p.PeerIdentity.DataUdpPort is < 1 or > 65535)
                 throw new ArgumentOutOfRangeException(nameof(p.PeerIdentity.DataUdpPort));
+            
             WriteUInt16Be(parts, (ushort)p.PeerIdentity.DataUdpPort);
 
             var nick = Encoding.UTF8.GetBytes(p.PeerIdentity.Nickname ?? "?");
