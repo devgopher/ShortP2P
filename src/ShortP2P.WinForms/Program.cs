@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NLog.Config;
 using NLog.Extensions.Logging;
@@ -19,14 +20,12 @@ internal static class Program
     {
         ConfigureNLog();
 
-        var services = new ServiceCollection();
-        services.AddLogging(logging =>
-        {
-            logging.ClearProviders();
-            logging.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Information);
-            logging.AddNLog();
-        });
+        var builder = Host.CreateApplicationBuilder();
+        builder.Logging.ClearProviders();
+        builder.Logging.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Information);
+        builder.Logging.AddNLog();
 
+        var services = builder.Services;
         var appRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "ShortP2P", "WinForms");
         services.AddSingleton(_ => ChatMediaOptions.LoadOrDefault(Path.Combine(appRoot, "chat-media.json")));
@@ -55,8 +54,10 @@ internal static class Program
         services.AddTransient<RoutingSettingsForm>();
         services.AddTransient<AppSettingsForm>();
 
-        using var provider = services.BuildServiceProvider();
-        provider.StartRoutePeerRoutesExpiryCleanupDetached();
+        using var host = builder.Build();
+        host.StartAsync().GetAwaiter().GetResult();
+
+        var provider = host.Services;
         var hostLogger = provider.GetRequiredService<ILogger<WinFormsHost>>();
         var userActionLogger = provider.GetRequiredService<ILogger<UserAction>>();
         RegisterGlobalExceptionLogging(hostLogger);
@@ -65,9 +66,7 @@ internal static class Program
         ApplicationConfiguration.Initialize();
         hostLogger.LogInformation("WinForms application started");
 
-        var p2p = provider.GetRequiredService<UserP2pRuntime>();
         var appSettings = provider.GetRequiredService<AppSettingsStore>();
-        var bluetoothRegistration = provider.GetRequiredService<BluetoothTransportRegistration>();
         try
         {
             appSettings.InitializeAsync().GetAwaiter().GetResult();
@@ -91,10 +90,7 @@ internal static class Program
         }
         finally
         {
-            p2p.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            if (bluetoothRegistration.Instance is IAsyncDisposable asyncTransport)
-                asyncTransport.DisposeAsync().AsTask().GetAwaiter().GetResult();
-
+            host.StopAsync().GetAwaiter().GetResult();
             LogManager.Shutdown();
         }
     }
