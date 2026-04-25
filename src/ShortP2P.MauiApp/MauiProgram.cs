@@ -44,7 +44,7 @@ public static class MauiProgram
             ChatMediaOptions.LoadOrDefault(Path.Combine(FileSystem.AppDataDirectory, "chat-media.json")));
         builder.Services.AddSingleton(_ => new AppDatabase(Path.Combine(FileSystem.AppDataDirectory, "shortp2p.db")));
         builder.Services.AddRouteDbContextWithPeerExpiryCleanup(
-            Path.Combine(FileSystem.AppDataDirectory, "routes.db"));
+            Path.Combine(FileSystem.AppDataDirectory, "routes.db"), enableDiscovery: true);
         builder.Services.AddSingleton<ISessionStorage, MauiSecureStorage>();
         builder.Services.AddSingleton<AuthService>();
         builder.Services.AddSingleton<ChatRepository>();

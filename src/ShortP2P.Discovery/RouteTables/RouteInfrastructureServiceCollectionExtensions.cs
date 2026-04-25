@@ -9,7 +9,7 @@ namespace ShortP2P.Discovery.RouteTables;
 public static class RouteInfrastructureServiceCollectionExtensions
 {
     /// <param name="sqliteDatabasePath"></param>
-    /// <param name="registerHostedCleanup">
+    /// <param name="enableDiscovery">
     ///     <see langword="true" /> — зарегистрировать фоновый сервис (см. <see cref="IHostedService" />) для MAUI / generic host.
     ///     <see langword="false" /> — только контекст и опции; затем вызовите <see cref="StartRoutePeerRoutesExpiryCleanupDetached" />.
     /// </param>
@@ -17,7 +17,7 @@ public static class RouteInfrastructureServiceCollectionExtensions
     public static IServiceCollection AddRouteDbContextWithPeerExpiryCleanup(
         this IServiceCollection services,
         string sqliteDatabasePath,
-        bool registerHostedCleanup = true,
+        bool enableDiscovery = true,
         Action<RoutePeerRoutesExpiryOptions>? configureExpiry = null)
     {
         var dbPath = $"Data Source={sqliteDatabasePath}";
@@ -32,7 +32,7 @@ public static class RouteInfrastructureServiceCollectionExtensions
             return options;
         });
 
-        if (registerHostedCleanup)
+        if (enableDiscovery)
         {
             services.AddHostedService<RoutePeerRoutesExpiryCleanupHostedService>();
             services.AddHostedService<DiscoveryRoutesUpdateHostedService>();

@@ -31,7 +31,7 @@ internal static class Program
             "ShortP2P", "WinForms");
         services.AddSingleton(_ => ChatMediaOptions.LoadOrDefault(Path.Combine(appRoot, "chat-media.json")));
         services.AddSingleton(_ => new AppDatabase(Path.Combine(appRoot, "shortp2p.db")));
-        services.AddRouteDbContextWithPeerExpiryCleanup(Path.Combine(appRoot, "routes.db"), registerHostedCleanup: false);
+        services.AddRouteDbContextWithPeerExpiryCleanup(Path.Combine(appRoot, "routes.db"), enableDiscovery: true);
         services.AddSingleton<ISessionStorage>(_ => new FileSessionStorage(Path.Combine(appRoot, "session")));
         services.AddSingleton<AuthService>();
         services.AddSingleton<ChatRepository>();
