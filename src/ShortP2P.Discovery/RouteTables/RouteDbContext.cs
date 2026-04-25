@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using ShortP2P.Auth.Data;
 using ShortP2P.Discovery;
 
 namespace ShortP2P.Discovery.RouteTables;

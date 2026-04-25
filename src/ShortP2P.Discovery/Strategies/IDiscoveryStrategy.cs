@@ -1,4 +1,5 @@
-﻿using ShortP2P.Discovery.RouteTables;
+﻿using ShortP2P.Auth.Data;
+using ShortP2P.Discovery.RouteTables;
 
 namespace ShortP2P.Discovery.Strategies;
 

@@ -11,6 +11,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\ShortP2P.Auth\ShortP2P.Auth.csproj" />
         <ProjectReference Include="..\ShortP2P.Transport\ShortP2P.Transport.csproj"/>
     </ItemGroup>
 

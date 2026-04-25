@@ -1,6 +1,5 @@
 using ShortP2P.Auth.Data;
 using ShortP2P.Crypto;
-using ShortP2P.Discovery;
 
 namespace ShortP2P.Auth;
 

@@ -12,6 +12,7 @@ using ShortP2P.Client.Services;
 using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
 using NLog;
+using ShortP2P.Discovery;
 
 namespace ShortP2P.WinForms;
 
@@ -57,7 +58,7 @@ internal static class Program
         services.AddTransient<MyQrForm>();
         services.AddTransient<RoutingSettingsForm>();
         services.AddTransient<AppSettingsForm>();
-
+        
         using var host = builder.Build();
         host.StartAsync().GetAwaiter().GetResult();
 

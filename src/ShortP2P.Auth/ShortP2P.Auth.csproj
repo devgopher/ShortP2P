@@ -13,7 +13,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\ShortP2P.Crypto\ShortP2P.Crypto.csproj" />
-    <ProjectReference Include="..\ShortP2P.Discovery\ShortP2P.Discovery.csproj" />
   </ItemGroup>
 
 </Project>

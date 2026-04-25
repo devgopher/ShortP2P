@@ -1,6 +1,8 @@
 ﻿using System.Data;
 using System.Net;
 using Microsoft.EntityFrameworkCore;
+using ShortP2P.Auth;
+using ShortP2P.Auth.Data;
 using ShortP2P.Discovery.Gossip;
 using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
@@ -16,7 +18,7 @@ namespace ShortP2P.Discovery.Strategies;
 public sealed class GossipStrategy(
     IDbContextFactory<RouteDbContext> dbContextFactory,
     IDiscoveryPingStore discoveryPingStore,
-    IPeerDiscoveryService peerDiscoveryService) : IDiscoveryStrategy
+    AuthService authService) : IDiscoveryStrategy
 {
     private const int MaxPeerChainDepth = 5;
     private readonly IDbContextFactory<RouteDbContext> _dbContextFactory =
@@ -41,7 +43,14 @@ public sealed class GossipStrategy(
             fetchedChains.TryAdd(chain.ChainKey, chain);
 
         var allKnownAddresses = await CollectAddressesByPeerAsync(db, pings, cancellationToken).ConfigureAwait(false);
-        var localSenderId = peerDiscoveryService?.LocalPeer.NetworkId.Value ?? Guid.Empty;
+
+        var localPeer = GetLocalPeer();
+
+        if (localPeer == null)
+            return [];
+        
+        var localSenderId = CompressedNetworkId.FromShortString(localPeer.NetworkIdShort).Value;
+        
         foreach (var remoteEndpoint in allKnownAddresses.SelectMany(kv => kv.Value))
         {
             var routes = await RouteTableWireClient.QueryRoutesAsync(
@@ -64,6 +73,13 @@ public sealed class GossipStrategy(
             .Include(r => r.PeerRoutes.OrderByDescending(pr => pr.LastSeen))
             .ToArrayAsync(cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private UserEntity? GetLocalPeer()
+    {
+        var localPeer = authService.CurrentUser;
+
+        return localPeer;
     }
 
     public async Task<PeerChain[]> FindAsync(CompressedNetworkId networkId, int deepness = 5,
@@ -323,7 +339,11 @@ public sealed class GossipStrategy(
 
     private IReadOnlyCollection<PeerChain> BuildDirectPeerChainsFromPings(IReadOnlyCollection<DiscoveryPingEntry> pings)
     {
-        var sourceRouteId = peerDiscoveryService?.LocalPeer.NetworkId.ToShortString() ?? "local";
+        var localPeer = GetLocalPeer();
+        if (localPeer == null)
+            return [];
+        
+        var sourceRouteId = localPeer?.NetworkIdShort ?? "local";
         var result = new Dictionary<string, PeerChain>(StringComparer.Ordinal);
         foreach (var ping in pings)
         {

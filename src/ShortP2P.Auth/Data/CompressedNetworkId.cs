@@ -1,4 +1,4 @@
-namespace ShortP2P.Discovery;
+namespace ShortP2P.Auth.Data;
 
 /// <summary>
 ///     Уникальный номер абонента в сети: 16 байт (UUID в бинарном виде), для UI — короткая base64url-строка.

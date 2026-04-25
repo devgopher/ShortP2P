@@ -1,4 +1,5 @@
 using System.Text;
+using ShortP2P.Auth.Data;
 
 namespace ShortP2P.Discovery;
 
