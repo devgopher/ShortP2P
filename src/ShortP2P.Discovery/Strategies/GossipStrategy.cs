@@ -8,6 +8,7 @@ namespace ShortP2P.Discovery.Strategies;
 /// </summary>
 public sealed class GossipStrategy(IDbContextFactory<RouteDbContext> dbContextFactory) : IDiscoveryStrategy
 {
+    private const int MaxPeerChainDepth = 5;
     private readonly IDbContextFactory<RouteDbContext> _dbContextFactory =
         dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
 
@@ -19,26 +20,64 @@ public sealed class GossipStrategy(IDbContextFactory<RouteDbContext> dbContextFa
             "LookupAsync будет возвращать маршруты исключительно из локальной базы; реализация позже.");
     }
 
-    public async Task<Route?> FindAsync(CompressedNetworkId networkId, int deepness = 3,
+    public async Task<PeerChain[]> FindAsync(CompressedNetworkId networkId, int deepness = 5,
         CancellationToken cancellationToken = default)
     {
-        _ = deepness;
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        var routeKey = networkId.ToShortString();
+        var cappedDepth = Math.Clamp(deepness, 1, MaxPeerChainDepth);
 
-        var byRouteId = await db.Routes
+        var chains = await db.PeerChains
             .AsNoTracking()
-            .Include(r => r.PeerRoutes)
-            .FirstOrDefaultAsync(r => r.RouteId == routeKey, cancellationToken)
+            .Include(c => c.PeerChainNodes.OrderBy(n => EF.Property<int>(n, "OrderIndex")))
+            .OrderByDescending(c => c.UpdatedAtUtc)
+            .ToArrayAsync(cancellationToken)
             .ConfigureAwait(false);
-        if (byRouteId != null)
-            return byRouteId;
 
-        return await db.Routes
-            .AsNoTracking()
-            .Include(r => r.PeerRoutes.OrderByDescending(pr => pr.LastSeen))
-            .FirstOrDefaultAsync(r => r.PeerRoutes.Any(p => p.PeerIdentity.NetworkId.Value == networkId.Value),
-                cancellationToken)
-            .ConfigureAwait(false);
+        return chains
+            .Select(chain => TrimByTarget(chain, networkId.Value, cappedDepth))
+            .Where(chain => chain != null)
+            .Cast<PeerChain>()
+            .ToArray();
+    }
+
+    private static PeerIdentityAddress Clone(PeerIdentityAddress source) => new()
+    {
+        RouteId = source.RouteId,
+        PeerIdentity = source.PeerIdentity,
+        PeerAddress = source.PeerAddress,
+        LastSeen = source.LastSeen
+    };
+
+    private static PeerChain? TrimByTarget(PeerChain chain, Guid targetNetworkId, int maxDepth)
+    {
+        if (chain.PeerChainNodes.Count == 0)
+            return null;
+
+        var searchLimit = Math.Min(chain.PeerChainNodes.Count, maxDepth);
+        var targetIndex = -1;
+        for (var i = 0; i < searchLimit; i++)
+        {
+            if (chain.PeerChainNodes[i].PeerIdentity.NetworkId.Value != targetNetworkId)
+                continue;
+            targetIndex = i;
+            break;
+        }
+
+        if (targetIndex < 0)
+            return null;
+
+        var trimmedNodes = chain.PeerChainNodes
+            .Take(targetIndex + 1)
+            .Select(Clone)
+            .ToList();
+        
+        return new PeerChain
+        {
+            SourceRouteId = chain.SourceRouteId,
+            TargetNetworkId = targetNetworkId,
+            ChainKey = $"{chain.ChainKey}|to:{targetNetworkId:N}|d:{targetIndex + 1}",
+            UpdatedAtUtc = chain.UpdatedAtUtc,
+            PeerChainNodes = trimmedNodes
+        };
     }
 }

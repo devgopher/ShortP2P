@@ -17,6 +17,6 @@ public interface IDiscoveryStrategy
     /// <summary>
     ///     Маршрут к пиру из локальной базы по сетевому идентификатору.
     /// </summary>
-    Task<Route?> FindAsync(CompressedNetworkId networkId, int deepness = 3,
+    Task<PeerChain[]> FindAsync(CompressedNetworkId networkId, int deepness = 5,
         CancellationToken cancellationToken = default);
 }
