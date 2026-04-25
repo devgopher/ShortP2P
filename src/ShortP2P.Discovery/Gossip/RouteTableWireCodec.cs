@@ -10,16 +10,16 @@ namespace ShortP2P.Discovery.Gossip;
 /// </summary>
 public static class RouteTableWireCodec
 {
-    public const byte FrameRequest = 0x42;
-    public const byte FrameReply = 0x43;
+    private const byte FrameRequest = 0x42;
+    private const byte FrameReply = 0x43;
 
-    public const int RequestLength = 1 + 8 + 16;
-    public const int ReplyHeaderLength = 1 + 8 + 16 + 2 + 2;
+    private const int RequestLength = 1 + 8 + 16;
+    private const int ReplyHeaderLength = 1 + 8 + 16 + 2 + 2;
 
-    public const ushort FlagTruncated = 1;
+    private const ushort FlagTruncated = 1;
 
     /// <summary>Максимальный размер полезной нагрузки ответа (без IP-фрагментации).</summary>
-    public const int DefaultMaxReplyLength = 32000;
+    private const int DefaultMaxReplyLength = 32000;
 
     public static byte[] BuildRequest(long nonce, Guid senderNetworkId)
     {
