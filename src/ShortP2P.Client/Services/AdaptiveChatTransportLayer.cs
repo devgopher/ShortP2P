@@ -5,7 +5,8 @@ using System.Threading.Channels;
 namespace ShortP2P.Client.Services;
 
 /// <summary>
-///     Транспортный слой чата: приём с локального UDP и отправка на адрес пира из чата.
+///     Транспортный слой чата: приём UDP (все интерфейсы, в т.ч. после DNAT с WAN) и отправка на адреса пира из чата
+///     (LAN или публичный IPv4 при пробросе портов).
 /// </summary>
 public sealed class AdaptiveChatTransportLayer(
     Func<TransportAddress[]?> directPeerAddressProvider,

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Threading;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
@@ -12,12 +13,13 @@ using ShortP2P.Transport.Abstractions;
 namespace ShortP2P.Discovery;
 
 /// <summary>
-///     Сканирование локальной сети по discovery-пингам: UDP на broadcast-адрес каждой локальной IPv4-подсети
-///     и на 255.255.255.255, порт <see cref="PresencePingCodec.UdpPort" />; wire discovery (gossip, маршрутная таблица) —
-///     UDP <see cref="UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort" />. Фоновая рассылка presence по периоду
+///     Discovery: UDP presence (<see cref="PresencePingCodec.UdpPort" />) на broadcast подсетей и limited broadcast,
+///     плюс unicast на известные IPv4 (чаты, QR, публичный адрес этого узла); wire gossip/маршруты —
+///     <see cref="UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort" /> на те же broadcast- и unicast-цели.
+///     Приём на 0.0.0.0 — в том числе датаграммы с интернета при пробросе портов (NAT). Фоновая рассылка —
 ///     <see cref="LinkTechnologyPresetExtensions.GetPresencePingPeriod" />; ручное сканирование —
-///     <see cref="ScanAsync" />, <see cref="TriggerScanAsync" />. Bind 0.0.0.0 на обоих портах;
-///     сырые пинги чужих пиров — в <see cref="DiscoveryPingReceived" />.
+///     <see cref="ScanAsync" />, <see cref="TriggerScanAsync" />. Событие <see cref="DiscoveryPingReceived" /> —
+///     по presence-пингам и по ответам gossip (Ack) на наши зонды.
 /// </summary>
 public sealed class LocalNetworkScanner(
     P2pRoutingSettings routingSettings,
@@ -58,6 +60,10 @@ public sealed class LocalNetworkScanner(
     private PeerIdentity? _localPeer;
     private bool _isBluetoothListening;
     private DateTimeOffset _nextPublicIpv4PresenceLookupUtc = DateTimeOffset.MinValue;
+
+    /// <summary>Два последних nonce gossip-зонда: поздние Ack после смены раунда всё ещё принимаются.</summary>
+    private long _priorGossipBroadcastNonce;
+    private long _lastGossipBroadcastNonce;
 
     /// <summary>Снимок последних найденных пиров (кроме текущего пользователя).</summary>
     public IReadOnlyList<DiscoveredLocalPeer> Clients
@@ -330,11 +336,15 @@ public sealed class LocalNetworkScanner(
             {
                 if (!IsTransportEnabled(TransportKind.Udp))
                     continue;
-                if (await TryReplyToGossipProbeAsync(_discoveryWireUdp, msg.Payload, msg.RemoteAddress, cancellationToken)
+                var buf = msg.Payload.ToArray();
+                if (TryHandleGossipAckAsDiscovery(buf, msg.RemoteAddress))
+                    continue;
+
+                if (await TryReplyToGossipProbeAsync(_discoveryWireUdp, buf, msg.RemoteAddress, cancellationToken)
                         .ConfigureAwait(false))
                     continue;
 
-                if (await TryReplyToRouteTableRequestAsync(_discoveryWireUdp, msg.Payload, msg.RemoteAddress,
+                if (await TryReplyToRouteTableRequestAsync(_discoveryWireUdp, buf, msg.RemoteAddress,
                         cancellationToken).ConfigureAwait(false))
                     continue;
             }
@@ -344,6 +354,51 @@ public sealed class LocalNetworkScanner(
             // ignore
         }
     }
+
+    /// <summary>Ответ на наш gossip-зонд (в т.ч. с внешнего IP): превращаем в тот же поток, что и presence.</summary>
+    private bool TryHandleGossipAckAsDiscovery(byte[] buf, TransportAddress remote)
+    {
+        if (!GossipWireCodec.TryParseAck(buf, out var nonce, out var responderId, out var dataPort, out var nick))
+            return false;
+        if (!IsRecentGossipBroadcastNonce(nonce))
+            return false;
+        if (dataPort is < 1 or > 65535)
+            return false;
+
+        var localPeer = _localPeer;
+        if (localPeer != null && responderId == localPeer.NetworkId.Value)
+            return true;
+
+        if (remote.Kind != TransportKind.Udp)
+            return true;
+
+        IPEndPoint remoteEp;
+        try
+        {
+            remoteEp = UdpTransportAddress.ToIPEndPoint(remote);
+        }
+        catch
+        {
+            return true;
+        }
+
+        var dataAddr = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(remoteEp.Address, dataPort));
+        nick = string.IsNullOrWhiteSpace(nick) ? "?" : nick.Trim();
+        var peer = new DiscoveredLocalPeer(responderId, nick, dataAddr, TransportKind.Udp, DateTimeOffset.UtcNow,
+            dataPort, LinkTechnologyPreset.Unlimited, PresencePeerCapabilities.Chat);
+        OnDiscoveryPingReceived(peer);
+        DiscoveryPingReceived?.Invoke(this, new DiscoveryPingReceivedEventArgs(peer));
+        return true;
+    }
+
+    private void RegisterGossipBroadcastNonce(long nonce)
+    {
+        var prev = Interlocked.Exchange(ref _lastGossipBroadcastNonce, nonce);
+        Volatile.Write(ref _priorGossipBroadcastNonce, prev);
+    }
+
+    private bool IsRecentGossipBroadcastNonce(long n) =>
+        n == Volatile.Read(ref _lastGossipBroadcastNonce) || n == Volatile.Read(ref _priorGossipBroadcastNonce);
 
     private async Task PresenceSecondaryReceiveLoopAsync(ITransport transport, CancellationToken cancellationToken)
     {
@@ -379,10 +434,9 @@ public sealed class LocalNetworkScanner(
         }
     }
 
-    private async Task<bool> TryReplyToGossipProbeAsync(ITransport replyTransport, ReadOnlyMemory<byte> payload,
+    private async Task<bool> TryReplyToGossipProbeAsync(ITransport replyTransport, byte[] buf,
         TransportAddress remote, CancellationToken cancellationToken)
     {
-        var buf = payload.ToArray();
         if (!GossipWireCodec.TryParseProbe(buf, out var nonce, out var sender, out var target))
             return false;
 
@@ -406,10 +460,9 @@ public sealed class LocalNetworkScanner(
         return true;
     }
 
-    private async Task<bool> TryReplyToRouteTableRequestAsync(ITransport replyTransport, ReadOnlyMemory<byte> payload,
+    private async Task<bool> TryReplyToRouteTableRequestAsync(ITransport replyTransport, byte[] buf,
         TransportAddress remote, CancellationToken cancellationToken)
     {
-        var buf = payload.ToArray();
         if (!RouteTableWireCodec.TryParseRequest(buf, out var nonce, out var sender))
             return false;
 
@@ -573,6 +626,57 @@ public sealed class LocalNetworkScanner(
             catch
             {
                 // транспорт может требовать предварительной доступности канала/устройства
+            }
+        }
+
+        await SendGossipDiscoveryProbesAsync(localPeer, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    ///     Gossip-зонды на wire-порт: те же broadcast, что LAN, и unicast на известные внешние/внутренние IPv4.
+    /// </summary>
+    private async Task SendGossipDiscoveryProbesAsync(PeerIdentity localPeer, CancellationToken cancellationToken)
+    {
+        var wireUdp = _discoveryWireUdp;
+        if (wireUdp == null || !IsTransportEnabled(TransportKind.Udp))
+            return;
+
+        long nonce;
+        do
+        {
+            nonce = Random.Shared.NextInt64();
+        } while (nonce == 0);
+
+        RegisterGossipBroadcastNonce(nonce);
+        var probe = GossipWireCodec.BuildProbe(nonce, localPeer.NetworkId.Value, Guid.Empty);
+
+        foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(GossipWireCodec.UdpPort))
+        {
+            try
+            {
+                var addr = UdpTransportAddress.FromIPEndPoint(ep);
+                await wireUdp.SendAsync(probe, addr, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // один broadcast может быть недоступен
+            }
+        }
+
+        foreach (var host in _udpPresenceTargets.Values)
+        {
+            try
+            {
+                if (!IPAddress.TryParse(host, out var ip))
+                    continue;
+                if (IPAddress.IsLoopback(ip))
+                    continue;
+                var addr = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(ip, GossipWireCodec.UdpPort));
+                await wireUdp.SendAsync(probe, addr, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // узел недоступен или фильтрация
             }
         }
     }
