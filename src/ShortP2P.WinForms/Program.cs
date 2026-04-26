@@ -60,6 +60,7 @@ internal static class Program
         services.AddTransient<AppSettingsForm>();
         
         using var host = builder.Build();
+        host.Services.ApplyRouteDatabaseMigrationsAsync().GetAwaiter().GetResult();
         host.StartAsync().GetAwaiter().GetResult();
 
         var provider = host.Services;

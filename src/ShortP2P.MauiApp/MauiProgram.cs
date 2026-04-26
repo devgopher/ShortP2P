@@ -67,6 +67,7 @@ public static class MauiProgram
 
         var app = builder.Build();
         Services = app.Services;
+        Services.ApplyRouteDatabaseMigrationsAsync().GetAwaiter().GetResult();
         IncomingMessageSound.EnsureHooked(Services.GetRequiredService<ChatRepository>(),
             Services.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(IncomingMessageSound)));
         Services.GetRequiredService<ILogger<MauiHost>>().LogInformation("GUI application started");

@@ -185,6 +185,7 @@ public sealed class GossipStrategy(
             {
                 route.PeerRoutes.Add(new PeerIdentityAddress
                 {
+                    Id = 1,
                     RouteId = routeId,
                     PeerIdentity = ping.Identity,
                     PeerAddress = address,
@@ -212,12 +213,14 @@ public sealed class GossipStrategy(
         if (targetIds.Count == 0)
             return result;
 
-        var knownAddresses = await db.Routes
+        var routes = await db.Routes
             .AsNoTracking()
             .SelectMany(r => r.PeerRoutes)
-            .Where(pr => targetIds.Contains(pr.PeerIdentity.NetworkId.Value))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
+
+        var knownAddresses = routes.Where(pr => targetIds.Contains(pr.PeerIdentity.NetworkId.Value)).ToList();
+        
         foreach (var address in knownAddresses)
         {
             if (!IPAddress.TryParse(address.PeerAddress, out var ip))

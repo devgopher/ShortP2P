@@ -44,6 +44,7 @@ public class RouteDbContext : DbContext
             entity.OwnsMany(e => e.PeerRoutes, pr =>
             {
                 pr.ToTable("PeerIdentityAddress");
+                pr.Property(p => p.Id).ValueGeneratedOnAdd();
                 pr.WithOwner().HasForeignKey(p => p.RouteId);
                 pr.Property(p => p.PeerAddress).IsRequired();
                 pr.OwnsOne(p => p.PeerIdentity, pi =>

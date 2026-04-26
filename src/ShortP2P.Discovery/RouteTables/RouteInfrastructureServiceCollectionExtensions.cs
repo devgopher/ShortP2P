@@ -9,6 +9,41 @@ namespace ShortP2P.Discovery.RouteTables;
 
 public static class RouteInfrastructureServiceCollectionExtensions
 {
+    /// <summary>
+    ///     Применяет накопленные EF-миграции для <see cref="RouteDbContext" /> (SQLite).
+    ///     Вызывайте при старте клиента (WinForms, MAUI) до фоновых сервисов и до чтения маршрутов.
+    /// </summary>
+    public static async Task ApplyRouteDatabaseMigrationsAsync(this IServiceProvider services,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await services.GetRequiredService<IDbContextFactory<RouteDbContext>>()
+            .CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        var connectionString = db.Database.GetConnectionString();
+        if (!string.IsNullOrEmpty(connectionString))
+            EnsureSqliteParentDirectoryExists(connectionString);
+
+        await db.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
+
+        var logger = services.GetService<ILoggerFactory>()?.CreateLogger("ShortP2P.RouteDb");
+        logger?.LogInformation("Route database migrations applied");
+    }
+
+    private static void EnsureSqliteParentDirectoryExists(string connectionString)
+    {
+        const string prefix = "Data Source=";
+        if (!connectionString.AsSpan().StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var path = connectionString[prefix.Length..].Trim();
+        if (path.Length == 0 || string.Equals(path, ":memory:", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir))
+            Directory.CreateDirectory(dir);
+    }
+
     /// <param name="sqliteDatabasePath"></param>
     /// <param name="enableDiscovery">
     ///     <see langword="true" /> — зарегистрировать фоновый сервис (см. <see cref="IHostedService" />) для MAUI / generic host.

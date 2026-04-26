@@ -1,10 +1,18 @@
-﻿namespace ShortP2P.Discovery.RouteTables;
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace ShortP2P.Discovery.RouteTables;
 
 /// <summary>
 ///     Конкретный адрес peer
 /// </summary>
 public class PeerIdentityAddress
 {
+    /// <summary>
+    ///     Primary key
+    /// </summary>
+    [Key]
+    public long Id { get; set; }
+    
     /// <summary>
     ///     Id маршрута
     /// </summary>
