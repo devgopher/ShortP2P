@@ -138,9 +138,12 @@ public sealed class WindowsBluetoothTransport : ITransport
 
         var charParameters = new GattLocalCharacteristicParameters
         {
-            CharacteristicProperties = GattCharacteristicProperties.Write | GattCharacteristicProperties.WriteWithoutResponse,
+            CharacteristicProperties = GattCharacteristicProperties.Write
+                                       | GattCharacteristicProperties.WriteWithoutResponse
+                                       | GattCharacteristicProperties.Notify
+                                       | GattCharacteristicProperties.Read,
             WriteProtectionLevel = GattProtectionLevel.Plain,
-            UserDescription = "ShortP2P BLE RX",
+            UserDescription = "ShortP2P BLE TX/RX"
         };
         var charResult = await _bleServiceProvider.Service.CreateCharacteristicAsync(BleRxCharacteristicUuid, charParameters)
             .AsTask(ct).ConfigureAwait(false);
