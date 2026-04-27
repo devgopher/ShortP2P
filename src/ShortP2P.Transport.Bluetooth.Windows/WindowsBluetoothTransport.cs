@@ -4,18 +4,15 @@ using System.Runtime.Versioning;
 using System.Threading.Channels;
 using ShortP2P.Transport.Abstractions;
 using Windows.Devices.Bluetooth;
-using Windows.Devices.Enumeration;
-using Windows.Devices.Bluetooth.Rfcomm;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
-using Windows.Networking.Sockets;
+using Windows.Devices.Enumeration;
 using Windows.Storage.Streams;
-using Microsoft.Extensions.Logging;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
 
 /// <summary>
-///     Классический Bluetooth (RFCOMM / Serial Port Profile) на Windows через WinRT.
-///     Устройства должны быть сопряжены в системе; хост-приложению при необходимости нужны capabilities Bluetooth в манифесте.
+///     Bluetooth Low Energy (GATT) на Windows через WinRT: исходящие записи в RX-характеристику пира
+///     и входящие записи через локальный GATT-сервер.
 /// </summary>
 [SupportedOSPlatform("windows10.0.17763.0")]
 public sealed class WindowsBluetoothTransport : ITransport
@@ -33,13 +30,10 @@ public sealed class WindowsBluetoothTransport : ITransport
             SingleWriter = false
         });
 
-    private readonly ConcurrentDictionary<ulong, StreamSocket> _outbound = new();
     private readonly ConcurrentDictionary<ulong, GattCharacteristic> _bleOutboundRx = new();
+    private readonly ConcurrentDictionary<ulong, BluetoothLEDevice> _blePeerDevices = new();
     private readonly ConcurrentDictionary<ulong, SemaphoreSlim> _sendLocks = new();
-    // private readonly ILogger<WindowsBluetoothTransport> _logger;
 
-    private RfcommServiceProvider? _rfcommProvider;
-    private StreamSocketListener? _socketListener;
     private CancellationTokenSource? _runCts;
     private GattServiceProvider? _bleServiceProvider;
     private GattLocalCharacteristic? _bleRxCharacteristic;
@@ -48,12 +42,12 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     public ChannelReader<TransportReceiveMessage> Inbound => _inbound.Reader;
 
-    public bool IsRunning => _rfcommProvider != null || _bleServiceProvider != null;
+    public bool IsRunning => _bleServiceProvider != null;
 
     public async Task<IReadOnlyList<TransportAddress>> GetPairedDeviceAddressesAsync(
         CancellationToken cancellationToken = default)
     {
-        var selector = BluetoothDevice.GetDeviceSelectorFromPairingState(true);
+        var selector = BluetoothLEDevice.GetDeviceSelectorFromPairingState(true);
         var infos = await DeviceInformation.FindAllAsync(selector).AsTask(cancellationToken).ConfigureAwait(false);
         var list = new List<TransportAddress>(infos.Count);
         foreach (var info in infos)
@@ -61,7 +55,7 @@ public sealed class WindowsBluetoothTransport : ITransport
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var dev = await BluetoothDevice.FromIdAsync(info.Id).AsTask(cancellationToken).ConfigureAwait(false);
+                var dev = await BluetoothLEDevice.FromIdAsync(info.Id).AsTask(cancellationToken).ConfigureAwait(false);
                 if (dev == null)
                     continue;
                 list.Add(new TransportAddress(TransportKind.Bluetooth,
@@ -83,8 +77,13 @@ public sealed class WindowsBluetoothTransport : ITransport
             if ((uint)cur.HResult == BluetoothUnavailableHResult)
                 return true;
             if (cur is InvalidOperationException &&
-                (cur.Message.Contains("Bluetooth device not found or not paired", StringComparison.OrdinalIgnoreCase) ||
-                 cur.Message.Contains("service not found on the remote device", StringComparison.OrdinalIgnoreCase)))
+                (cur.Message.Contains("Bluetooth LE device not found", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("Bluetooth LE device is not paired", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("Bluetooth LE pairing", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("Bluetooth LE PairAsync", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("automatic pairing is not available", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("BLE service not found", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("BLE RX characteristic not found", StringComparison.OrdinalIgnoreCase)))
                 return true;
         }
 
@@ -94,39 +93,34 @@ public sealed class WindowsBluetoothTransport : ITransport
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_rfcommProvider != null || _bleServiceProvider != null) return;
+        if (_bleServiceProvider != null) return;
 
         _runCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var ct = _runCts.Token;
 
-        RfcommServiceProvider? provider = null;
         try
         {
-            provider = await RfcommServiceProvider.CreateAsync(RfcommServiceId.SerialPort).AsTask(ct)
-                .ConfigureAwait(false);
+            await StartBleGattAsync(ct).ConfigureAwait(false);
         }
         catch (Exception ex) when ((uint)ex.HResult == BluetoothUnavailableHResult)
         {
-            //_logger.LogError("Bluetooth is unavailable (radio off or no adapter). Turn Bluetooth on and retry.");
+            // Bluetooth off / no adapter — GATT server not started.
         }
 
-        if (provider != null)
+        if (_bleServiceProvider == null)
         {
-            _rfcommProvider = provider;
-            var listener = new StreamSocketListener();
-            _socketListener = listener;
-            listener.ConnectionReceived += (s, args) => _ = OnConnectionReceivedAsync(args, ct);
+            try
+            {
+                _runCts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // ignore
+            }
 
-            await listener.BindServiceNameAsync(
-                    provider.ServiceId.AsString(),
-                    SocketProtectionLevel.BluetoothEncryptionAllowNullAuthentication)
-                .AsTask(ct)
-                .ConfigureAwait(false);
-
-            provider.StartAdvertising(listener, true);
+            _runCts.Dispose();
+            _runCts = null;
         }
-
-        await StartBleGattAsync(ct).ConfigureAwait(false);
     }
 
     private async Task StartBleGattAsync(CancellationToken ct)
@@ -154,9 +148,6 @@ public sealed class WindowsBluetoothTransport : ITransport
         StartBleGattProviderAdvertising(_bleServiceProvider);
     }
 
-    /// <summary>
-    ///     Включает периферийную рекламу BLE для зарегистрированного GATT-провайдера (обнаружение и приём подключений).
-    /// </summary>
     private static void StartBleGattProviderAdvertising(GattServiceProvider provider)
     {
         var advertising = new GattServiceProviderAdvertisingParameters
@@ -212,62 +203,6 @@ public sealed class WindowsBluetoothTransport : ITransport
         return new TransportAddress(TransportKind.Bluetooth, new byte[BluetoothMacAddress.MacLength]);
     }
 
-    private async Task OnConnectionReceivedAsync(StreamSocketListenerConnectionReceivedEventArgs args,
-        CancellationToken ct)
-    {
-        var socket = args.Socket;
-        BluetoothDevice? remote;
-        try
-        {
-            remote = await BluetoothDevice.FromHostNameAsync(socket.Information.RemoteHostName).AsTask(ct)
-                .ConfigureAwait(false);
-        }
-        catch
-        {
-            socket.Dispose();
-            return;
-        }
-
-        if (remote == null)
-        {
-            socket.Dispose();
-            return;
-        }
-
-        var mac = BluetoothMacAddress.FromBluetoothAddress(remote.BluetoothAddress);
-        var addr = new TransportAddress(TransportKind.Bluetooth, mac);
-        await RunReceiveLoopAsync(socket, addr, ct).ConfigureAwait(false);
-    }
-
-    private async Task RunReceiveLoopAsync(StreamSocket socket, TransportAddress remoteAddress, CancellationToken ct)
-    {
-        try
-        {
-            var reader = new DataReader(socket.InputStream) { InputStreamOptions = InputStreamOptions.Partial };
-            while (!ct.IsCancellationRequested)
-            {
-                var load = await reader.LoadAsync(65536).AsTask(ct).ConfigureAwait(false);
-                if (load == 0) break;
-                var buf = new byte[load];
-                reader.ReadBytes(buf);
-                var msg = new TransportReceiveMessage(buf, remoteAddress);
-                await _inbound.Writer.WriteAsync(msg, ct).ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // ignore
-        }
-        catch
-        {
-            // Соединение закрыто или ошибка чтения — выходим из цикла.
-        }
-        finally
-        {
-            socket.Dispose();
-        }
-    }
-
     public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, TransportAddress destination,
         CancellationToken cancellationToken = default)
     {
@@ -284,56 +219,12 @@ public sealed class WindowsBluetoothTransport : ITransport
         await sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            try
-            {
-                var socket = await GetOrConnectOutboundAsync(btAddr, cancellationToken).ConfigureAwait(false);
-                await using var stream = socket.OutputStream.AsStreamForWrite();
-                await stream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
-                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (InvalidOperationException)
-            {
-                await SendViaBleAsync(btAddr, payload, cancellationToken).ConfigureAwait(false);
-            }
+            await SendViaBleAsync(btAddr, payload, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             sendLock.Release();
         }
-    }
-
-    private async Task<StreamSocket> GetOrConnectOutboundAsync(ulong bluetoothAddress, CancellationToken ct)
-    {
-        if (_outbound.TryGetValue(bluetoothAddress, out var existing))
-        {
-            try
-            {
-                _ = existing.Information;
-                return existing;
-            }
-            catch
-            {
-                _outbound.TryRemove(bluetoothAddress, out _);
-                existing.Dispose();
-            }
-        }
-
-        var device = await BluetoothDevice.FromBluetoothAddressAsync(bluetoothAddress).AsTask(ct).ConfigureAwait(false);
-        if (device == null) throw new InvalidOperationException("Bluetooth device not found or not paired.");
-
-        var servicesResult =
-            await device.GetRfcommServicesForIdAsync(RfcommServiceId.SerialPort).AsTask(ct).ConfigureAwait(false);
-        if (servicesResult.Services.Count == 0)
-            throw new InvalidOperationException(
-                "Serial Port (RFCOMM) service not found on the remote device. Ensure SPP is available.");
-
-        var service = servicesResult.Services[0];
-        var socket = new StreamSocket();
-        await socket.ConnectAsync(service.ConnectionHostName, service.ConnectionServiceName).AsTask(ct)
-            .ConfigureAwait(false);
-
-        _outbound[bluetoothAddress] = socket;
-        return socket;
     }
 
     private async Task SendViaBleAsync(ulong bluetoothAddress, ReadOnlyMemory<byte> payload, CancellationToken ct)
@@ -347,14 +238,87 @@ public sealed class WindowsBluetoothTransport : ITransport
             throw new IOException("BLE write failed.");
     }
 
+    private static async Task EnsureBlePairedAsync(BluetoothLEDevice device, CancellationToken ct)
+    {
+        if (device.DeviceInformation.Pairing.IsPaired)
+            return;
+
+        var pairing = device.DeviceInformation.Pairing;
+        if (!pairing.CanPair)
+        {
+            device.Dispose();
+            throw new InvalidOperationException(
+                "Bluetooth LE device is not paired and automatic pairing is not available (CanPair is false).");
+        }
+
+        const DevicePairingKinds kinds =
+            DevicePairingKinds.ConfirmOnly
+            | DevicePairingKinds.DisplayPin
+            | DevicePairingKinds.ProvidePin
+            | DevicePairingKinds.ConfirmPinMatch;
+
+        var custom = pairing.Custom;
+        custom.PairingRequested += OnBleCustomPairingRequested;
+        DevicePairingResult result;
+        try
+        {
+            result = await custom.PairAsync(kinds, DevicePairingProtectionLevel.Default).AsTask(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            device.Dispose();
+            throw new InvalidOperationException("Bluetooth LE PairAsync failed.", ex);
+        }
+        finally
+        {
+            custom.PairingRequested -= OnBleCustomPairingRequested;
+        }
+
+        if (result.Status != DevicePairingResultStatus.Paired)
+        {
+            device.Dispose();
+            throw new InvalidOperationException(
+                $"Bluetooth LE pairing did not complete: {result.Status}. Accept the pairing prompt on Windows or on the remote device.");
+        }
+    }
+
+    private static void OnBleCustomPairingRequested(DeviceInformationCustomPairing sender,
+        DevicePairingRequestedEventArgs args)
+    {
+        var deferral = args.GetDeferral();
+        try
+        {
+            switch (args.PairingKind)
+            {
+                case DevicePairingKinds.ConfirmOnly:
+                case DevicePairingKinds.DisplayPin:
+                case DevicePairingKinds.ConfirmPinMatch:
+                    args.Accept();
+                    break;
+                case DevicePairingKinds.ProvidePin:
+                    break;
+            }
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
     private async Task<GattCharacteristic> GetOrConnectBleRxCharacteristicAsync(ulong bluetoothAddress, CancellationToken ct)
     {
         if (_bleOutboundRx.TryGetValue(bluetoothAddress, out var cached))
             return cached;
 
-        var device = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress).AsTask(ct).ConfigureAwait(false);
-        if (device == null)
-            throw new InvalidOperationException("Bluetooth LE device not found or not paired.");
+        if (!_blePeerDevices.TryGetValue(bluetoothAddress, out var device))
+        {
+            device = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress).AsTask(ct).ConfigureAwait(false);
+            if (device == null)
+                throw new InvalidOperationException("Bluetooth LE device not found or not paired.");
+
+            await EnsureBlePairedAsync(device, ct).ConfigureAwait(false);
+            _blePeerDevices[bluetoothAddress] = device;
+        }
 
         var serviceResult = await device.GetGattServicesForUuidAsync(BleServiceUuid).AsTask(ct).ConfigureAwait(false);
         var service = serviceResult.Services.FirstOrDefault()
@@ -369,7 +333,8 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
-        if (_rfcommProvider == null && _bleServiceProvider == null)
+        if (_bleServiceProvider == null && _bleRxCharacteristic == null && _blePeerDevices.Count == 0 &&
+            _bleOutboundRx.Count == 0 && _runCts == null)
             return;
 
         try
@@ -381,30 +346,19 @@ public sealed class WindowsBluetoothTransport : ITransport
             // ignore
         }
 
-        foreach (var kv in _outbound)
-            kv.Value.Dispose();
-
-        _outbound.Clear();
         _bleOutboundRx.Clear();
 
-        if (_rfcommProvider != null)
-        {
-            try
-            {
-                _rfcommProvider.StopAdvertising();
-            }
-            catch
-            {
-                // ignore
-            }
+        foreach (var kv in _blePeerDevices)
+            kv.Value.Dispose();
 
-            _rfcommProvider = null;
-        }
+        _blePeerDevices.Clear();
+
         if (_bleRxCharacteristic != null)
         {
             _bleRxCharacteristic.WriteRequested -= OnBleWriteRequested;
             _bleRxCharacteristic = null;
         }
+
         if (_bleServiceProvider != null)
         {
             try
@@ -419,12 +373,6 @@ public sealed class WindowsBluetoothTransport : ITransport
             _bleServiceProvider = null;
         }
 
-        if (_socketListener != null)
-        {
-            _socketListener.Dispose();
-            _socketListener = null;
-        }
-
         _runCts?.Dispose();
         _runCts = null;
 
@@ -432,7 +380,6 @@ public sealed class WindowsBluetoothTransport : ITransport
     }
 
     private bool _disposed;
-
 
     public async ValueTask DisposeAsync()
     {

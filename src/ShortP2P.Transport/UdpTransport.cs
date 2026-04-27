@@ -18,10 +18,11 @@ public sealed class UdpTransport(int listenPort, bool enableBroadcast = false) :
     private static UdpClient CreateClient(int listenPort, bool enableBroadcast)
     {
         var c = new UdpClient();
-        c.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        c.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress,true);
         c.Client.Bind(new IPEndPoint(IPAddress.Any, listenPort));
         if (enableBroadcast)
             c.EnableBroadcast = true;
+        
         return c;
     }
     private CancellationTokenSource? _cts;
@@ -74,7 +75,7 @@ public sealed class UdpTransport(int listenPort, bool enableBroadcast = false) :
             throw new ArgumentException("Destination must be UDP.", nameof(destination));
 
         var ep = UdpTransportAddress.ToIPEndPoint(destination);
-        await _udp.SendAsync(payload.ToArray(), ep, cancellationToken).ConfigureAwait(false);
+        var sent = await _udp.SendAsync(payload.ToArray(), ep, cancellationToken).ConfigureAwait(false);
     }
 
     public ValueTask DisposeAsync()

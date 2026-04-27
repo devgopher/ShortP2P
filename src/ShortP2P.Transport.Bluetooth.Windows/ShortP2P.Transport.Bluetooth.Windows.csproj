@@ -5,7 +5,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <RootNamespace>ShortP2P.Transport.Bluetooth.Windows</RootNamespace>
-        <Description>Bluetooth RFCOMM (SPP) transport for Windows via WinRT.</Description>
+        <Description>Bluetooth Low Energy (GATT) transport for Windows via WinRT.</Description>
     </PropertyGroup>
 
     <ItemGroup>
