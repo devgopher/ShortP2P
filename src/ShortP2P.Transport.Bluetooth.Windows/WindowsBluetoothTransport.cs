@@ -44,32 +44,6 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     public bool IsRunning => _bleServiceProvider != null;
 
-    public async Task<IReadOnlyList<TransportAddress>> GetPairedDeviceAddressesAsync(
-        CancellationToken cancellationToken = default)
-    {
-        var selector = BluetoothLEDevice.GetDeviceSelectorFromPairingState(true);
-        var infos = await DeviceInformation.FindAllAsync(selector).AsTask(cancellationToken).ConfigureAwait(false);
-        var list = new List<TransportAddress>(infos.Count);
-        foreach (var info in infos)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                var dev = await BluetoothLEDevice.FromIdAsync(info.Id).AsTask(cancellationToken).ConfigureAwait(false);
-                if (dev == null)
-                    continue;
-                list.Add(new TransportAddress(TransportKind.Bluetooth,
-                    BluetoothMacAddress.FromBluetoothAddress(dev.BluetoothAddress)));
-            }
-            catch
-            {
-                // skip broken pair item
-            }
-        }
-
-        return list;
-    }
-
     public static bool IsUnavailableError(Exception ex)
     {
         for (var cur = ex; cur != null; cur = cur.InnerException)
@@ -111,7 +85,7 @@ public sealed class WindowsBluetoothTransport : ITransport
         {
             try
             {
-                _runCts.Cancel();
+                await _runCts.CancelAsync();
             }
             catch (ObjectDisposedException)
             {
@@ -320,7 +294,7 @@ public sealed class WindowsBluetoothTransport : ITransport
             _blePeerDevices[bluetoothAddress] = device;
         }
 
-        var serviceResult = await device.GetGattServicesForUuidAsync(BleServiceUuid).AsTask(ct).ConfigureAwait(false);
+        var serviceResult = await device.GetGattServicesAsync().AsTask(ct).ConfigureAwait(false);
         var service = serviceResult.Services.FirstOrDefault()
                       ?? throw new InvalidOperationException("BLE service not found on remote device.");
         var charResult = await service.GetCharacteristicsForUuidAsync(BleRxCharacteristicUuid).AsTask(ct)

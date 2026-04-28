@@ -334,6 +334,7 @@ public sealed class LocalNetworkScanner(
         {
             await foreach (var msg in _discoveryWireUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
+                await Task.Delay(10, cancellationToken);
                 if (!IsTransportEnabled(TransportKind.Udp))
                     continue;
                 var buf = msg.Payload.ToArray();
@@ -344,9 +345,9 @@ public sealed class LocalNetworkScanner(
                         .ConfigureAwait(false))
                     continue;
 
-                if (await TryReplyToRouteTableRequestAsync(_discoveryWireUdp, buf, msg.RemoteAddress,
+                if (!await TryReplyToRouteTableRequestAsync(_discoveryWireUdp, buf, msg.RemoteAddress,
                         cancellationToken).ConfigureAwait(false))
-                    continue;
+                    break;
             }
         }
         catch (OperationCanceledException)
