@@ -24,7 +24,7 @@ public sealed class AddChatForm : Form
     public string PeerNickname => _nick.Text.Trim();
     public string PeerNetworkIdShort => _id.Text.Trim();
     public string PeerPublicKeyJson => _pub.Text.Trim();
-    public string PeerHost => _host.Text.Trim();
+    public string PeerHosts => _host.Text.Trim();
     public int PeerPort => int.TryParse(_port.Text, out var p) ? p : 0;
 
     public AddChatForm(ILogger<AddChatForm> logger, ILogger<UserAction> userActions)
@@ -158,22 +158,27 @@ public sealed class AddChatForm : Form
     private void OnOkClicked(object? sender, EventArgs e)
     {
         if (PeerNickname.Length == 0 || PeerNetworkIdShort.Length == 0 || PeerPublicKeyJson.Length == 0 ||
-            PeerHost.Length == 0)
+            PeerHosts.Length == 0)
         {
             MessageBox.Show(this, "Fill all fields.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
-        var isBluetoothMac = BluetoothTransportAddress.TryParseMac(PeerHost, out _);
-        if (!isBluetoothMac && PeerPort is <= 0 or > 65535)
+        var hosts = PeerHosts.Split(',').Select(s => s.Trim()).ToArray();
+
+        foreach (var host in hosts)
         {
-            MessageBox.Show(this, "Invalid peer port.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
+            var isBluetoothMac = BluetoothTransportAddress.TryParseMac(host, out _);
+            if (!isBluetoothMac && PeerPort is <= 0 or > 65535)
+            {
+                MessageBox.Show(this, "Invalid peer port.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
         }
 
         _userActions.LogInformation(
             "Add chat: save (peer {Peer}, network id {NetworkId}, host {Host}:{Port})",
-            PeerNickname, PeerNetworkIdShort, PeerHost, PeerPort);
+            PeerNickname, PeerNetworkIdShort, PeerHosts, PeerPort);
         DialogResult = DialogResult.OK;
         Close();
     }

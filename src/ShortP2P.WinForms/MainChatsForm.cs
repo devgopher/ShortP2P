@@ -366,10 +366,10 @@ public sealed class MainChatsForm : Form
         }
 
         await _chats.AddChatAsync(u.Id, dlg.PeerNickname, dlg.PeerNetworkIdShort, dlg.PeerPublicKeyJson.Trim(),
-            dlg.PeerHost, dlg.PeerPort).ConfigureAwait(true);
+            dlg.PeerHosts, dlg.PeerPort).ConfigureAwait(true);
         _userActions.LogInformation(
             "Chats: chat added (peer {Peer}, network id {NetworkId}, host {Host}:{Port})",
-            dlg.PeerNickname, dlg.PeerNetworkIdShort, dlg.PeerHost, dlg.PeerPort);
+            dlg.PeerNickname, dlg.PeerNetworkIdShort, dlg.PeerHosts, dlg.PeerPort);
         await RefreshAsync().ConfigureAwait(true);
     }
 

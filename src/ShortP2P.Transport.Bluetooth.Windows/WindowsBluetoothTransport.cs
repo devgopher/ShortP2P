@@ -286,23 +286,80 @@ public sealed class WindowsBluetoothTransport : ITransport
 
         if (!_blePeerDevices.TryGetValue(bluetoothAddress, out var device))
         {
-            device = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress).AsTask(ct).ConfigureAwait(false);
+            device = await TryOpenBluetoothLeDeviceAsync(bluetoothAddress, ct).ConfigureAwait(false);
             if (device == null)
-                throw new InvalidOperationException("Bluetooth LE device not found or not paired.");
+                throw new InvalidOperationException(
+                    "Bluetooth LE device not found. Pair the device in Windows Settings, ensure Bluetooth is on, " +
+                    "and that the MAC in the contact matches the peer (try re-adding after a fresh scan). " +
+                    "FromBluetoothAddressAsync only works for paired devices or devices recently seen by the system.");
 
             await EnsureBlePairedAsync(device, ct).ConfigureAwait(false);
             _blePeerDevices[bluetoothAddress] = device;
         }
 
-        var serviceResult = await device.GetGattServicesAsync().AsTask(ct).ConfigureAwait(false);
-        var service = serviceResult.Services.FirstOrDefault()
-                      ?? throw new InvalidOperationException("BLE service not found on remote device.");
+        var serviceResult = await device.GetGattServicesForUuidAsync(BleServiceUuid).AsTask(ct).ConfigureAwait(false);
+        if (serviceResult.Status != GattCommunicationStatus.Success || serviceResult.Services.Count == 0)
+            throw new InvalidOperationException("BLE service not found on remote device.");
+        var service = serviceResult.Services[0];
         var charResult = await service.GetCharacteristicsForUuidAsync(BleRxCharacteristicUuid).AsTask(ct)
             .ConfigureAwait(false);
         var rx = charResult.Characteristics.FirstOrDefault()
                  ?? throw new InvalidOperationException("BLE RX characteristic not found on remote device.");
         _bleOutboundRx[bluetoothAddress] = rx;
         return rx;
+    }
+
+    /// <summary>
+    ///     WinRT часто возвращает null из <see cref="BluetoothLEDevice.FromBluetoothAddressAsync"/>, если пир не в кэше
+    ///     и не сопряжён. Пробуем несколько API и оба порядка байт MAC (ошибка при ручном вводе / чужой формат QR).
+    /// </summary>
+    private static async Task<BluetoothLEDevice?> TryOpenBluetoothLeDeviceAsync(ulong bluetoothAddress,
+        CancellationToken ct)
+    {
+        foreach (var addr in AlternateBluetoothAddresses(bluetoothAddress))
+        {
+            var dev = await TryOpenBluetoothLeDeviceOneAddressAsync(addr, ct).ConfigureAwait(false);
+            if (dev != null)
+                return dev;
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<ulong> AlternateBluetoothAddresses(ulong bluetoothAddress)
+    {
+        yield return bluetoothAddress;
+        var mac = BluetoothMacAddress.FromBluetoothAddress(bluetoothAddress);
+        var rev = new byte[BluetoothMacAddress.MacLength];
+        for (var i = 0; i < mac.Length; i++) rev[i] = mac[^(i + 1)];
+        var reversed = BluetoothMacAddress.ToBluetoothAddress(rev);
+        if (reversed != bluetoothAddress)
+            yield return reversed;
+    }
+
+    private static async Task<BluetoothLEDevice?> TryOpenBluetoothLeDeviceOneAddressAsync(ulong bluetoothAddress,
+        CancellationToken ct)
+    {
+        var tt = await DeviceInformation.FindAllAsync(BluetoothLEDevice.GetDeviceSelector());
+        var dev = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress).AsTask(ct).ConfigureAwait(false);
+        if (dev != null)
+            return dev;
+        
+        dev = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress, BluetoothAddressType.Public)
+            .AsTask(ct).ConfigureAwait(false);
+        if (dev != null)
+            return dev;
+
+        dev = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress, BluetoothAddressType.Random)
+            .AsTask(ct).ConfigureAwait(false);
+        if (dev != null)
+            return dev;
+
+        var selector = BluetoothLEDevice.GetDeviceSelectorFromBluetoothAddress(bluetoothAddress);
+        var infos = await DeviceInformation.FindAllAsync(selector).AsTask(ct).ConfigureAwait(false);
+        if (infos.Count == 0)
+            return null;
+        return await BluetoothLEDevice.FromIdAsync(infos[0].Id).AsTask(ct).ConfigureAwait(false);
     }
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
