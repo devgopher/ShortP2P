@@ -4,6 +4,7 @@ using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ShortP2P.Crypto;
+using ShortP2P.Transport;
 
 namespace ShortP2P.Client.Qr;
 
@@ -57,14 +58,19 @@ public static class PeerQrCodec
             return false;
         }
 
-        if (!TryMergeQrHosts(p, out var mergedHosts, out var hostErr))
+        TryMergeQrHosts(p, out var mergedHosts);
+        TryMergeQrMacs(p, out var mergedMacs);
+
+        if (mergedHosts.Count == 0 && mergedMacs.Count == 0)
         {
-            error = hostErr;
+            error = "QR is missing a valid host IP (h / ha) or Bluetooth MAC (b / ba).";
             return false;
         }
 
-        p.H = mergedHosts[0];
+        p.H = mergedHosts.Count > 0 ? mergedHosts[0] : "";
         p.Ha = mergedHosts.Count > 1 ? mergedHosts.Skip(1).ToList() : null;
+        p.B = mergedMacs.Count > 0 ? mergedMacs[0] : null;
+        p.Ba = mergedMacs.Count > 1 ? mergedMacs.Skip(1).ToList() : null;
 
         if (p.P is < 1 or > 65535)
         {
@@ -86,10 +92,9 @@ public static class PeerQrCodec
         return true;
     }
 
-    private static bool TryMergeQrHosts(PeerQrPayload p, out List<string> merged, out string? error)
+    private static void TryMergeQrHosts(PeerQrPayload p, out List<string> merged)
     {
         merged = [];
-        error = null;
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         TryAddQrHost(merged, seen, p.H);
@@ -98,14 +103,19 @@ public static class PeerQrCodec
             foreach (var x in p.Ha)
                 TryAddQrHost(merged, seen, x);
         }
+    }
 
-        if (merged.Count == 0)
+    private static void TryMergeQrMacs(PeerQrPayload p, out List<string> merged)
+    {
+        merged = [];
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        TryAddQrMac(merged, seen, p.B);
+        if (p.Ba != null)
         {
-            error = "QR is missing a valid host IP (h / ha).";
-            return false;
+            foreach (var x in p.Ba)
+                TryAddQrMac(merged, seen, x);
         }
-
-        return true;
     }
 
     private static void TryAddQrHost(List<string> merged, HashSet<string> seen, string? s)
@@ -118,5 +128,17 @@ public static class PeerQrCodec
         if (!seen.Add(t))
             return;
         merged.Add(t);
+    }
+
+    private static void TryAddQrMac(List<string> merged, HashSet<string> seen, string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s))
+            return;
+        if (!BluetoothTransportAddress.TryParseMac(s, out var mac))
+            return;
+        var canon = BluetoothTransportAddress.ToMacString(mac);
+        if (!seen.Add(canon))
+            return;
+        merged.Add(canon);
     }
 }

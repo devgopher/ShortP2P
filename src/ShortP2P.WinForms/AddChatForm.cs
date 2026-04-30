@@ -89,11 +89,9 @@ public sealed class AddChatForm : Form
 
     private void OnQrFromFile(object? sender, EventArgs e)
     {
-        using var dlg = new OpenFileDialog
-        {
-            Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp|All files|*.*",
-            Title = "Image with peer QR code",
-        };
+        using var dlg = new OpenFileDialog();
+        dlg.Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp|All files|*.*";
+        dlg.Title = "Image with peer QR code";
         if (dlg.ShowDialog(this) != DialogResult.OK)
             return;
 
@@ -167,7 +165,7 @@ public sealed class AddChatForm : Form
         }
 
         var isBluetoothMac = BluetoothTransportAddress.TryParseMac(PeerHost, out _);
-        if (!isBluetoothMac && (PeerPort <= 0 || PeerPort > 65535))
+        if (!isBluetoothMac && PeerPort is <= 0 or > 65535)
         {
             MessageBox.Show(this, "Invalid peer port.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;

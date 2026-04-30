@@ -4,6 +4,7 @@ using ShortP2P.Auth;
 using ShortP2P.Client.Qr;
 using ShortP2P.Crypto;
 using ShortP2P.Client.Services;
+using ShortP2P.Transport.Bluetooth.Windows;
 
 namespace ShortP2P.WinForms;
 
@@ -38,7 +39,17 @@ public sealed class MyQrForm : Form
         };
 
         var pub = RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey());
-        var png = PeerQrService.EncodeQrPng(PeerQrService.BuildPayload(u, pub));
+        string? btMac = null;
+        try
+        {
+            btMac = LocalAdapterBluetoothMac.TryGetAdapterMacStringAsync().GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // no Bluetooth / WinRT
+        }
+
+        var png = PeerQrService.EncodeQrPng(PeerQrService.BuildPayload(u, pub, null, btMac, null));
 
         var picture = new PictureBox
         {

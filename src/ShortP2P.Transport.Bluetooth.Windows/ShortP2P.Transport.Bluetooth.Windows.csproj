@@ -10,6 +10,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\ShortP2P.Transport.Abstractions\ShortP2P.Transport.Abstractions.csproj"/>
+        <ProjectReference Include="..\ShortP2P.Transport\ShortP2P.Transport.csproj"/>
     </ItemGroup>
 
     <ItemGroup>
