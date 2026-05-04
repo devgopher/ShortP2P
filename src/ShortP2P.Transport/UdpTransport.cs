@@ -68,14 +68,33 @@ public sealed class UdpTransport(int listenPort, bool enableBroadcast = false) :
         _cts = null;
     }
 
+    private readonly SemaphoreSlim _lockSemaphore = new(1, 1);
+    
     public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, TransportAddress destination,
         CancellationToken cancellationToken = default)
     {
+        await _lockSemaphore.WaitAsync(cancellationToken);
+        await InnerSend(payload, destination, cancellationToken);
+    }
+
+    private async ValueTask InnerSend(ReadOnlyMemory<byte> payload, TransportAddress destination,
+        CancellationToken cancellationToken)
+    {
+        
         if (destination.Kind != TransportKind.Udp)
             throw new ArgumentException("Destination must be UDP.", nameof(destination));
 
         var ep = UdpTransportAddress.ToIPEndPoint(destination);
-        var sent = await _udp.SendAsync(payload.ToArray(), ep, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var sent = await _udp.SendAsync(payload.ToArray(), ep, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.NetworkUnreachable)
+        {
+            // лог, задержка и повтор или пересоздать сокет
+        }
+
+        _lockSemaphore.Release();
     }
 
     public ValueTask DisposeAsync()
