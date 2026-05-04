@@ -10,7 +10,7 @@ namespace ShortP2P.Transport;
 ///     Привязка к заданному <see cref="IPAddress" /> и порту — для приёма со всех интерфейсов используйте
 ///     <see cref="IPAddress.Any" /> (в т.ч. DNAT на роутере на этот хост).
 ///     Исходящие и входящие операции с сокетом сериализуются отдельными <see cref="SemaphoreSlim" /> (1,1).
-///     Экземпляры создаются только через <see cref="CreateUdpTransport" />.
+///     Прямое создание — <see cref="CreateUdpTransport" />; общий сокет на процесс — <see cref="IUdpTransportFactory" />.
 /// </summary>
 public sealed class UdpTransport : ITransport
 {

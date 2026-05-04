@@ -14,6 +14,7 @@ using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
 using ShortP2P.Discovery.RouteTables;
 using ShortP2P.MauiApp.Services;
+using ShortP2P.Transport;
 
 namespace ShortP2P.MauiApp;
 
@@ -51,6 +52,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<AuthService>();
         builder.Services.AddSingleton<ChatRepository>();
         builder.Services.AddSingleton<P2pRoutingSettingsStore>();
+        builder.Services.AddSingleton<IUdpTransportFactory, UdpTransportFactory>();
         builder.Services.AddSingleton<UserP2pRuntime>();
         builder.Services.AddTransient<LoginPage>();
         builder.Services.AddTransient<RegisterPage>();

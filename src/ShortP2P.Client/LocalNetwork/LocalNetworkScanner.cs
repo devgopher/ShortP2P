@@ -23,6 +23,7 @@ namespace ShortP2P.Discovery;
 /// </summary>
 public sealed class LocalNetworkScanner(
     P2pRoutingSettings routingSettings,
+    IUdpTransportFactory udpTransportFactory,
     ITransport? bluetoothTransport = null,
     IEnumerable<ITransport>? additionalDiscoveryTransports = null,
     IRouteTableSnapshotSource? routeTableSnapshotSource = null,
@@ -59,6 +60,8 @@ public sealed class LocalNetworkScanner(
     private Task? _staleLoop;
     private PeerIdentity? _localPeer;
     private bool _isBluetoothListening;
+    /// <summary>Глубина вложенности раундов TX discovery; &gt;0 — приём пингов не обрабатывается.</summary>
+    private int _presencePingTransmitDepth;
     private DateTimeOffset _nextPublicIpv4PresenceLookupUtc = DateTimeOffset.MinValue;
 
     /// <summary>Два последних nonce gossip-зонда: поздние Ack после смены раунда всё ещё принимаются.</summary>
@@ -108,8 +111,8 @@ public sealed class LocalNetworkScanner(
         _localPeer = localPeer;
         _nextPublicIpv4PresenceLookupUtc = DateTimeOffset.MinValue;
         EnsurePublicIpv4InPresenceTargets();
-        _presenceUdp = UdpTransport.CreateUdpTransport(IPAddress.Any, PresencePingCodec.UdpPort, enableBroadcast: true);
-        _discoveryWireUdp = UdpTransport.CreateUdpTransport(IPAddress.Any,
+        _presenceUdp = udpTransportFactory.Acquire(IPAddress.Any, PresencePingCodec.UdpPort, enableBroadcast: true);
+        _discoveryWireUdp = udpTransportFactory.Acquire(IPAddress.Any,
             UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort, enableBroadcast: true);
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _cts.Token;
@@ -175,7 +178,7 @@ public sealed class LocalNetworkScanner(
             _presenceUdp = null;
             try
             {
-                await p.StopAsync(cancellationToken).ConfigureAwait(false);
+                await udpTransportFactory.ReleaseAsync(p, cancellationToken).ConfigureAwait(false);
             }
             catch
             {
@@ -189,7 +192,7 @@ public sealed class LocalNetworkScanner(
             _discoveryWireUdp = null;
             try
             {
-                await d.StopAsync(cancellationToken).ConfigureAwait(false);
+                await udpTransportFactory.ReleaseAsync(d, cancellationToken).ConfigureAwait(false);
             }
             catch
             {
@@ -301,6 +304,8 @@ public sealed class LocalNetworkScanner(
         {
             await foreach (var msg in _presenceUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
+                if (Volatile.Read(ref _presencePingTransmitDepth) != 0)
+                    continue;
                 if (!IsTransportEnabled(msg.RemoteAddress.Kind))
                     continue;
                 var buf = msg.Payload.ToArray();
@@ -336,6 +341,8 @@ public sealed class LocalNetworkScanner(
             await foreach (var msg in _discoveryWireUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 await Task.Delay(10, cancellationToken);
+                if (Volatile.Read(ref _presencePingTransmitDepth) != 0)
+                    continue;
                 if (!IsTransportEnabled(TransportKind.Udp))
                     continue;
                 var buf = msg.Payload.ToArray();
@@ -408,6 +415,8 @@ public sealed class LocalNetworkScanner(
         {
             await foreach (var msg in transport.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
+                if (Volatile.Read(ref _presencePingTransmitDepth) != 0)
+                    continue;
                 if (!IsTransportEnabled(msg.RemoteAddress.Kind))
                     continue;
                 var buf = msg.Payload.ToArray();
@@ -547,91 +556,100 @@ public sealed class LocalNetworkScanner(
         var localPeer = _localPeer;
         var presenceUdp = _presenceUdp;
         if (localPeer == null) return;
-        EnsurePublicIpv4InPresenceTargets();
-        var caps = routingSettings.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
-        var payload = PresencePingCodec.Build(
-            localPeer.NetworkId.Value,
-            localPeer.Nickname,
-            localPeer.DataUdpPort,
-            routingSettings.LinkTechnology,
-            caps);
-        
-        if (presenceUdp != null && IsTransportEnabled(TransportKind.Udp))
+        Interlocked.Increment(ref _presencePingTransmitDepth);
+        try
         {
-            foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(PresencePingCodec.UdpPort))
-            {
-                try
-                {
-                    var addr = UdpTransportAddress.FromIPEndPoint(ep);
-                    await presenceUdp.SendAsync(payload, addr, cancellationToken).ConfigureAwait(false);
-                }
-                catch
-                {
-                    // один broadcast может быть недоступен
-                }
-            }
-            foreach (var host in _udpPresenceTargets.Values)
-            {
-                try
-                {
-                    if (!IPAddress.TryParse(host, out var ip))
-                        continue;
-                    var addr = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(ip, PresencePingCodec.UdpPort));
-                    await presenceUdp.SendAsync(payload, addr, cancellationToken).ConfigureAwait(false);
-                }
-                catch
-                {
-                    // peer может быть офлайн / IP устарел
-                }
-            }
-        }
+            EnsurePublicIpv4InPresenceTargets();
+            var caps = routingSettings.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
+            var payload = PresencePingCodec.Build(
+                localPeer.NetworkId.Value,
+                localPeer.Nickname,
+                localPeer.DataUdpPort,
+                routingSettings.LinkTechnology,
+                caps);
 
-        var bt = _secondaryPresenceTransports.FirstOrDefault(t => t.Kind == TransportKind.Bluetooth);
-        if (bt != null && IsTransportEnabled(TransportKind.Bluetooth))
+            if (presenceUdp != null && IsTransportEnabled(TransportKind.Udp))
+            {
+                foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(PresencePingCodec.UdpPort))
+                {
+                    try
+                    {
+                        var addr = UdpTransportAddress.FromIPEndPoint(ep);
+                        await presenceUdp.SendAsync(payload, addr, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // один broadcast может быть недоступен
+                    }
+                }
+
+                foreach (var host in _udpPresenceTargets.Values)
+                {
+                    try
+                    {
+                        if (!IPAddress.TryParse(host, out var ip))
+                            continue;
+                        var addr = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(ip, PresencePingCodec.UdpPort));
+                        await presenceUdp.SendAsync(payload, addr, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // peer может быть офлайн / IP устарел
+                    }
+                }
+            }
+
+            var bt = _secondaryPresenceTransports.FirstOrDefault(t => t.Kind == TransportKind.Bluetooth);
+            if (bt != null && IsTransportEnabled(TransportKind.Bluetooth))
+            {
+                if (_bluetoothTargets.IsEmpty)
+                {
+                    try
+                    {
+                        var paired = await TryGetPairedBluetoothAddressesAsync(bt, cancellationToken).ConfigureAwait(false);
+                        foreach (var addr in paired)
+                            RememberBluetoothPeer(addr);
+                    }
+                    catch
+                    {
+                        // bluetooth subsystem unavailable
+                    }
+                }
+
+                foreach (var target in _bluetoothTargets.Values)
+                {
+                    try
+                    {
+                        await bt.SendAsync(payload, target, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // устройство выключено/вне зоны/не сопряжено
+                    }
+                }
+            }
+
+            foreach (var transport in _secondaryPresenceTransports.Where(t => t.Kind != TransportKind.Bluetooth))
+            {
+                if (!IsTransportEnabled(transport.Kind))
+                    continue;
+                try
+                {
+                    await transport.SendAsync(payload, new TransportAddress(transport.Kind, []), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    // транспорт может требовать предварительной доступности канала/устройства
+                }
+            }
+
+            await SendGossipDiscoveryProbesAsync(localPeer, cancellationToken).ConfigureAwait(false);
+        }
+        finally
         {
-            if (_bluetoothTargets.IsEmpty)
-            {
-                try
-                {
-                    var paired = await TryGetPairedBluetoothAddressesAsync(bt, cancellationToken).ConfigureAwait(false);
-                    foreach (var addr in paired)
-                        RememberBluetoothPeer(addr);
-                }
-                catch
-                {
-                    // bluetooth subsystem unavailable
-                }
-            }
-
-            foreach (var target in _bluetoothTargets.Values)
-            {
-                try
-                {
-                    await bt.SendAsync(payload, target, cancellationToken).ConfigureAwait(false);
-                }
-                catch
-                {
-                    // устройство выключено/вне зоны/не сопряжено
-                }
-            }
+            Interlocked.Decrement(ref _presencePingTransmitDepth);
         }
-
-        foreach (var transport in _secondaryPresenceTransports.Where(t => t.Kind != TransportKind.Bluetooth))
-        {
-            if (!IsTransportEnabled(transport.Kind))
-                continue;
-            try
-            {
-                await transport.SendAsync(payload, new TransportAddress(transport.Kind, []), cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch
-            {
-                // транспорт может требовать предварительной доступности канала/устройства
-            }
-        }
-
-        await SendGossipDiscoveryProbesAsync(localPeer, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

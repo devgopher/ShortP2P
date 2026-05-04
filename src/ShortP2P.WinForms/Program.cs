@@ -13,6 +13,7 @@ using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
 using NLog;
 using ShortP2P.Discovery;
+using ShortP2P.Transport;
 
 namespace ShortP2P.WinForms;
 
@@ -41,11 +42,13 @@ internal static class Program
         services.AddSingleton<P2pRoutingSettingsStore>();
         services.AddSingleton<AppSettingsStore>();
         services.AddSingleton<BluetoothTransportRegistration>();
+        services.AddSingleton<IUdpTransportFactory, UdpTransportFactory>();
         services.AddSingleton(sp => new UserP2pRuntime(
             sp.GetRequiredService<P2pRoutingSettingsStore>(),
             sp.GetRequiredService<AuthService>(),
             sp.GetRequiredService<ChatRepository>(),
             sp.GetRequiredService<ChatMediaOptions>(),
+            sp.GetRequiredService<IUdpTransportFactory>(),
             sp.GetRequiredService<BluetoothTransportRegistration>().Instance,
             additionalDiscoveryTransports: null,
             sp.GetService<IRouteTableSnapshotSource>(),

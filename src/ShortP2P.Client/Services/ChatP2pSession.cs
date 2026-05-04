@@ -911,6 +911,7 @@ public sealed class ChatP2pSession(
 
         if (_udp != null)
             await _udp.StopAsync(cancellationToken).ConfigureAwait(false);
+
         if (bluetoothTransport != null)
             await bluetoothTransport.StopAsync(cancellationToken).ConfigureAwait(false);
 

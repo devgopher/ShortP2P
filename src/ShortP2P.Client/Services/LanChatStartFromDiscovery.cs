@@ -15,8 +15,8 @@ namespace ShortP2P.Client.Services;
 public static class LanChatStartFromDiscovery
 {
     /// <param name="inviteListenerCoordinator">
-    ///     Если задан, перед временным bind на <see cref="ChatInviteCodec.InviteUdpPort" /> останавливает фоновый
-    ///     приёмник инвайтов и в <c>finally</c> снова его поднимает (тот же порт <see cref="ChatInviteCodec.InviteUdpPort" />).
+    ///     Если задан и в рантайме есть общая <see cref="IUdpTransportFactory" />, инвайт уходит через тот же сокет,
+    ///     что и фоновый приёмник (без stop/start). Иначе — временно освобождает порт и поднимает слушатель снова.
     /// </param>
     public static async Task<LanChatStartResult> TryStartAsync(
         DiscoveredLocalPeer peer,
@@ -67,38 +67,71 @@ public static class LanChatStartFromDiscovery
         var invite = ChatInviteCodec.Build(user.Nickname, nid,
             RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), host, ChatInviteCodec.InviteUdpPort);
 
-        if (inviteListenerCoordinator != null)
-            await inviteListenerCoordinator.StopInviteListenerAsync(cancellationToken).ConfigureAwait(false);
-        var udp = UdpTransport.CreateUdpTransport(IPAddress.Any, ChatInviteCodec.InviteUdpPort);
-        try
+        var sharedFactory = inviteListenerCoordinator?.UdpTransportFactory;
+        if (sharedFactory != null)
         {
-            await udp.StartAsync(cancellationToken).ConfigureAwait(false);
-            if (peer.TransportKind == TransportKind.Bluetooth)
+            if (peer.TransportKind == TransportKind.Udp)
+            {
+                var udp = sharedFactory.Acquire(IPAddress.Any, ChatInviteCodec.InviteUdpPort);
+                try
+                {
+                    await udp.StartAsync(cancellationToken).ConfigureAwait(false);
+                    await udp.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    try
+                    {
+                        await sharedFactory.ReleaseAsync(udp, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
+            }
+            else
             {
                 var bt = inviteListenerCoordinator!.BluetoothTransport!;
                 await bt.StartAsync(cancellationToken).ConfigureAwait(false);
                 await bt.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
             }
-            else
-                await udp.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
         }
-        finally
+        else
         {
+            if (inviteListenerCoordinator != null)
+                await inviteListenerCoordinator.StopInviteListenerAsync(cancellationToken).ConfigureAwait(false);
+            var udp = UdpTransport.CreateUdpTransport(IPAddress.Any, ChatInviteCodec.InviteUdpPort);
             try
             {
-                await udp.StopAsync(cancellationToken).ConfigureAwait(false);
+                await udp.StartAsync(cancellationToken).ConfigureAwait(false);
+                if (peer.TransportKind == TransportKind.Bluetooth)
+                {
+                    var bt = inviteListenerCoordinator!.BluetoothTransport!;
+                    await bt.StartAsync(cancellationToken).ConfigureAwait(false);
+                    await bt.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                    await udp.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
             }
-            catch
+            finally
             {
-                // ignore
-            }
+                try
+                {
+                    await udp.StopAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // ignore
+                }
 
-            if (inviteListenerCoordinator != null)
-            {
-                var u = auth.CurrentUser;
-                if (u != null)
-                    await inviteListenerCoordinator.EnsureInviteListenerRunningAsync(u, cancellationToken)
-                        .ConfigureAwait(false);
+                if (inviteListenerCoordinator != null)
+                {
+                    var u = auth.CurrentUser;
+                    if (u != null)
+                        await inviteListenerCoordinator.EnsureInviteListenerRunningAsync(u, cancellationToken)
+                            .ConfigureAwait(false);
+                }
             }
         }
 
