@@ -19,7 +19,8 @@ using ShortP2P.Transport.Abstractions;
 namespace ShortP2P.Client.Services;
 
 /// <summary>
-///     One chat: UDP transport, RSA handshake (0x01 + 128 bytes), encrypted messenger frames (0x02 + ciphertext).
+///     Чат: UDP/Bluetooth, RSA-handshake (0x01) только у пира с меньшим network id (сравнение Guid);
+///     второй шлёт запрос 0x04+16 байт id и ждёт handshake. Шифрокадры 0x02.
 /// </summary>
 public sealed class ChatP2pSession(
     ChatEntity chat,
@@ -35,6 +36,8 @@ public sealed class ChatP2pSession(
 {
     private const byte FrameHandshake = 0x01;
     private const byte FrameCipher = 0x02;
+    /// <summary>Запрос на установку сессии: только от пира с большим NetworkId; тело — 16 байт Guid отправителя.</summary>
+    private const byte FrameSessionSetupRequest = 0x04;
     public const int MaxMessageChars = 32768;
     private static readonly TimeSpan DecryptRecoveryCooldown = TimeSpan.FromSeconds(10);
     private readonly SemaphoreSlim _flushPendingSem = new(1, 1);
@@ -54,8 +57,9 @@ public sealed class ChatP2pSession(
     private Task? _incomingTask;
     private DateTimeOffset _lastDecryptRecoveryUtc = DateTimeOffset.MinValue;
     private MessengerService? _messenger;
-    /// <summary>True если сессия создана через исходящий handshake (<see cref="EnsureSessionAsInitiatorAsync" />).</summary>
+    /// <summary>True только у лидера (меньший NetworkId): отправлен свой RSA-handshake; зонд ACK/OK только с лидера.</summary>
     private bool _handshakeWeInitiated;
+    private TaskCompletionSource<bool>? _followerHandshakeTcs;
     private TaskCompletionSource<bool>? _cryptoProbeOkAwaiter;
     private volatile bool _cryptoProbeRoundTripOk;
     private readonly SemaphoreSlim _cryptoProbeLoopLock = new(1, 1);
@@ -266,7 +270,7 @@ public sealed class ChatP2pSession(
         _ = TryConfirmCryptoSessionAsync(cancellationToken);
     }
 
-    /// <summary>Временная отладка UI: сброс AES-сессии и повторная отправка RSA-handshake как инициатор.</summary>
+    /// <summary>Временная отладка UI: сброс AES и повторная установка сессии по правилам лидера/подписчика.</summary>
     public async Task TechSendHandshakeAsync(CancellationToken cancellationToken = default)
     {
         if (_cts == null || _transportLayer == null)
@@ -725,6 +729,8 @@ public sealed class ChatP2pSession(
         {
             _cryptoProbeOkAwaiter?.TrySetCanceled();
             _cryptoProbeOkAwaiter = null;
+            _followerHandshakeTcs?.TrySetCanceled();
+            _followerHandshakeTcs = null;
             _handshakeWeInitiated = false;
             _cryptoProbeRoundTripOk = false;
             _messenger = null;
@@ -934,8 +940,79 @@ public sealed class ChatP2pSession(
         return false;
     }
 
+    /// <summary>Меньший NetworkId (Guid) — единственный, кто высылает RSA-handshake; больший — только 0x04-запрос.</summary>
+    private bool IsCryptoSessionLeader()
+    {
+        var ours = CompressedNetworkId.FromShortString(user.NetworkIdShort.Trim()).Value;
+        var peer = CompressedNetworkId.FromShortString(chat.PeerNetworkIdShort.Trim()).Value;
+        return ours.CompareTo(peer) < 0;
+    }
+
+    private async Task SendSessionSetupRequestPacketAsync(CancellationToken cancellationToken)
+    {
+        var id = CompressedNetworkId.FromShortString(user.NetworkIdShort.Trim());
+        var buf = new byte[17];
+        buf[0] = FrameSessionSetupRequest;
+        if (!id.Value.TryWriteBytes(buf.AsSpan(1)))
+            throw new InvalidOperationException("Failed to write network id.");
+        await SendRouteRawAsync(buf, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Вызывается только под захватом <see cref="_sessionSetup" /> (лидер).</summary>
+    private async Task EnsureLeaderCryptoSessionCoreAsync(CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            if (_session != null && _messenger != null)
+                return;
+        }
+
+        var hs = P2PCrypto.CreateHandshakeInitiation(_peerPublicKey!);
+        var packet = new byte[129];
+        packet[0] = FrameHandshake;
+        Buffer.BlockCopy(hs.HandshakePacket, 0, packet, 1, hs.HandshakePacket.Length);
+        await SendRouteRawAsync(packet, cancellationToken).ConfigureAwait(false);
+
+        MessengerService ms;
+        lock (_sync)
+        {
+            if (_session != null && _messenger != null)
+                return;
+            _session = hs.Session;
+            _messenger =
+                new MessengerService(_prefixed!, _session, CreateMessengerOptions(), OnDecryptFailureAsync);
+            _handshakeWeInitiated = true;
+            ms = _messenger;
+        }
+
+        await ms.StartAsync(cancellationToken).ConfigureAwait(false);
+        StartIncomingReaderIfNeeded();
+    }
+
     private async Task EnsureSessionAsInitiatorAsync(CancellationToken cancellationToken)
     {
+        if (IsCryptoSessionLeader())
+        {
+            await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await EnsureLeaderCryptoSessionCoreAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _sessionSetup.Release();
+            }
+
+            return;
+        }
+
+        lock (_sync)
+        {
+            if (_session != null && _messenger != null)
+                return;
+        }
+
+        TaskCompletionSource<bool>? waitHandshake = null;
         await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -943,32 +1020,45 @@ public sealed class ChatP2pSession(
             {
                 if (_session != null && _messenger != null)
                     return;
+                _followerHandshakeTcs?.TrySetCanceled();
+                _followerHandshakeTcs = waitHandshake =
+                    new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             }
 
-            var hs = P2PCrypto.CreateHandshakeInitiation(_peerPublicKey!);
-            var packet = new byte[129];
-            packet[0] = FrameHandshake;
-            Buffer.BlockCopy(hs.HandshakePacket, 0, packet, 1, hs.HandshakePacket.Length);
-            await SendRouteRawAsync(packet, cancellationToken).ConfigureAwait(false);
-
-            MessengerService ms;
+            await SendSessionSetupRequestPacketAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
             lock (_sync)
             {
-                if (_session != null && _messenger != null)
-                    return;
-                _session = hs.Session;
-                _messenger =
-                    new MessengerService(_prefixed!, _session, CreateMessengerOptions(), OnDecryptFailureAsync);
-                _handshakeWeInitiated = true;
-                ms = _messenger;
+                if (waitHandshake != null && ReferenceEquals(_followerHandshakeTcs, waitHandshake))
+                {
+                    _followerHandshakeTcs.TrySetCanceled();
+                    _followerHandshakeTcs = null;
+                }
             }
 
-            await ms.StartAsync(cancellationToken).ConfigureAwait(false);
-            StartIncomingReaderIfNeeded();
+            throw;
         }
         finally
         {
             _sessionSetup.Release();
+        }
+
+        if (waitHandshake == null)
+            return;
+
+        try
+        {
+            await waitHandshake.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                if (ReferenceEquals(_followerHandshakeTcs, waitHandshake))
+                    _followerHandshakeTcs = null;
+            }
         }
     }
 
@@ -1007,6 +1097,26 @@ public sealed class ChatP2pSession(
                         await HandleResponderHandshakeAsync(handshake, cancellationToken).ConfigureAwait(false);
                         continue;
                     }
+                    case FrameSessionSetupRequest when buf.Length == 17:
+                    {
+                        if (!IsCryptoSessionLeader())
+                            continue;
+                        var peerGuid = new Guid(buf.AsSpan(1, 16));
+                        var expected = CompressedNetworkId.FromShortString(chat.PeerNetworkIdShort.Trim()).Value;
+                        if (peerGuid != expected)
+                            continue;
+                        await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
+                        try
+                        {
+                            await EnsureLeaderCryptoSessionCoreAsync(cancellationToken).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            _sessionSetup.Release();
+                        }
+
+                        continue;
+                    }
                 }
 
                 if (buf[0] != FrameCipher || buf.Length <= 1)
@@ -1030,7 +1140,11 @@ public sealed class ChatP2pSession(
         await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (IsCryptoSessionLeader())
+                return;
+
             MessengerService? created;
+            TaskCompletionSource<bool>? followerSignal;
             lock (_sync)
             {
                 if (_session != null)
@@ -1041,6 +1155,8 @@ public sealed class ChatP2pSession(
                 _messenger =
                     new MessengerService(_prefixed!, _session, CreateMessengerOptions(), OnDecryptFailureAsync);
                 _handshakeWeInitiated = false;
+                followerSignal = _followerHandshakeTcs;
+                _followerHandshakeTcs = null;
                 created = _messenger;
             }
 
@@ -1049,6 +1165,8 @@ public sealed class ChatP2pSession(
                 await created.StartAsync(cancellationToken).ConfigureAwait(false);
                 StartIncomingReaderIfNeeded();
             }
+
+            followerSignal?.TrySetResult(true);
         }
         finally
         {
@@ -1197,6 +1315,8 @@ public sealed class ChatP2pSession(
         {
             _cryptoProbeOkAwaiter?.TrySetCanceled();
             _cryptoProbeOkAwaiter = null;
+            _followerHandshakeTcs?.TrySetCanceled();
+            _followerHandshakeTcs = null;
             _handshakeWeInitiated = false;
             _cryptoProbeRoundTripOk = false;
         }
