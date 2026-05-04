@@ -137,7 +137,10 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
         try
         {
             await foreach (var msg in _transport.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
                 ProcessIncomingPacket(msg);
+                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException)
         {

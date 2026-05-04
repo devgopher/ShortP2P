@@ -205,6 +205,15 @@ public sealed class ChatP2pSession(
             // пир офлайн или сеть недоступна
         }
 
+        try
+        {
+            await EnsureSessionAsInitiatorAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // пир ещё не готов — сессия поднимется при первой отправке
+        }
+
         HookPresenceForPendingFlush();
     }
 
@@ -230,6 +239,15 @@ public sealed class ChatP2pSession(
         try
         {
             await SendChatInviteWithRetryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            await EnsureSessionAsInitiatorAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
         {

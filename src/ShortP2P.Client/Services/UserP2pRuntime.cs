@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
+using System.Threading;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.ChatMedia;
@@ -27,6 +29,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private readonly object _sessionLock = new();
     private readonly Dictionary<int, ChatP2pSession> _chatSessions = new();
     private readonly HashSet<int> _sessionsStarted = [];
+    /// <summary>Сериализация старта сессии по discovery-пингу для одного чата (без await внутри lock).</summary>
+    private readonly ConcurrentDictionary<int, SemaphoreSlim> _discoverySessionStartGates = new();
     private readonly HashSet<string> _selfUdpAddresses = new(StringComparer.OrdinalIgnoreCase);
 
     private volatile bool _discoveryHooked;
@@ -101,6 +105,18 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         {
             _chatSessions.Remove(chatId, out session);
             _sessionsStarted.Remove(chatId);
+        }
+
+        if (_discoverySessionStartGates.TryRemove(chatId, out var gate))
+        {
+            try
+            {
+                gate.Dispose();
+            }
+            catch
+            {
+                // ignore
+            }
         }
 
         if (session != null)
@@ -359,7 +375,9 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         if (cancellationToken.IsCancellationRequested)
             return;
         var user = _auth.CurrentUser;
-        if (user == null || peer.TransportKind != TransportKind.Udp)
+        if (user == null)
+            return;
+        if (peer.TransportKind is not TransportKind.Udp and not TransportKind.Bluetooth)
             return;
 
         var shortId = CompressedNetworkId.FromGuid(peer.NetworkId).ToShortString();
@@ -367,11 +385,25 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         if (chat == null)
             return;
 
-        var seenIp = UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address.ToString();
+        var seenDirect = peer.TransportKind == TransportKind.Udp
+            ? UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address.ToString()
+            : BluetoothTransportAddress.ToMacString(peer.SourceAddress.Data);
 
+        await ApplyDiscoveryPingRouteAsync(chat, peer.TransportKind, seenDirect, cancellationToken)
+            .ConfigureAwait(false);
+        await TryEnsureChatSessionStartedFromDiscoveryAsync(chat.Id, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    ///     Обновление маршрута из пинга; старт сессии выполняется отдельно
+    ///     <see cref="TryEnsureChatSessionStartedFromDiscoveryAsync" />.
+    /// </summary>
+    private async Task ApplyDiscoveryPingRouteAsync(ChatEntity chat, TransportKind pingKind, string seenDirect,
+        CancellationToken cancellationToken)
+    {
         if (!string.IsNullOrEmpty(chat.RelayRouteBlob))
         {
-            var mergedRelay = PeerHostList.WithPrimaryFirst(chat.PeerHost, seenIp);
+            var mergedRelay = PeerHostList.WithPrimaryFirst(chat.PeerHost, seenDirect);
             if (string.Equals(mergedRelay, chat.PeerHost, StringComparison.Ordinal))
                 return;
             await _chats.UpdateChatP2pRouteAsync(chat.Id, mergedRelay, chat.PeerPort, chat.RelayRouteBlob)
@@ -391,20 +423,92 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
         if (started && session != null)
         {
-            var primary = PeerHostList.PrimaryHost(chat.PeerHost);
-            if (string.Equals(primary, seenIp, StringComparison.Ordinal))
-                return;
-            await session.ApplyPeerEndpointAsync(seenIp, chat.PeerPort, cancellationToken).ConfigureAwait(false);
+            if (pingKind == TransportKind.Udp)
+            {
+                var primary = PeerHostList.PrimaryHost(chat.PeerHost);
+                if (string.Equals(primary, seenDirect, StringComparison.Ordinal))
+                    return;
+                await session.ApplyPeerEndpointAsync(seenDirect, chat.PeerPort, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                var mergedBt = PeerHostList.WithPrimaryFirst(chat.PeerHost, seenDirect);
+                if (string.Equals(mergedBt, chat.PeerHost, StringComparison.Ordinal))
+                    return;
+                await _chats.UpdateChatP2pRouteAsync(chat.Id, mergedBt, chat.PeerPort, null).ConfigureAwait(false);
+                _chats.NotifyChatListChanged();
+                await RefreshSessionChatRowAsync(chat.Id, cancellationToken).ConfigureAwait(false);
+            }
+
             return;
         }
 
-        var mergedHost = PeerHostList.WithPrimaryFirst(chat.PeerHost, seenIp);
+        var mergedHost = PeerHostList.WithPrimaryFirst(chat.PeerHost, seenDirect);
         if (string.Equals(mergedHost, chat.PeerHost, StringComparison.Ordinal))
             return;
 
         await _chats.UpdateChatP2pRouteAsync(chat.Id, mergedHost, chat.PeerPort, null).ConfigureAwait(false);
         _chats.NotifyChatListChanged();
         await RefreshSessionChatRowAsync(chat.Id, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    ///     Локальная отметка: <see cref="_sessionsStarted" />. Первый успешный пинг собеседника поднимает сессию, если ещё не в множестве.
+    /// </summary>
+    private async Task TryEnsureChatSessionStartedFromDiscoveryAsync(int chatId,
+        CancellationToken cancellationToken)
+    {
+        lock (_sessionLock)
+        {
+            if (_sessionsStarted.Contains(chatId))
+                return;
+        }
+
+        var sem = _discoverySessionStartGates.GetOrAdd(chatId, _ => new SemaphoreSlim(1, 1));
+        await sem.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            lock (_sessionLock)
+            {
+                if (_sessionsStarted.Contains(chatId))
+                    return;
+            }
+
+            var user = _auth.CurrentUser;
+            if (user == null)
+                return;
+
+            var chat = await _chats.GetChatAsync(chatId).ConfigureAwait(false);
+            if (chat == null)
+                return;
+
+            ChatP2pSession session;
+            lock (_sessionLock)
+            {
+                if (_sessionsStarted.Contains(chatId))
+                    return;
+                session = GetOrCreateSession(chat, user, _auth, _chats, uiSync: null);
+            }
+
+            try
+            {
+                await session.StartAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                return;
+            }
+
+            lock (_sessionLock)
+            {
+                if (!_sessionsStarted.Contains(chatId))
+                    _sessionsStarted.Add(chatId);
+            }
+        }
+        finally
+        {
+            sem.Release();
+        }
     }
 
     private async Task RefreshSessionChatRowAsync(int chatId, CancellationToken cancellationToken)
@@ -447,6 +551,21 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             sessions = new List<ChatP2pSession>(_chatSessions.Values);
             _chatSessions.Clear();
             _sessionsStarted.Clear();
+        }
+
+        foreach (var kv in _discoverySessionStartGates.ToArray())
+        {
+            if (_discoverySessionStartGates.TryRemove(kv.Key, out var g))
+            {
+                try
+                {
+                    g.Dispose();
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
         }
 
         foreach (var s in sessions)
