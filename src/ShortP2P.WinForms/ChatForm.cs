@@ -100,6 +100,16 @@ public sealed class ChatForm : Form
         Height = 36,
         Font = new Font("Segoe UI", 10, FontStyle.Bold, GraphicsUnit.Point),
     };
+    private readonly GroupBox _techGroup = new()
+    {
+        Text = "TECH",
+        Dock = DockStyle.Bottom,
+        Height = 52,
+        Padding = new Padding(8, 4, 8, 4),
+        TabStop = false,
+    };
+    private readonly Button _techHandshake = new() { Text = "Send handshake", AutoSize = true };
+    private readonly Button _techPing = new() { Text = "Send ping", AutoSize = true };
     private readonly ToolTip _buttonTooltips = new() { ShowAlways = true };
     private ChatP2pSession? _p2PSession;
     private bool _pairingPromptShown;
@@ -132,7 +142,7 @@ public sealed class ChatForm : Form
         Text = chat.PeerNickname;
         StartPosition = FormStartPosition.CenterParent;
         Width = 520;
-        Height = 520;
+        Height = 572;
         MaximizeBox = false;
 
         _peerInfoLabel.Text = PeerInfoText("Статус: офлайн");
@@ -170,10 +180,26 @@ public sealed class ChatForm : Form
         _buttonTooltips.SetToolTip(_attachCamera, "Записать видеосообщение с камеры");
         _buttonTooltips.SetToolTip(_attachDocument, "Отправить документ");
         _buttonTooltips.SetToolTip(_send, "Отправить сообщение");
+        _buttonTooltips.SetToolTip(_techHandshake, "Временно: сброс крипто-сессии и повторный RSA handshake");
+        _buttonTooltips.SetToolTip(_techPing, "Временно: presence ping на порт discovery (50101)");
+
+        var techFlow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            AutoSize = true,
+            Padding = new Padding(0, 2, 0, 0),
+        };
+        techFlow.Controls.Add(_techHandshake);
+        techFlow.Controls.Add(_techPing);
+        _techGroup.Controls.Add(techFlow);
 
         // Порядок: Fill сначала, затем Top/Bottom — иначе между шапкой и вводом остаётся пустая полоса.
+        // Последний Dock Bottom примыкает к низу окна (панель ввода); TECH добавляется раньше — выше неё.
         Controls.Add(_messages);
         Controls.Add(top);
+        Controls.Add(_techGroup);
         Controls.Add(bottom);
 
         _attachVoice.Click += (_, _) => OnAttachVoice();
@@ -182,6 +208,8 @@ public sealed class ChatForm : Form
         _attachCamera.Click += async (_, _) => await OnAttachCameraAsync().ConfigureAwait(true);
         _attachDocument.Click += async (_, _) => await OnAttachDocumentAsync().ConfigureAwait(true);
         _send.Click += async (_, _) => await OnSendAsync().ConfigureAwait(true);
+        _techHandshake.Click += async (_, _) => await OnTechHandshakeAsync().ConfigureAwait(true);
+        _techPing.Click += async (_, _) => await OnTechPingAsync().ConfigureAwait(true);
         _messages.DrawItem += OnMessagesDrawItem;
         _messages.MeasureItem += OnMessagesMeasureItem;
         _messages.MouseClick += OnMessagesMouseClick;
@@ -596,6 +624,38 @@ public sealed class ChatForm : Form
         finally
         {
             await ReloadMessagesAsync().ConfigureAwait(true);
+        }
+    }
+
+    private async Task OnTechHandshakeAsync()
+    {
+        if (_p2PSession == null)
+            return;
+        try
+        {
+            await _p2PSession.TechSendHandshakeAsync().ConfigureAwait(true);
+            _userActions.LogInformation("Chat {Peer}: TECH send handshake", _chat.PeerNickname);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "TECH handshake failed chat {ChatId}", _chat.Id);
+            MessageBox.Show(this, ex.Message, "TECH: handshake", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private async Task OnTechPingAsync()
+    {
+        if (_p2PSession == null)
+            return;
+        try
+        {
+            await _p2PSession.TechSendPresencePingAsync().ConfigureAwait(true);
+            _userActions.LogInformation("Chat {Peer}: TECH send ping", _chat.PeerNickname);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "TECH ping failed chat {ChatId}", _chat.Id);
+            MessageBox.Show(this, ex.Message, "TECH: ping", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 

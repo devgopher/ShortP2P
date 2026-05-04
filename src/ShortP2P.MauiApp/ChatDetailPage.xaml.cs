@@ -266,6 +266,36 @@ public partial class ChatDetailPage : ContentPage
         }
     }
 
+    private async void OnTechHandshakeClicked(object? sender, EventArgs e)
+    {
+        if (_p2pSession == null)
+            return;
+        try
+        {
+            await _p2pSession.TechSendHandshakeAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "TECH handshake failed");
+            await DisplayAlert("TECH: handshake", ex.Message, "OK").ConfigureAwait(true);
+        }
+    }
+
+    private async void OnTechPingClicked(object? sender, EventArgs e)
+    {
+        if (_p2pSession == null)
+            return;
+        try
+        {
+            await _p2pSession.TechSendPresencePingAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "TECH ping failed");
+            await DisplayAlert("TECH: ping", ex.Message, "OK").ConfigureAwait(true);
+        }
+    }
+
     private async void OnAttachImageClicked(object? sender, EventArgs e)
     {
         if (_p2pSession == null)

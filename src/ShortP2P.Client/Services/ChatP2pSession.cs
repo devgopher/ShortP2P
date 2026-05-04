@@ -266,6 +266,47 @@ public sealed class ChatP2pSession(
         _ = TryConfirmCryptoSessionAsync(cancellationToken);
     }
 
+    /// <summary>Временная отладка UI: сброс AES-сессии и повторная отправка RSA-handshake как инициатор.</summary>
+    public async Task TechSendHandshakeAsync(CancellationToken cancellationToken = default)
+    {
+        if (_cts == null || _transportLayer == null)
+            throw new InvalidOperationException("Сессия чата не запущена.");
+
+        await ResetCryptoStateAsync(cancellationToken).ConfigureAwait(false);
+        await EnsureSessionAsInitiatorAsync(cancellationToken).ConfigureAwait(false);
+        _ = TryConfirmCryptoSessionAsync(cancellationToken);
+    }
+
+    /// <summary>Временная отладка UI: presence ping (порт discovery) на адреса пира.</summary>
+    public async Task TechSendPresencePingAsync(CancellationToken cancellationToken = default)
+    {
+        if (_cts == null)
+            throw new InvalidOperationException("Сессия чата не запущена.");
+
+        var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort).Value;
+        var link = routingSettings?.LinkTechnology ?? LinkTechnologyPreset.Unlimited;
+        var ping = PresencePingCodec.Build(nid, user.Nickname, user.DataUdpPort, link);
+
+        foreach (var addr in BuildOrderedDirectPeerAddresses())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            switch (addr.Kind)
+            {
+                case TransportKind.Udp:
+                {
+                    var ipEp = UdpTransportAddress.ToIPEndPoint(addr);
+                    var dest = UdpTransportAddress.FromIPEndPoint(
+                        new IPEndPoint(ipEp.Address, PresencePingCodec.UdpPort));
+                    await ResolveTransportForAddress(dest).SendAsync(ping, dest, cancellationToken).ConfigureAwait(false);
+                    break;
+                }
+                case TransportKind.Bluetooth when bluetoothTransport != null:
+                    await bluetoothTransport.SendAsync(ping, addr, cancellationToken).ConfigureAwait(false);
+                    break;
+            }
+        }
+    }
+
     private async Task SendChatInviteAsync(CancellationToken cancellationToken)
     {
         var host = BuildInviteHosts();
