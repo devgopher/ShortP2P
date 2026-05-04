@@ -69,7 +69,7 @@ public static class LanChatStartFromDiscovery
 
         if (inviteListenerCoordinator != null)
             await inviteListenerCoordinator.StopInviteListenerAsync(cancellationToken).ConfigureAwait(false);
-        var udp = new UdpTransport(ChatInviteCodec.InviteUdpPort);
+        var udp = UdpTransport.CreateUdpTransport(IPAddress.Any, ChatInviteCodec.InviteUdpPort);
         try
         {
             await udp.StartAsync(cancellationToken).ConfigureAwait(false);

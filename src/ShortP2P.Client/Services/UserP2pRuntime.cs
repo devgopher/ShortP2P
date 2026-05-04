@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Net;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.ChatMedia;
@@ -142,7 +143,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
             _inviteCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var token = _inviteCts.Token;
-            _inviteUdp = new UdpTransport(ChatInviteCodec.InviteUdpPort);
+            _inviteUdp = UdpTransport.CreateUdpTransport(IPAddress.Any, ChatInviteCodec.InviteUdpPort);
             await _inviteUdp.StartAsync(cancellationToken).ConfigureAwait(false);
             _inviteReceiveTask = Task.Run(() => InviteReceiveLoopAsync(token), token);
         }

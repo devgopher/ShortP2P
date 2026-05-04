@@ -171,7 +171,7 @@ public sealed class ChatP2pSession(
 
         if (IsTransportEnabled(TransportKind.Udp))
         {
-            _udp = new UdpTransport(user.DataUdpPort);
+            _udp = UdpTransport.CreateUdpTransport(IPAddress.Any, user.DataUdpPort);
             await _udp.StartAsync(cancellationToken).ConfigureAwait(false);
         }
         else

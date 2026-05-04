@@ -108,8 +108,9 @@ public sealed class LocalNetworkScanner(
         _localPeer = localPeer;
         _nextPublicIpv4PresenceLookupUtc = DateTimeOffset.MinValue;
         EnsurePublicIpv4InPresenceTargets();
-        _presenceUdp = new UdpTransport(PresencePingCodec.UdpPort, enableBroadcast: true);
-        _discoveryWireUdp = new UdpTransport(UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort, enableBroadcast: true);
+        _presenceUdp = UdpTransport.CreateUdpTransport(IPAddress.Any, PresencePingCodec.UdpPort, enableBroadcast: true);
+        _discoveryWireUdp = UdpTransport.CreateUdpTransport(IPAddress.Any,
+            UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort, enableBroadcast: true);
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _cts.Token;
         await _presenceUdp.StartAsync(cancellationToken).ConfigureAwait(false);

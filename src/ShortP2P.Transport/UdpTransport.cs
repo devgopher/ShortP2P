@@ -1,5 +1,5 @@
-using System.Net.Sockets;
 using System.Net;
+using System.Net.Sockets;
 using System.Threading.Channels;
 using ShortP2P.Transport.Abstractions;
 
@@ -7,26 +7,48 @@ namespace ShortP2P.Transport;
 
 /// <summary>
 ///     UDP-транспорт (кроссплатформенный). Один датаграмма = один блок для верхнего слоя.
-///     Привязка к <see cref="IPAddress.Any"/> — приём со всех локальных IPv4, включая датаграммы,
-///     доставленные на этот хост после DNAT с внешнего (WAN) адреса при пробросе портов на роутере.
+///     Привязка к заданному <see cref="IPAddress" /> и порту — для приёма со всех интерфейсов используйте
+///     <see cref="IPAddress.Any" /> (в т.ч. DNAT на роутере на этот хост).
+///     Исходящие и входящие операции с сокетом сериализуются отдельными <see cref="SemaphoreSlim" /> (1,1).
+///     Экземпляры создаются только через <see cref="CreateUdpTransport" />.
 /// </summary>
-public sealed class UdpTransport(int listenPort, bool enableBroadcast = false) : ITransport
+public sealed class UdpTransport : ITransport
 {
     private readonly Channel<TransportReceiveMessage> _channel = Channel.CreateUnbounded<TransportReceiveMessage>();
-    private readonly UdpClient _udp = CreateClient(listenPort, enableBroadcast);
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
+    private readonly SemaphoreSlim _receiveGate = new(1, 1);
+    private readonly UdpClient _udp;
 
-    private static UdpClient CreateClient(int listenPort, bool enableBroadcast)
-    {
-        var c = new UdpClient();
-        c.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress,true);
-        c.Client.Bind(new IPEndPoint(IPAddress.Any, listenPort));
-        if (enableBroadcast)
-            c.EnableBroadcast = true;
-        
-        return c;
-    }
     private CancellationTokenSource? _cts;
     private Task? _receiveTask;
+
+    private UdpTransport(IPAddress bindAddress, int listenPort, bool enableBroadcast)
+    {
+        _udp = CreateClient(bindAddress, listenPort, enableBroadcast);
+    }
+
+    /// <summary>Создаёт UDP-транспорт с привязкой к локальному адресу и порту.</summary>
+    /// <param name="ip">Адрес привязки (часто <see cref="IPAddress.Any" />).</param>
+    /// <param name="port">Локальный порт прослушивания.</param>
+    /// <param name="enableBroadcast">Разрешить широковещательные исходящие датаграммы.</param>
+    public static UdpTransport CreateUdpTransport(IPAddress ip, int port, bool enableBroadcast = false)
+    {
+        ArgumentNullException.ThrowIfNull(ip);
+        ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
+        return new UdpTransport(ip, port, enableBroadcast);
+    }
+
+    private static UdpClient CreateClient(IPAddress bindAddress, int listenPort, bool enableBroadcast)
+    {
+        var c = new UdpClient();
+        c.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        c.Client.Bind(new IPEndPoint(bindAddress, listenPort));
+        if (enableBroadcast)
+            c.EnableBroadcast = true;
+
+        return c;
+    }
 
     public TransportKind Kind => TransportKind.Udp;
 
@@ -44,8 +66,8 @@ public sealed class UdpTransport(int listenPort, bool enableBroadcast = false) :
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
         if (_cts == null) return;
-        
-        await _cts.CancelAsync();
+
+        await _cts.CancelAsync().ConfigureAwait(false);
 
         _udp.Close();
 
@@ -66,35 +88,26 @@ public sealed class UdpTransport(int listenPort, bool enableBroadcast = false) :
         _receiveTask = null;
         _cts.Dispose();
         _cts = null;
+        _receiveGate.Dispose();
+        _sendGate.Dispose();
     }
 
-    private readonly SemaphoreSlim _lockSemaphore = new(1, 1);
-    
     public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, TransportAddress destination,
         CancellationToken cancellationToken = default)
     {
-        await _lockSemaphore.WaitAsync(cancellationToken);
-        await InnerSend(payload, destination, cancellationToken);
-    }
-
-    private async ValueTask InnerSend(ReadOnlyMemory<byte> payload, TransportAddress destination,
-        CancellationToken cancellationToken)
-    {
-        
         if (destination.Kind != TransportKind.Udp)
             throw new ArgumentException("Destination must be UDP.", nameof(destination));
 
-        var ep = UdpTransportAddress.ToIPEndPoint(destination);
+        await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var sent = await _udp.SendAsync(payload.ToArray(), ep, cancellationToken).ConfigureAwait(false);
+            var ep = UdpTransportAddress.ToIPEndPoint(destination);
+            await _udp.SendAsync(payload.ToArray(), ep, cancellationToken).ConfigureAwait(false);
         }
-        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.NetworkUnreachable)
+        finally
         {
-            // лог, задержка и повтор или пересоздать сокет
+            _sendGate.Release();
         }
-
-        _lockSemaphore.Release();
     }
 
     public ValueTask DisposeAsync()
@@ -107,10 +120,19 @@ public sealed class UdpTransport(int listenPort, bool enableBroadcast = false) :
         while (!cancellationToken.IsCancellationRequested)
             try
             {
-                var result = await _udp.ReceiveAsync(cancellationToken).ConfigureAwait(false);
-                var addr = UdpTransportAddress.FromIPEndPoint(result.RemoteEndPoint);
-                await _channel.Writer.WriteAsync(new TransportReceiveMessage(result.Buffer, addr), cancellationToken)
-                    .ConfigureAwait(false);
+                await _receiveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    var result = await _udp.ReceiveAsync(cancellationToken).ConfigureAwait(false);
+                    var addr = UdpTransportAddress.FromIPEndPoint(result.RemoteEndPoint);
+                    await _channel.Writer
+                        .WriteAsync(new TransportReceiveMessage(result.Buffer, addr), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                finally
+                {
+                    _receiveGate.Release();
+                }
             }
             catch (OperationCanceledException)
             {
