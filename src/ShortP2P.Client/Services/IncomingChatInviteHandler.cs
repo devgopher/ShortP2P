@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
@@ -11,7 +12,10 @@ using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Client.Services;
 
-/// <summary>Добавляет чат с инициатором, если его ещё нет (ответ на <see cref="ChatInviteCodec"/>).</summary>
+/// <summary>
+///     Добавляет чат с инициатором в БД и уведомляет <see cref="ChatRepository.ChatListChanged" />; ответный invite
+///     уходит в фоне, чтобы список чатов обновлялся сразу и приёмник не ждал отправки.
+/// </summary>
 public static class IncomingChatInviteHandler
 {
     /// <param name="sendInviteReplyAsync">
@@ -59,16 +63,32 @@ public static class IncomingChatInviteHandler
             existing.RelayRouteBlob = null;
             existing.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
             repo.NotifyChatListChanged();
-            await TrySendInviteReplyAsync(auth, user, host, port, sourceAddress, sendInviteReplyAsync, cancellationToken)
-                .ConfigureAwait(false);
+            ScheduleInviteReply(auth, user, host, port, sourceAddress, sendInviteReplyAsync);
             return;
         }
 
         await repo.AddChatAsync(user.Id, nick, idShort, pubJson, effectiveHost, PresencePingCodec.DefaultDataUdpPort)
             .ConfigureAwait(false);
 
-        await TrySendInviteReplyAsync(auth, user, host, port, sourceAddress, sendInviteReplyAsync, cancellationToken)
-            .ConfigureAwait(false);
+        ScheduleInviteReply(auth, user, host, port, sourceAddress, sendInviteReplyAsync);
+    }
+
+    private static void ScheduleInviteReply(AuthService auth, UserEntity user, string inviteHostList,
+        int invitePacketPort, TransportAddress? sourceAddress,
+        Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, Task>? sendInviteReplyAsync)
+    {
+        if (sendInviteReplyAsync == null)
+            return;
+        _ = TrySendInviteReplyAsync(auth, user, inviteHostList, invitePacketPort, sourceAddress, sendInviteReplyAsync,
+                CancellationToken.None)
+            .ContinueWith(
+                static t =>
+                {
+                    if (t.IsFaulted)
+                        Trace.TraceWarning(
+                            "[Invite] reply send failed: " + (t.Exception?.GetBaseException().Message ?? ""));
+                },
+                TaskScheduler.Default);
     }
 
     private static async Task TrySendInviteReplyAsync(AuthService auth, UserEntity user, string inviteHostList,
@@ -90,13 +110,17 @@ public static class IncomingChatInviteHandler
 
     private static string ResolvePeerHost(string inviteHost, TransportAddress? sourceAddress)
     {
-        if (sourceAddress?.Kind == TransportKind.Bluetooth)
-            return BluetoothTransportAddress.ToMacString(sourceAddress.Data);
-        if (sourceAddress?.Kind == TransportKind.Udp)
+        switch (sourceAddress?.Kind)
         {
-            var seenIp = UdpTransportAddress.ToIPEndPoint(sourceAddress).Address.ToString();
-            return PeerHostList.WithPrimaryFirst(inviteHost, seenIp);
+            case TransportKind.Bluetooth:
+                return BluetoothTransportAddress.ToMacString(sourceAddress.Data);
+            case TransportKind.Udp:
+            {
+                var seenIp = UdpTransportAddress.ToIPEndPoint(sourceAddress).Address.ToString();
+                return PeerHostList.WithPrimaryFirst(inviteHost, seenIp);
+            }
+            default:
+                return inviteHost;
         }
-        return inviteHost;
     }
 }

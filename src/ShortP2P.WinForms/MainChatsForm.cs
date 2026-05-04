@@ -2,6 +2,7 @@ using System.Drawing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
+using ShortP2P.Auth.Data;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Crypto;
 using ShortP2P.Client.Data;
@@ -213,14 +214,20 @@ public sealed class MainChatsForm : Form
 
     private async Task OnChatListChangedAsync()
     {
+        var ui = SynchronizationContext.Current;
         await RefreshAsync().ConfigureAwait(true);
         var u = _auth.CurrentUser;
         if (u == null)
             return;
+        _ = EnsureSessionsAfterChatListChangedAsync(u, ui);
+    }
+
+    private async Task EnsureSessionsAfterChatListChangedAsync(UserEntity u, SynchronizationContext? ui)
+    {
         try
         {
-            await _p2P.EnsureAllChatSessionsStartedAsync(u, _auth, _chats, SynchronizationContext.Current)
-                .ConfigureAwait(true);
+            await _p2P.EnsureAllChatSessionsStartedAsync(u, _auth, _chats, ui, CancellationToken.None)
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
