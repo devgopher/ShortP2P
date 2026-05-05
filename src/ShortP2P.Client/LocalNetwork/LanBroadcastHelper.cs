@@ -7,7 +7,7 @@ namespace ShortP2P.Discovery;
 /// <summary>
 ///     IPv4 directed broadcast по локальным интерфейсам (адрес «.255» подсети) + limited broadcast 255.255.255.255.
 /// </summary>
-internal static class LanBroadcastHelper
+public static class LanBroadcastHelper
 {
     public static IEnumerable<IPEndPoint> GetIpv4BroadcastEndpoints(int port)
     {

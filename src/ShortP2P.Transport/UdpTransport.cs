@@ -14,16 +14,22 @@ namespace ShortP2P.Transport;
 /// </summary>
 public sealed class UdpTransport : ITransport
 {
+    private readonly IPAddress _bindAddress;
+    private readonly int _listenPort;
+    private readonly bool _enableBroadcast;
     private readonly Channel<TransportReceiveMessage> _channel = Channel.CreateUnbounded<TransportReceiveMessage>();
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly SemaphoreSlim _receiveGate = new(1, 1);
-    private readonly UdpClient _udp;
+    private UdpClient _udp;
 
     private CancellationTokenSource? _cts;
     private Task? _receiveTask;
 
     private UdpTransport(IPAddress bindAddress, int listenPort, bool enableBroadcast)
     {
+        _bindAddress = bindAddress;
+        _listenPort = listenPort;
+        _enableBroadcast = enableBroadcast;
         _udp = CreateClient(bindAddress, listenPort, enableBroadcast);
     }
 
@@ -102,7 +108,16 @@ public sealed class UdpTransport : ITransport
         try
         {
             var ep = UdpTransportAddress.ToIPEndPoint(destination);
-            await _udp.SendAsync(payload.ToArray(), ep, cancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                await _udp.SendAsync(payload.ToArray(), ep, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                _udp = CreateClient(_bindAddress, _listenPort, _enableBroadcast);
+                await _udp.SendAsync(payload.ToArray(), ep, cancellationToken).ConfigureAwait(false);
+            }
         }
         finally
         {

@@ -570,7 +570,8 @@ public sealed class LocalNetworkScanner(
 
             if (presenceUdp != null && IsTransportEnabled(TransportKind.Udp))
             {
-                foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(PresencePingCodec.UdpPort))
+                var broadcastEps = LanBroadcastHelper.GetIpv4BroadcastEndpoints(PresencePingCodec.UdpPort);
+                foreach (var ep in broadcastEps)
                 {
                     try
                     {

@@ -16,9 +16,9 @@ public static class PresencePingCodec
     /// <summary>Локальный и удалённый UDP-порт только для discovery/presence ping.</summary>
     public const int UdpPort = 50101;
 
-    public const byte FramePresencePing = 0x31;
+    private const byte FramePresencePing = 0x31;
 
-    public const int MaxNicknameUtf8Bytes = 512;
+    private const int MaxNicknameUtf8Bytes = 512;
 
     /// <summary>Если в пакете нет поля порта (старые клиенты).</summary>
     public const int DefaultDataUdpPort = 50100;

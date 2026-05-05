@@ -1,5 +1,6 @@
 using System.IO;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -290,8 +291,11 @@ public sealed class ChatP2pSession(
         var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort).Value;
         var link = routingSettings?.LinkTechnology ?? LinkTechnologyPreset.Unlimited;
         var ping = PresencePingCodec.Build(nid, user.Nickname, user.DataUdpPort, link);
+        var sentUdpTargets = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var addr in BuildOrderedDirectPeerAddresses())
+        var peers = BuildOrderedDirectPeerAddresses();
+        peers.AddRange(BuildOrderedBroadcastAddresses());
+        foreach (var addr in peers)
         {
             cancellationToken.ThrowIfCancellationRequested();
             switch (addr.Kind)
@@ -301,6 +305,9 @@ public sealed class ChatP2pSession(
                     var ipEp = UdpTransportAddress.ToIPEndPoint(addr);
                     var dest = UdpTransportAddress.FromIPEndPoint(
                         new IPEndPoint(ipEp.Address, PresencePingCodec.UdpPort));
+                    var key = $"{ipEp.Address}:{PresencePingCodec.UdpPort}";
+                    if (!sentUdpTargets.Add(key))
+                        break;
                     await ResolveTransportForAddress(dest).SendAsync(ping, dest, cancellationToken).ConfigureAwait(false);
                     break;
                 }
@@ -309,6 +316,57 @@ public sealed class ChatP2pSession(
                     break;
             }
         }
+
+        foreach (var ep in EnumerateIpv4BroadcastEndpoints(PresencePingCodec.UdpPort))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var key = $"{ep.Address}:{ep.Port}";
+            if (!sentUdpTargets.Add(key))
+                continue;
+            var dest = UdpTransportAddress.FromIPEndPoint(ep);
+            await ResolveTransportForAddress(dest).SendAsync(ping, dest, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static IEnumerable<IPEndPoint> EnumerateIpv4BroadcastEndpoints(int port)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                continue;
+            if (ni.OperationalStatus != OperationalStatus.Up)
+                continue;
+            foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+            {
+                if (ua.Address.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(ua.Address))
+                    continue;
+                var mask = ua.IPv4Mask;
+                if (mask == null)
+                    continue;
+                var ep = new IPEndPoint(ComputeBroadcastAddress(ua.Address, mask), port);
+                var key = $"{ep.Address}:{ep.Port}";
+                if (seen.Add(key))
+                    yield return ep;
+            }
+        }
+
+        var limited = new IPEndPoint(IPAddress.Broadcast, port);
+        var limitedKey = $"{limited.Address}:{limited.Port}";
+        if (seen.Add(limitedKey))
+            yield return limited;
+    }
+
+    private static IPAddress ComputeBroadcastAddress(IPAddress address, IPAddress mask)
+    {
+        var a = address.GetAddressBytes();
+        var m = mask.GetAddressBytes();
+        if (a.Length != 4 || m.Length != 4)
+            throw new ArgumentException("IPv4 address and mask are required.");
+        var b = new byte[4];
+        for (var i = 0; i < 4; i++)
+            b[i] = (byte)(a[i] | ~m[i]);
+        return new IPAddress(b);
     }
 
     private async Task SendChatInviteAsync(CancellationToken cancellationToken)
@@ -761,7 +819,15 @@ public sealed class ChatP2pSession(
 
         return list;
     }
+    
+    
+    private List<TransportAddress> BuildOrderedBroadcastAddresses()
+    {
+        var endpoints = LanBroadcastHelper.GetIpv4BroadcastEndpoints(50101);// EnumerateBroadcastAddresses
 
+        return endpoints.Select(UdpTransportAddress.FromIPEndPoint).ToList();
+    }
+    
     /// <summary>
     ///     Инициатор: ACK → ждём OK; без ответа — пауза 5 с ± 2 с (равномерно), сброс крипты, инвайт, handshake, снова.
     ///     Ответчик на ACK шлёт OK. Не пишется в БД. Один активный цикл на сессию.
