@@ -119,6 +119,8 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
             _ownOutboundMessageIds.Add(messageId);
         }
 
+        Console.WriteLine($"sending to {FormatDestinationForLog(destination)}");
+
         for (var i = 0; i < totalChunks; i++)
         {
             var offset = i * maxPayload;
@@ -132,14 +134,32 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
         }
     }
 
+    private static string FormatDestinationForLog(TransportAddress destination)
+    {
+        try
+        {
+            return destination.ToIpAddress();
+        }
+        catch (InvalidOperationException)
+        {
+            return $"{destination.Kind}";
+        }
+    }
+
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
     {
         try
         {
-            await foreach (var msg in _transport.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            while (await _transport.Inbound.WaitToReadAsync(CancellationToken.None).ConfigureAwait(false))
             {
-                ProcessIncomingPacket(msg);
-                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+                while (_transport.Inbound.TryRead(out var msg))
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                        return;
+                    
+                    ProcessIncomingPacket(msg);
+                    await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+                }
             }
         }
         catch (OperationCanceledException)

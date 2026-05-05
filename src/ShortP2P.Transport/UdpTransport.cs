@@ -149,13 +149,17 @@ public sealed class UdpTransport : ITransport
                     _receiveGate.Release();
                 }
             }
+            catch (SocketException ex)
+            {
+                _udp = CreateClient(_bindAddress, _listenPort, _enableBroadcast);
+            }
             catch (OperationCanceledException)
             {
                 break;
             }
             catch (ObjectDisposedException)
             {
-                break;
+                _udp = CreateClient(_bindAddress, _listenPort, _enableBroadcast);
             }
 
         _channel.Writer.TryComplete();

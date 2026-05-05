@@ -225,15 +225,6 @@ public sealed class LocalNetworkScanner(
 
     public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
 
-    /// <summary>Очистить список найденных (например перед ручным сканированием).</summary>
-    public void ClearDiscoveredClients()
-    {
-        _entries.Clear();
-        RebuildSnapshot();
-        if (!_scanSessionActive)
-            ClientsChanged?.Invoke(this, EventArgs.Empty);
-    }
-
     public void RememberBluetoothPeer(TransportAddress address)
     {
         if (address.Kind != TransportKind.Bluetooth || address.Data.Length == 0)
