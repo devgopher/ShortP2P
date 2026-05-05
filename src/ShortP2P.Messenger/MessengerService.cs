@@ -148,7 +148,7 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
 
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
     {
-        try
+        while (!cancellationToken.IsCancellationRequested)
         {
             while (await _transport.Inbound.WaitToReadAsync(CancellationToken.None).ConfigureAwait(false))
             {
@@ -156,20 +156,14 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
                 {
                     if (cancellationToken.IsCancellationRequested)
                         return;
-                    
+
                     ProcessIncomingPacket(msg);
-                    await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(100).ConfigureAwait(false);
                 }
             }
         }
-        catch (OperationCanceledException)
-        {
-            // shutdown
-        }
-        finally
-        {
-            _incoming.Writer.TryComplete();
-        }
+
+        _incoming.Writer.TryComplete();
     }
 
     private void ProcessIncomingPacket(TransportReceiveMessage msg)
