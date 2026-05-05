@@ -1052,11 +1052,14 @@ public sealed class ChatP2pSession(
         }
 
         await ms.StartAsync(cancellationToken).ConfigureAwait(false);
+        Console.WriteLine("messenger started (leader)");
         StartIncomingReaderIfNeeded();
     }
 
     private async Task EnsureSessionAsInitiatorAsync(CancellationToken cancellationToken)
     {
+        await EnsureMessengerStartedForExistingSessionAsync(cancellationToken).ConfigureAwait(false);
+
         if (IsCryptoSessionLeader())
         {
             await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -1126,6 +1129,22 @@ public sealed class ChatP2pSession(
                     _followerHandshakeTcs = null;
             }
         }
+    }
+
+    private async Task EnsureMessengerStartedForExistingSessionAsync(CancellationToken cancellationToken)
+    {
+        MessengerService? created = null;
+        lock (_sync)
+        {
+            if (_session == null || _messenger != null)
+                return;
+            _messenger = new MessengerService(_prefixed!, _session, CreateMessengerOptions(), OnDecryptFailureAsync);
+            created = _messenger;
+        }
+
+        await created.StartAsync(cancellationToken).ConfigureAwait(false);
+        Console.WriteLine($"messenger started ({(_handshakeWeInitiated ? "leader" : "follower")})");
+        StartIncomingReaderIfNeeded();
     }
 
     private MessengerOptions CreateMessengerOptions()
@@ -1213,12 +1232,16 @@ public sealed class ChatP2pSession(
             TaskCompletionSource<bool>? followerSignal;
             lock (_sync)
             {
-                if (_session != null)
+                if (_session != null && _messenger != null)
                     return;
 
-                var localPrivate = auth.GetCurrentPrivateKey();
-                _session = P2PCrypto.CreateSession(localPrivate, handshakePacket);
-                _messenger =
+                if (_session == null)
+                {
+                    var localPrivate = auth.GetCurrentPrivateKey();
+                    _session = P2PCrypto.CreateSession(localPrivate, handshakePacket);
+                }
+
+                _messenger ??=
                     new MessengerService(_prefixed!, _session, CreateMessengerOptions(), OnDecryptFailureAsync);
                 _handshakeWeInitiated = false;
                 followerSignal = _followerHandshakeTcs;
@@ -1229,6 +1252,7 @@ public sealed class ChatP2pSession(
             if (created != null)
             {
                 await created.StartAsync(cancellationToken).ConfigureAwait(false);
+                Console.WriteLine("messenger started (follower)");
                 StartIncomingReaderIfNeeded();
             }
 

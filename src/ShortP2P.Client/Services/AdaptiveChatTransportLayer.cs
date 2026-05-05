@@ -76,23 +76,31 @@ public sealed class AdaptiveChatTransportLayer(
     public async ValueTask SendPacketAsync(ReadOnlyMemory<byte> packet, CancellationToken cancellationToken = default)
     {
         var peerAddresses = directPeerAddressProvider() ?? throw new InvalidOperationException("Peer address is not set.");
+        Exception? lastError = null;
+        var attempted = 0;
 
         foreach (var peerAddress in peerAddresses)
         {
             var transport = transportResolver(peerAddress);
 
             if (transport == null) continue;
+            attempted++;
             try
             {
                 await transport.SendAsync(packet, peerAddress, cancellationToken).ConfigureAwait(false);
+                return;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                lastError = ex;
                 continue;
             }
-
-            break;
         }
+
+        if (attempted == 0)
+            throw new InvalidOperationException("No transport available for current peer addresses.");
+
+        throw new IOException("Failed to send packet to any peer address.", lastError);
     }
 
     private async Task DirectReceiveLoopAsync(ITransport transport, CancellationToken cancellationToken)
