@@ -1279,12 +1279,12 @@ public sealed class ChatP2pSession : IAsyncDisposable
                 if (TryGetCryptoSession(out _) && _messenger != null)
                     return;
 
-                if (!TryGetCryptoSession(out var cryptoSession))
-                {
-                    var localPrivate = auth.GetCurrentPrivateKey();
-                    cryptoSession = _cryptoSessionCache.GetSession(chat.Id,
-                        () => P2PCrypto.CreateSession(localPrivate, handshakePacket));
-                }
+                // Follower must rebuild crypto session from latest leader handshake.
+                // Otherwise stale cached session may survive retries and break decrypt.
+                ClearCryptoSession();
+                var localPrivate = auth.GetCurrentPrivateKey();
+                var cryptoSession = _cryptoSessionCache.GetSession(chat.Id,
+                    () => P2PCrypto.CreateSession(localPrivate, handshakePacket));
 
                 _messenger ??=
                     new MessengerService(_prefixed!, cryptoSession, CreateMessengerOptions(), OnDecryptFailureAsync);
