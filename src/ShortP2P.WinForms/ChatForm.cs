@@ -222,7 +222,7 @@ public sealed class ChatForm : Form
         _userActions.LogInformation("Chat {Peer}: window opened (chat id {ChatId})", _chat.PeerNickname, _chat.Id);
         var uiSync = SynchronizationContext.Current;
         var fresh = await _repo.GetChatAsync(_chat.Id).ConfigureAwait(true) ?? _chat;
-        _p2PSession = _p2PRuntime.GetOrCreateSession(fresh, _user, _auth, _repo, uiSync);
+        _p2PSession = _p2PRuntime.GetSession(fresh, _user, _auth, _repo, uiSync);
         _p2PSession.MessagesChanged += OnP2pMessagesChanged;
         if (!_p2PRuntime.IsChatSessionStarted(_chat.Id))
         {

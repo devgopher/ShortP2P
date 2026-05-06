@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Net;
 using System.Threading;
 using ShortP2P.Auth;
@@ -26,9 +25,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private readonly IUdpTransportFactory _udpTransportFactory;
     private readonly ITransport? _bluetooth;
 
-    private readonly object _sessionLock = new();
-    private readonly Dictionary<int, ChatP2pSession> _chatSessions = new();
-    private readonly HashSet<int> _sessionsStarted = [];
+    private readonly ChatSessionCache _sessionCache;
     /// <summary>Сериализация старта сессии по discovery-пингу для одного чата (без await внутри lock).</summary>
     private readonly ConcurrentDictionary<int, SemaphoreSlim> _discoverySessionStartGates = new();
     private readonly HashSet<string> _selfUdpAddresses = new(StringComparer.OrdinalIgnoreCase);
@@ -53,7 +50,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     public IUdpTransportFactory UdpTransportFactory => _udpTransportFactory;
 
     public UserP2pRuntime(P2pRoutingSettingsStore store, AuthService auth, ChatRepository chats,
-        ChatMediaOptions chatMedia, IUdpTransportFactory udpTransportFactory, ITransport? bluetooth = null,
+        ChatMediaOptions chatMedia, IUdpTransportFactory udpTransportFactory, ChatSessionCache sessionCache,
+        ITransport? bluetooth = null,
         IEnumerable<ITransport>? additionalDiscoveryTransports = null,
         IRouteTableSnapshotSource? routeTableSnapshotSource = null,
         IDiscoveryPingStore? discoveryPingStore = null)
@@ -63,49 +61,34 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         _chats = chats;
         _chatMedia = chatMedia;
         _udpTransportFactory = udpTransportFactory;
+        _sessionCache = sessionCache;
         _bluetooth = bluetooth;
         LocalScan = new LocalNetworkScanner(Settings, udpTransportFactory, bluetooth, additionalDiscoveryTransports,
             routeTableSnapshotSource, discoveryPingStore);
     }
 
-    public ChatP2pSession GetOrCreateSession(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo,
+    public ChatP2pSession GetSession(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo,
         SynchronizationContext? uiSync)
     {
-        lock (_sessionLock)
-        {
-            if (_chatSessions.TryGetValue(chat.Id, out var existing))
-            {
-                existing.ApplyChatRow(chat);
-                return existing;
-            }
-
-            var session = new ChatP2pSession(chat, user, auth, repo, uiSync, Settings, LocalScan, _chatMedia, _bluetooth);
-            _chatSessions[chat.Id] = session;
-            return session;
-        }
+        return _sessionCache.GetSession(chat.Id,
+            () => ChatP2pSession.Create(chat, user, auth, repo, uiSync, Settings, LocalScan, _chatMedia, _bluetooth),
+            s => s.ApplyChatRow(chat));
     }
 
     public bool IsChatSessionStarted(int chatId)
     {
-        lock (_sessionLock)
-            return _sessionsStarted.Contains(chatId);
+        return _sessionCache.IsStarted(chatId);
     }
 
     public void MarkChatSessionStarted(int chatId)
     {
-        lock (_sessionLock)
-            _sessionsStarted.Add(chatId);
+        _sessionCache.MarkStarted(chatId);
     }
 
     /// <summary>Останавливает и снимает P2P-сессию для удалённого из БД чата.</summary>
     public async Task RemoveChatSessionAsync(int chatId, CancellationToken cancellationToken = default)
     {
-        ChatP2pSession? session;
-        lock (_sessionLock)
-        {
-            _chatSessions.Remove(chatId, out session);
-            _sessionsStarted.Remove(chatId);
-        }
+        _sessionCache.TryRemove(chatId, out var session);
 
         if (_discoverySessionStartGates.TryRemove(chatId, out var gate))
         {
@@ -185,31 +168,15 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         var list = await repo.ListChatsAsync(user.Id).ConfigureAwait(false);
         foreach (var c in list)
         {
-            ChatP2pSession session;
-            bool needStart;
-            lock (_sessionLock)
-            {
-                if (_chatSessions.TryGetValue(c.Id, out var existing))
-                {
-                    existing.ApplyChatRow(c);
-                    session = existing;
-                }
-                else
-                {
-                    session = new ChatP2pSession(c, user, auth, repo, uiSync, Settings, LocalScan, _chatMedia, _bluetooth);
-                    _chatSessions[c.Id] = session;
-                }
-
-                needStart = !_sessionsStarted.Contains(c.Id);
-            }
+            var session = GetSession(c, user, auth, repo, uiSync);
+            var needStart = !IsChatSessionStarted(c.Id);
 
             if (!needStart)
                 continue;
             try
             {
                 await session.StartAsync(cancellationToken).ConfigureAwait(false);
-                lock (_sessionLock)
-                    _sessionsStarted.Add(c.Id);
+                MarkChatSessionStarted(c.Id);
             }
             catch
             {
@@ -238,6 +205,15 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                         .ConfigureAwait(false),
                     msg.RemoteAddress,
                     CancellationToken.None).ConfigureAwait(false);
+                if (!ChatInviteCodec.TryParse(buf, out var peerGuid, out _, out _, out _, out _)) 
+                    continue;
+                var user = _auth.CurrentUser;
+                if (user == null) 
+                    continue;
+                var peerShort = CompressedNetworkId.FromGuid(peerGuid).ToShortString();
+                var chat = await _chats.FindChatByPeerNetworkIdAsync(user.Id, peerShort).ConfigureAwait(false);
+                if (chat != null)
+                    _ = GetSession(chat, user, _auth, _chats, uiSync: null);
             }
         }
         catch (OperationCanceledException)
@@ -413,13 +389,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             return;
         }
 
-        ChatP2pSession? session;
-        var started = false;
-        lock (_sessionLock)
-        {
-            if (_chatSessions.TryGetValue(chat.Id, out session))
-                started = _sessionsStarted.Contains(chat.Id);
-        }
+        _sessionCache.TryGetSession(chat.Id, out var session);
+        var started = _sessionCache.IsStarted(chat.Id);
 
         if (started && session != null)
         {
@@ -458,21 +429,15 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private async Task TryEnsureChatSessionStartedFromDiscoveryAsync(int chatId,
         CancellationToken cancellationToken)
     {
-        lock (_sessionLock)
-        {
-            if (_sessionsStarted.Contains(chatId))
-                return;
-        }
+        if (IsChatSessionStarted(chatId))
+            return;
 
         var sem = _discoverySessionStartGates.GetOrAdd(chatId, _ => new SemaphoreSlim(1, 1));
         await sem.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            lock (_sessionLock)
-            {
-                if (_sessionsStarted.Contains(chatId))
-                    return;
-            }
+            if (IsChatSessionStarted(chatId))
+                return;
 
             var user = _auth.CurrentUser;
             if (user == null)
@@ -482,13 +447,9 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             if (chat == null)
                 return;
 
-            ChatP2pSession session;
-            lock (_sessionLock)
-            {
-                if (_sessionsStarted.Contains(chatId))
-                    return;
-                session = GetOrCreateSession(chat, user, _auth, _chats, uiSync: null);
-            }
+            if (IsChatSessionStarted(chatId))
+                return;
+            var session = GetSession(chat, user, _auth, _chats, uiSync: null);
 
             try
             {
@@ -499,11 +460,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 return;
             }
 
-            lock (_sessionLock)
-            {
-                if (!_sessionsStarted.Contains(chatId))
-                    _sessionsStarted.Add(chatId);
-            }
+            MarkChatSessionStarted(chatId);
         }
         finally
         {
@@ -517,11 +474,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         if (fresh == null)
             return;
         cancellationToken.ThrowIfCancellationRequested();
-        lock (_sessionLock)
-        {
-            if (_chatSessions.TryGetValue(chatId, out var s))
-                s.ApplyChatRow(fresh);
-        }
+        if (_sessionCache.TryGetSession(chatId, out var session))
+            session.ApplyChatRow(fresh);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
@@ -545,13 +499,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             _presencePingWorkCts = null;
         }
 
-        List<ChatP2pSession> sessions;
-        lock (_sessionLock)
-        {
-            sessions = new List<ChatP2pSession>(_chatSessions.Values);
-            _chatSessions.Clear();
-            _sessionsStarted.Clear();
-        }
+        var sessions = _sessionCache.DrainAll();
 
         foreach (var kv in _discoverySessionStartGates.ToArray())
         {

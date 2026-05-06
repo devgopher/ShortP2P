@@ -43,12 +43,14 @@ internal static class Program
         services.AddSingleton<AppSettingsStore>();
         services.AddSingleton<BluetoothTransportRegistration>();
         services.AddSingleton<IUdpTransportFactory, UdpTransportFactory>();
+        services.AddSingleton<ChatSessionCache>();
         services.AddSingleton(sp => new UserP2pRuntime(
             sp.GetRequiredService<P2pRoutingSettingsStore>(),
             sp.GetRequiredService<AuthService>(),
             sp.GetRequiredService<ChatRepository>(),
             sp.GetRequiredService<ChatMediaOptions>(),
             sp.GetRequiredService<IUdpTransportFactory>(),
+            sp.GetRequiredService<ChatSessionCache>(),
             sp.GetRequiredService<BluetoothTransportRegistration>().Instance,
             additionalDiscoveryTransports: null,
             sp.GetService<IRouteTableSnapshotSource>(),

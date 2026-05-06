@@ -97,7 +97,7 @@ public partial class ChatDetailPage : ContentPage
         _p2p.LocalScan.ClientsChanged += OnPeerLanPresenceChanged;
         EnsurePresenceRefreshTimerStarted();
         var uiSync = SynchronizationContext.Current;
-        _p2pSession = _p2p.GetOrCreateSession(chat, user, _auth, _repo, uiSync);
+        _p2pSession = _p2p.GetSession(chat, user, _auth, _repo, uiSync);
         _p2pSession.MessagesChanged += OnP2PMessagesChanged;
         if (!_p2p.IsChatSessionStarted(chat.Id))
         {

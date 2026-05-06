@@ -23,18 +23,17 @@ namespace ShortP2P.Client.Services;
 ///     Чат: UDP/Bluetooth, RSA-handshake (0x01) только у пира с меньшим network id (сравнение Guid);
 ///     второй шлёт запрос 0x04+16 байт id и ждёт handshake. Шифрокадры 0x02.
 /// </summary>
-public sealed class ChatP2pSession(
-    ChatEntity chat,
-    UserEntity user,
-    AuthService auth,
-    ChatRepository repo,
-    SynchronizationContext? uiSynchronizationContext = null,
-    P2pRoutingSettings? routingSettings = null,
-    LocalNetworkScanner? localNetworkScanner = null,
-    ChatMediaOptions? chatMediaOptions = null,
-    ITransport? bluetoothTransport = null)
-    : IAsyncDisposable
+public sealed class ChatP2pSession : IAsyncDisposable
 {
+    private readonly ChatEntity chat;
+    private readonly UserEntity user;
+    private readonly AuthService auth;
+    private readonly ChatRepository repo;
+    private readonly SynchronizationContext? uiSynchronizationContext;
+    private readonly P2pRoutingSettings? routingSettings;
+    private readonly LocalNetworkScanner? localNetworkScanner;
+    private readonly ITransport? bluetoothTransport;
+
     private const byte FrameHandshake = 0x01;
     private const byte FrameCipher = 0x02;
     /// <summary>Запрос на установку сессии: только от пира с большим NetworkId; тело — 16 байт Guid отправителя.</summary>
@@ -44,7 +43,7 @@ public sealed class ChatP2pSession(
     private readonly SemaphoreSlim _flushPendingSem = new(1, 1);
 
     private readonly GuaranteedDeliveryPolicy _guaranteedDelivery = new();
-    private readonly ChatMediaOptions _media = chatMediaOptions ?? new ChatMediaOptions();
+    private readonly ChatMediaOptions _media;
     private readonly List<int> _pendingOutgoing = [];
 
     private readonly object _pendingSync = new();
@@ -70,10 +69,47 @@ public sealed class ChatP2pSession(
     private RsaPublicKey? _peerPublicKey;
     private PrefixedCipherTransport? _prefixed;
     private volatile bool _presenceHooked;
-    private P2PSession? _session;
+    private P2PSession? _p2pSession;
     private AdaptiveChatTransportLayer? _transportLayer;
     private Task? _transportReceiveTask;
     private UdpTransport? _udp;
+
+    private ChatP2pSession(
+        ChatEntity chat,
+        UserEntity user,
+        AuthService auth,
+        ChatRepository repo,
+        SynchronizationContext? uiSynchronizationContext = null,
+        P2pRoutingSettings? routingSettings = null,
+        LocalNetworkScanner? localNetworkScanner = null,
+        ChatMediaOptions? chatMediaOptions = null,
+        ITransport? bluetoothTransport = null)
+    {
+        this.chat = chat;
+        this.user = user;
+        this.auth = auth;
+        this.repo = repo;
+        this.uiSynchronizationContext = uiSynchronizationContext;
+        this.routingSettings = routingSettings;
+        this.localNetworkScanner = localNetworkScanner;
+        this.bluetoothTransport = bluetoothTransport;
+        _media = chatMediaOptions ?? new ChatMediaOptions();
+    }
+
+    public static ChatP2pSession Create(
+        ChatEntity chat,
+        UserEntity user,
+        AuthService auth,
+        ChatRepository repo,
+        SynchronizationContext? uiSynchronizationContext = null,
+        P2pRoutingSettings? routingSettings = null,
+        LocalNetworkScanner? localNetworkScanner = null,
+        ChatMediaOptions? chatMediaOptions = null,
+        ITransport? bluetoothTransport = null)
+    {
+        return new ChatP2pSession(chat, user, auth, repo, uiSynchronizationContext, routingSettings,
+            localNetworkScanner, chatMediaOptions, bluetoothTransport);
+    }
 
     public ValueTask DisposeAsync()
     {
@@ -792,7 +828,7 @@ public sealed class ChatP2pSession(
             _handshakeWeInitiated = false;
             _cryptoProbeRoundTripOk = false;
             _messenger = null;
-            _session = null;
+            _p2pSession = null;
             _incomingStarted = false;
         }
     }
@@ -1029,7 +1065,7 @@ public sealed class ChatP2pSession(
     {
         lock (_sync)
         {
-            if (_session != null && _messenger != null)
+            if (_p2pSession != null && _messenger != null)
                 return;
         }
 
@@ -1042,11 +1078,11 @@ public sealed class ChatP2pSession(
         MessengerService ms;
         lock (_sync)
         {
-            if (_session != null && _messenger != null)
+            if (_p2pSession != null && _messenger != null)
                 return;
-            _session = hs.Session;
+            _p2pSession = hs.Session;
             _messenger =
-                new MessengerService(_prefixed!, _session, CreateMessengerOptions(), OnDecryptFailureAsync);
+                new MessengerService(_prefixed!, _p2pSession, CreateMessengerOptions(), OnDecryptFailureAsync);
             _handshakeWeInitiated = true;
             ms = _messenger;
         }
@@ -1077,7 +1113,7 @@ public sealed class ChatP2pSession(
 
         lock (_sync)
         {
-            if (_session != null && _messenger != null)
+            if (_p2pSession != null && _messenger != null)
                 return;
         }
 
@@ -1087,7 +1123,7 @@ public sealed class ChatP2pSession(
         {
             lock (_sync)
             {
-                if (_session != null && _messenger != null)
+                if (_p2pSession != null && _messenger != null)
                     return;
                 _followerHandshakeTcs?.TrySetCanceled();
                 _followerHandshakeTcs = waitHandshake =
@@ -1136,9 +1172,9 @@ public sealed class ChatP2pSession(
         MessengerService? created = null;
         lock (_sync)
         {
-            if (_session == null || _messenger != null)
+            if (_p2pSession == null || _messenger != null)
                 return;
-            _messenger = new MessengerService(_prefixed!, _session, CreateMessengerOptions(), OnDecryptFailureAsync);
+            _messenger = new MessengerService(_prefixed!, _p2pSession, CreateMessengerOptions(), OnDecryptFailureAsync);
             created = _messenger;
         }
 
@@ -1232,17 +1268,17 @@ public sealed class ChatP2pSession(
             TaskCompletionSource<bool>? followerSignal;
             lock (_sync)
             {
-                if (_session != null && _messenger != null)
+                if (_p2pSession != null && _messenger != null)
                     return;
 
-                if (_session == null)
+                if (_p2pSession == null)
                 {
                     var localPrivate = auth.GetCurrentPrivateKey();
-                    _session = P2PCrypto.CreateSession(localPrivate, handshakePacket);
+                    _p2pSession = P2PCrypto.CreateSession(localPrivate, handshakePacket);
                 }
 
                 _messenger ??=
-                    new MessengerService(_prefixed!, _session, CreateMessengerOptions(), OnDecryptFailureAsync);
+                    new MessengerService(_prefixed!, _p2pSession, CreateMessengerOptions(), OnDecryptFailureAsync);
                 _handshakeWeInitiated = false;
                 followerSignal = _followerHandshakeTcs;
                 _followerHandshakeTcs = null;
@@ -1412,7 +1448,7 @@ public sealed class ChatP2pSession(
         }
 
         _messenger = null;
-        _session = null;
+        _p2pSession = null;
         _transportReceiveTask = null;
         _incomingTask = null;
         _incomingStarted = false;

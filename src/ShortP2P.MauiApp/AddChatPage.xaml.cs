@@ -169,7 +169,7 @@ public partial class AddChatPage : ContentPage
                 .ConfigureAwait(true);
 
             await _p2p.EnsureStartedAsync(u).ConfigureAwait(true);
-            var session = _p2p.GetOrCreateSession(chat, u, _auth, _chats, SynchronizationContext.Current);
+            var session = _p2p.GetSession(chat, u, _auth, _chats, SynchronizationContext.Current);
             if (!_p2p.IsChatSessionStarted(chat.Id))
             {
                 await session.StartAsync().ConfigureAwait(true);

@@ -22,29 +22,27 @@ namespace ShortP2P.Crypto
         {
             if (remotePublicKey == null) throw new ArgumentNullException(nameof(remotePublicKey));
 
-            using (var rsa = RSA.Create())
+            using var rsa = RSA.Create();
+            rsa.ImportParameters(remotePublicKey.ToParameters());
+
+            var sessionKeys = new byte[SessionKeyBytes];
+            using (var rng = RandomNumberGenerator.Create())
             {
-                rsa.ImportParameters(remotePublicKey.ToParameters());
-
-                var sessionKeys = new byte[SessionKeyBytes];
-                using (var rng = RandomNumberGenerator.Create())
-                {
-                    rng.GetBytes(sessionKeys);
-                }
-
-                var encrypted = rsa.Encrypt(sessionKeys, RSAEncryptionPadding.OaepSHA1);
-                if (encrypted.Length != HandshakePacketBytes)
-                    throw new CryptographicException(
-                        $"Unexpected handshake packet length: {encrypted.Length}. Expected {HandshakePacketBytes}.");
-
-                var aesKey = new byte[16];
-                var macKey = new byte[32];
-                Buffer.BlockCopy(sessionKeys, 0, aesKey, 0, 16);
-                Buffer.BlockCopy(sessionKeys, 16, macKey, 0, 32);
-
-                var session = new P2PSession(aesKey, macKey);
-                return new P2PHandshakeResult(encrypted, session);
+                rng.GetBytes(sessionKeys);
             }
+
+            var encrypted = rsa.Encrypt(sessionKeys, RSAEncryptionPadding.OaepSHA1);
+            if (encrypted.Length != HandshakePacketBytes)
+                throw new CryptographicException(
+                    $"Unexpected handshake packet length: {encrypted.Length}. Expected {HandshakePacketBytes}.");
+
+            var aesKey = new byte[16];
+            var macKey = new byte[32];
+            Buffer.BlockCopy(sessionKeys, 0, aesKey, 0, 16);
+            Buffer.BlockCopy(sessionKeys, 16, macKey, 0, 32);
+
+            var session = new P2PSession(aesKey, macKey);
+            return new P2PHandshakeResult(encrypted, session);
         }
 
         /// <summary>

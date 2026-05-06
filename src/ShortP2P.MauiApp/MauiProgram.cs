@@ -53,6 +53,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<ChatRepository>();
         builder.Services.AddSingleton<P2pRoutingSettingsStore>();
         builder.Services.AddSingleton<IUdpTransportFactory, UdpTransportFactory>();
+        builder.Services.AddSingleton<ChatSessionCache>();
         builder.Services.AddSingleton<UserP2pRuntime>();
         builder.Services.AddTransient<LoginPage>();
         builder.Services.AddTransient<RegisterPage>();
