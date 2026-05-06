@@ -420,6 +420,27 @@ public sealed class ChatP2pSession : IAsyncDisposable
         var invite = ChatInviteCodec.Build(user.Nickname, nid,
             RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), host, ChatInviteCodec.InviteUdpPort);
         await SendRouteRawAsync(invite, cancellationToken).ConfigureAwait(false);
+        await SendSessionNegotiationAfterInviteAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task SendSessionNegotiationAfterInviteAsync(CancellationToken cancellationToken)
+    {
+        if (IsCryptoSessionLeader())
+        {
+            await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await EnsureLeaderCryptoSessionCoreAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _sessionSetup.Release();
+            }
+
+            return;
+        }
+
+        await SendSessionSetupRequestPacketAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static string BuildInviteHosts()
