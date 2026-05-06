@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Channels;
+using System.Diagnostics.CodeAnalysis;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.ChatMedia;
@@ -33,6 +34,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
     private readonly P2pRoutingSettings? routingSettings;
     private readonly LocalNetworkScanner? localNetworkScanner;
     private readonly ITransport? bluetoothTransport;
+    private readonly P2pCryptoSessionCache _cryptoSessionCache;
 
     private const byte FrameHandshake = 0x01;
     private const byte FrameCipher = 0x02;
@@ -69,7 +71,6 @@ public sealed class ChatP2pSession : IAsyncDisposable
     private RsaPublicKey? _peerPublicKey;
     private PrefixedCipherTransport? _prefixed;
     private volatile bool _presenceHooked;
-    private P2PSession? _p2pSession;
     private AdaptiveChatTransportLayer? _transportLayer;
     private Task? _transportReceiveTask;
     private UdpTransport? _udp;
@@ -83,7 +84,8 @@ public sealed class ChatP2pSession : IAsyncDisposable
         P2pRoutingSettings? routingSettings = null,
         LocalNetworkScanner? localNetworkScanner = null,
         ChatMediaOptions? chatMediaOptions = null,
-        ITransport? bluetoothTransport = null)
+        ITransport? bluetoothTransport = null,
+        P2pCryptoSessionCache? cryptoSessionCache = null)
     {
         this.chat = chat;
         this.user = user;
@@ -93,6 +95,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
         this.routingSettings = routingSettings;
         this.localNetworkScanner = localNetworkScanner;
         this.bluetoothTransport = bluetoothTransport;
+        _cryptoSessionCache = cryptoSessionCache ?? new P2pCryptoSessionCache();
         _media = chatMediaOptions ?? new ChatMediaOptions();
     }
 
@@ -105,11 +108,17 @@ public sealed class ChatP2pSession : IAsyncDisposable
         P2pRoutingSettings? routingSettings = null,
         LocalNetworkScanner? localNetworkScanner = null,
         ChatMediaOptions? chatMediaOptions = null,
-        ITransport? bluetoothTransport = null)
+        ITransport? bluetoothTransport = null,
+        P2pCryptoSessionCache? cryptoSessionCache = null)
     {
         return new ChatP2pSession(chat, user, auth, repo, uiSynchronizationContext, routingSettings,
-            localNetworkScanner, chatMediaOptions, bluetoothTransport);
+            localNetworkScanner, chatMediaOptions, bluetoothTransport, cryptoSessionCache);
     }
+
+    private bool TryGetCryptoSession([NotNullWhen(true)] out P2PSession? session) =>
+        _cryptoSessionCache.TryGetSession(chat.Id, out session);
+    private void SetCryptoSession(P2PSession session) => _cryptoSessionCache.SetSession(chat.Id, session);
+    private void ClearCryptoSession() => _cryptoSessionCache.TryRemove(chat.Id, out _);
 
     public ValueTask DisposeAsync()
     {
@@ -828,9 +837,9 @@ public sealed class ChatP2pSession : IAsyncDisposable
             _handshakeWeInitiated = false;
             _cryptoProbeRoundTripOk = false;
             _messenger = null;
-            _p2pSession = null;
             _incomingStarted = false;
         }
+        ClearCryptoSession();
     }
 
     private async ValueTask SendRouteRawAsync(ReadOnlyMemory<byte> packet, CancellationToken cancellationToken)
@@ -1065,7 +1074,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
     {
         lock (_sync)
         {
-            if (_p2pSession != null && _messenger != null)
+            if (TryGetCryptoSession(out _) && _messenger != null)
                 return;
         }
 
@@ -1078,11 +1087,12 @@ public sealed class ChatP2pSession : IAsyncDisposable
         MessengerService ms;
         lock (_sync)
         {
-            if (_p2pSession != null && _messenger != null)
+            if (TryGetCryptoSession(out _) && _messenger != null)
                 return;
-            _p2pSession = hs.Session;
+            SetCryptoSession(hs.Session);
+            _cryptoSessionCache.TryGetSession(chat.Id, out var cryptoSession);
             _messenger =
-                new MessengerService(_prefixed!, _p2pSession, CreateMessengerOptions(), OnDecryptFailureAsync);
+                new MessengerService(_prefixed!, cryptoSession!, CreateMessengerOptions(), OnDecryptFailureAsync);
             _handshakeWeInitiated = true;
             ms = _messenger;
         }
@@ -1113,7 +1123,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
         lock (_sync)
         {
-            if (_p2pSession != null && _messenger != null)
+            if (TryGetCryptoSession(out _) && _messenger != null)
                 return;
         }
 
@@ -1123,7 +1133,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
         {
             lock (_sync)
             {
-                if (_p2pSession != null && _messenger != null)
+                if (TryGetCryptoSession(out _) && _messenger != null)
                     return;
                 _followerHandshakeTcs?.TrySetCanceled();
                 _followerHandshakeTcs = waitHandshake =
@@ -1172,9 +1182,9 @@ public sealed class ChatP2pSession : IAsyncDisposable
         MessengerService? created = null;
         lock (_sync)
         {
-            if (_p2pSession == null || _messenger != null)
+            if (!TryGetCryptoSession(out var cryptoSession) || _messenger != null)
                 return;
-            _messenger = new MessengerService(_prefixed!, _p2pSession, CreateMessengerOptions(), OnDecryptFailureAsync);
+            _messenger = new MessengerService(_prefixed!, cryptoSession, CreateMessengerOptions(), OnDecryptFailureAsync);
             created = _messenger;
         }
 
@@ -1268,17 +1278,18 @@ public sealed class ChatP2pSession : IAsyncDisposable
             TaskCompletionSource<bool>? followerSignal;
             lock (_sync)
             {
-                if (_p2pSession != null && _messenger != null)
+                if (TryGetCryptoSession(out _) && _messenger != null)
                     return;
 
-                if (_p2pSession == null)
+                if (!TryGetCryptoSession(out var cryptoSession))
                 {
                     var localPrivate = auth.GetCurrentPrivateKey();
-                    _p2pSession = P2PCrypto.CreateSession(localPrivate, handshakePacket);
+                    cryptoSession = _cryptoSessionCache.GetSession(chat.Id,
+                        () => P2PCrypto.CreateSession(localPrivate, handshakePacket));
                 }
 
                 _messenger ??=
-                    new MessengerService(_prefixed!, _p2pSession, CreateMessengerOptions(), OnDecryptFailureAsync);
+                    new MessengerService(_prefixed!, cryptoSession, CreateMessengerOptions(), OnDecryptFailureAsync);
                 _handshakeWeInitiated = false;
                 followerSignal = _followerHandshakeTcs;
                 _followerHandshakeTcs = null;
@@ -1448,7 +1459,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
         }
 
         _messenger = null;
-        _p2pSession = null;
+        ClearCryptoSession();
         _transportReceiveTask = null;
         _incomingTask = null;
         _incomingStarted = false;

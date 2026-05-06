@@ -44,6 +44,7 @@ internal static class Program
         services.AddSingleton<BluetoothTransportRegistration>();
         services.AddSingleton<IUdpTransportFactory, UdpTransportFactory>();
         services.AddSingleton<ChatSessionCache>();
+        services.AddSingleton<P2pCryptoSessionCache>();
         services.AddSingleton(sp => new UserP2pRuntime(
             sp.GetRequiredService<P2pRoutingSettingsStore>(),
             sp.GetRequiredService<AuthService>(),
@@ -51,6 +52,7 @@ internal static class Program
             sp.GetRequiredService<ChatMediaOptions>(),
             sp.GetRequiredService<IUdpTransportFactory>(),
             sp.GetRequiredService<ChatSessionCache>(),
+            sp.GetRequiredService<P2pCryptoSessionCache>(),
             sp.GetRequiredService<BluetoothTransportRegistration>().Instance,
             additionalDiscoveryTransports: null,
             sp.GetService<IRouteTableSnapshotSource>(),

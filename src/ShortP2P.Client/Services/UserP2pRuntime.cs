@@ -24,6 +24,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private readonly ChatMediaOptions _chatMedia;
     private readonly IUdpTransportFactory _udpTransportFactory;
     private readonly ITransport? _bluetooth;
+    private readonly P2pCryptoSessionCache _cryptoSessionCache;
 
     private readonly ChatSessionCache _sessionCache;
     /// <summary>Сериализация старта сессии по discovery-пингу для одного чата (без await внутри lock).</summary>
@@ -51,6 +52,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
     public UserP2pRuntime(P2pRoutingSettingsStore store, AuthService auth, ChatRepository chats,
         ChatMediaOptions chatMedia, IUdpTransportFactory udpTransportFactory, ChatSessionCache sessionCache,
+        P2pCryptoSessionCache cryptoSessionCache,
         ITransport? bluetooth = null,
         IEnumerable<ITransport>? additionalDiscoveryTransports = null,
         IRouteTableSnapshotSource? routeTableSnapshotSource = null,
@@ -62,6 +64,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         _chatMedia = chatMedia;
         _udpTransportFactory = udpTransportFactory;
         _sessionCache = sessionCache;
+        _cryptoSessionCache = cryptoSessionCache;
         _bluetooth = bluetooth;
         LocalScan = new LocalNetworkScanner(Settings, udpTransportFactory, bluetooth, additionalDiscoveryTransports,
             routeTableSnapshotSource, discoveryPingStore);
@@ -71,7 +74,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         SynchronizationContext? uiSync)
     {
         return _sessionCache.GetSession(chat.Id,
-            () => ChatP2pSession.Create(chat, user, auth, repo, uiSync, Settings, LocalScan, _chatMedia, _bluetooth),
+            () => ChatP2pSession.Create(chat, user, auth, repo, uiSync, Settings, LocalScan, _chatMedia, _bluetooth,
+                _cryptoSessionCache),
             s => s.ApplyChatRow(chat));
     }
 
