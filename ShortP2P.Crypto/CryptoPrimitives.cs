@@ -6,7 +6,7 @@ namespace ShortP2P.Crypto
     {
         public static byte[] Concat(params byte[][] arrays)
         {
-            if (arrays == null) throw new ArgumentNullException(nameof(arrays));
+            ArgumentNullException.ThrowIfNull(arrays);
 
             var total = 0;
             for (var i = 0; i < arrays.Length; i++)
@@ -28,8 +28,8 @@ namespace ShortP2P.Crypto
 
         public static bool ConstantTimeEquals(byte[] a, byte[] b)
         {
-            if (a == null) throw new ArgumentNullException(nameof(a));
-            if (b == null) throw new ArgumentNullException(nameof(b));
+            ArgumentNullException.ThrowIfNull(a);
+            ArgumentNullException.ThrowIfNull(b);
             if (a.Length != b.Length) return false;
 
             var diff = 0;

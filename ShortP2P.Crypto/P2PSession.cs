@@ -20,8 +20,8 @@ namespace ShortP2P.Crypto
 
         internal P2PSession(byte[] aesKey, byte[] macKey)
         {
-            if (aesKey == null) throw new ArgumentNullException(nameof(aesKey));
-            if (macKey == null) throw new ArgumentNullException(nameof(macKey));
+            ArgumentNullException.ThrowIfNull(aesKey);
+            ArgumentNullException.ThrowIfNull(macKey);
             if (aesKey.Length != 16) throw new ArgumentException("aesKey must be 16 bytes (AES-128).", nameof(aesKey));
             if (macKey.Length != 32) throw new ArgumentException("macKey must be 32 bytes.", nameof(macKey));
 
@@ -44,7 +44,7 @@ namespace ShortP2P.Crypto
 
         public byte[] Encrypt(byte[] plaintext)
         {
-            if (plaintext == null) throw new ArgumentNullException(nameof(plaintext));
+            ArgumentNullException.ThrowIfNull(plaintext);
             if (plaintext.Length > MaxPlaintextBytes)
                 throw new ArgumentException(
                     $"Plaintext is too large. Max is {MaxPlaintextBytes} bytes for <= {MaxEncryptedPacketBytes}-byte packets.",
@@ -88,7 +88,7 @@ namespace ShortP2P.Crypto
 
         public byte[] Decrypt(byte[] packet)
         {
-            if (packet == null) throw new ArgumentNullException(nameof(packet));
+            ArgumentNullException.ThrowIfNull(packet);
             if (packet.Length > MaxEncryptedPacketBytes)
                 throw new ArgumentException($"Packet length exceeds limit {MaxEncryptedPacketBytes} bytes.",
                     nameof(packet));

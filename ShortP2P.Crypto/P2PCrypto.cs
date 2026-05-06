@@ -48,8 +48,8 @@ namespace ShortP2P.Crypto
         /// </summary>
         public static P2PSession CreateSession(RsaPrivateKey localPrivateKey, byte[] remoteHandshakePacket)
         {
-            if (localPrivateKey == null) throw new ArgumentNullException(nameof(localPrivateKey));
-            if (remoteHandshakePacket == null) throw new ArgumentNullException(nameof(remoteHandshakePacket));
+            ArgumentNullException.ThrowIfNull(localPrivateKey);
+            ArgumentNullException.ThrowIfNull(remoteHandshakePacket);
 
             var sessionKeys = P2PHandshake.DecryptHandshakePacket(localPrivateKey, remoteHandshakePacket);
 
@@ -66,7 +66,7 @@ namespace ShortP2P.Crypto
         /// </summary>
         public static byte[] Encrypt(P2PSession session, byte[] plaintext)
         {
-            if (session == null) throw new ArgumentNullException(nameof(session));
+            ArgumentNullException.ThrowIfNull(session);
             return session.Encrypt(plaintext);
         }
 
@@ -75,7 +75,7 @@ namespace ShortP2P.Crypto
         /// </summary>
         public static byte[] Decrypt(P2PSession session, byte[] packet)
         {
-            if (session == null) throw new ArgumentNullException(nameof(session));
+            ArgumentNullException.ThrowIfNull(session);
             return session.Decrypt(packet);
         }
     }

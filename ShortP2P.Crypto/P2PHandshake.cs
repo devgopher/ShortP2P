@@ -20,7 +20,7 @@ namespace ShortP2P.Crypto
         /// </summary>
         public static P2PHandshakeResult CreateHandshakeInitiation(RsaPublicKey remotePublicKey)
         {
-            if (remotePublicKey == null) throw new ArgumentNullException(nameof(remotePublicKey));
+            ArgumentNullException.ThrowIfNull(remotePublicKey);
 
             using var rsa = RSA.Create();
             rsa.ImportParameters(remotePublicKey.ToParameters());
@@ -58,8 +58,8 @@ namespace ShortP2P.Crypto
         /// </summary>
         public static byte[] DecryptHandshakePacket(RsaPrivateKey localPrivateKey, byte[] handshakePacket)
         {
-            if (localPrivateKey == null) throw new ArgumentNullException(nameof(localPrivateKey));
-            if (handshakePacket == null) throw new ArgumentNullException(nameof(handshakePacket));
+            ArgumentNullException.ThrowIfNull(localPrivateKey);
+            ArgumentNullException.ThrowIfNull(handshakePacket);
             if (handshakePacket.Length != HandshakePacketBytes)
                 throw new ArgumentException($"Handshake packet must be exactly {HandshakePacketBytes} bytes.",
                     nameof(handshakePacket));

@@ -10,8 +10,8 @@ namespace ShortP2P.Crypto
     {
         public RsaPublicKey(byte[] modulus, byte[] exponent)
         {
-            if (modulus == null) throw new ArgumentNullException(nameof(modulus));
-            if (exponent == null) throw new ArgumentNullException(nameof(exponent));
+            ArgumentNullException.ThrowIfNull(modulus);
+            ArgumentNullException.ThrowIfNull(exponent);
             if (modulus.Length == 0) throw new ArgumentException("Modulus is empty.", nameof(modulus));
             if (exponent.Length == 0) throw new ArgumentException("Exponent is empty.", nameof(exponent));
 
