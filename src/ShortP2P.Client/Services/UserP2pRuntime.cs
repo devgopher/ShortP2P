@@ -216,8 +216,20 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                     continue;
                 var peerShort = CompressedNetworkId.FromGuid(peerGuid).ToShortString();
                 var chat = await _chats.FindChatByPeerNetworkIdAsync(user.Id, peerShort).ConfigureAwait(false);
-                if (chat != null)
-                    _ = GetSession(chat, user, _auth, _chats, uiSync: null);
+                if (chat == null)
+                    continue;
+                var session = GetSession(chat, user, _auth, _chats, uiSync: null);
+                if (IsChatSessionStarted(chat.Id))
+                    continue;
+                try
+                {
+                    await session.StartAsync(cancellationToken).ConfigureAwait(false);
+                    MarkChatSessionStarted(chat.Id);
+                }
+                catch
+                {
+                    // peer may be temporarily unavailable
+                }
             }
         }
         catch (OperationCanceledException)

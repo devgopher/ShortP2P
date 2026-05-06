@@ -261,14 +261,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
             // пир офлайн или сеть недоступна
         }
 
-        try
-        {
-            await EnsureSessionAsInitiatorAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            // пир ещё не готов — сессия поднимется при первой отправке
-        }
+        await EnsureSessionAsInitiatorAsync(cancellationToken).ConfigureAwait(false);
 
         _ = TryConfirmCryptoSessionAsync(cancellationToken);
 
