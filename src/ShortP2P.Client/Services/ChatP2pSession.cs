@@ -117,7 +117,6 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
     private bool TryGetCryptoSession([NotNullWhen(true)] out P2PSession? session) =>
         _cryptoSessionCache.TryGetSession(chat.Id, out session);
-    private void SetCryptoSession(P2PSession session) => _cryptoSessionCache.SetSession(chat.Id, session);
     private void ClearCryptoSession() => _cryptoSessionCache.TryRemove(chat.Id, out _);
 
     public ValueTask DisposeAsync()
@@ -1089,10 +1088,9 @@ public sealed class ChatP2pSession : IAsyncDisposable
         {
             if (TryGetCryptoSession(out _) && _messenger != null)
                 return;
-            SetCryptoSession(hs.Session);
-            _cryptoSessionCache.TryGetSession(chat.Id, out var cryptoSession);
+            var cryptoSession = _cryptoSessionCache.GetSession(chat.Id, () => hs.Session);
             _messenger =
-                new MessengerService(_prefixed!, cryptoSession!, CreateMessengerOptions(), OnDecryptFailureAsync);
+                new MessengerService(_prefixed!, cryptoSession, CreateMessengerOptions(), OnDecryptFailureAsync);
             _handshakeWeInitiated = true;
             ms = _messenger;
         }

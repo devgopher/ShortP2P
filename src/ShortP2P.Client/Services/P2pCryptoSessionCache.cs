@@ -19,11 +19,6 @@ public sealed class P2pCryptoSessionCache
         return _entries.TryGetValue(chatId, out session);
     }
 
-    public void SetSession(int chatId, P2PSession session)
-    {
-        _entries[chatId] = session;
-    }
-
     public bool TryRemove(int chatId, out P2PSession? session)
     {
         return _entries.TryRemove(chatId, out session);
