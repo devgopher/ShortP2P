@@ -217,7 +217,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
-        await StopAsync(cancellationToken).ConfigureAwait(false);
+        // await StopAsync(cancellationToken).ConfigureAwait(false);
 
         _bridge = Channel.CreateUnbounded<TransportReceiveMessage>();
 

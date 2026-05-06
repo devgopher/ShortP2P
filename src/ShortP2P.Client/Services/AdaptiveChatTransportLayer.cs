@@ -109,13 +109,13 @@ public sealed class AdaptiveChatTransportLayer(
         {
             await foreach (var msg in transport.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
-                if (isTransportEnabled != null && !isTransportEnabled(msg.RemoteAddress.Kind))
-                    continue;
-                var payload = msg.Payload;
-                if (shouldAcceptFrom != null &&
-                    (payload.IsEmpty || payload.Span[0] != ChatInviteCodec.FrameChatInvite) &&
-                    !shouldAcceptFrom(msg.RemoteAddress))
-                    continue;
+                // if (isTransportEnabled != null && !isTransportEnabled(msg.RemoteAddress.Kind))
+                //     continue;
+                // var payload = msg.Payload;
+                // if (shouldAcceptFrom != null &&
+                //     (payload.IsEmpty || payload.Span[0] != ChatInviteCodec.FrameChatInvite) &&
+                //     !shouldAcceptFrom(msg.RemoteAddress))
+                //     continue;
                 await _inbound.Writer.WriteAsync(msg, cancellationToken).ConfigureAwait(false);
             }
         }
