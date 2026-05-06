@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
 using ShortP2P.Client.Qr;
@@ -10,6 +11,9 @@ namespace ShortP2P.WinForms;
 
 public sealed class MyQrForm : Form
 {
+    private readonly byte[]? _qrPng;
+    private readonly string _qrPayloadJson = string.Empty;
+
     public MyQrForm(AuthService auth, ILogger<MyQrForm> log, ILogger<UserAction> userActions)
     {
         Text = "My QR code";
@@ -49,15 +53,19 @@ public sealed class MyQrForm : Form
             // no Bluetooth / WinRT
         }
 
-        var png = PeerQrService.EncodeQrPng(PeerQrService.BuildPayload(u, pub, null, btMac, null));
+        var payload = PeerQrService.BuildPayload(u, pub, null, btMac, null);
+        _qrPayloadJson = PeerQrCodec.Serialize(payload);
+        _qrPng = PeerQrService.EncodeQrPng(payload);
 
         var picture = new PictureBox
         {
             Size = new Size(280, 280),
             SizeMode = PictureBoxSizeMode.Zoom,
             BorderStyle = BorderStyle.FixedSingle,
-            Image = new Bitmap(new MemoryStream(png)),
+            Image = new Bitmap(new MemoryStream(_qrPng)),
         };
+        var btnShare = new Button { Text = "Поделиться", AutoSize = true };
+        btnShare.Click += (_, _) => OnShareClicked();
 
         var panel = new FlowLayoutPanel
         {
@@ -68,9 +76,85 @@ public sealed class MyQrForm : Form
         };
         panel.Controls.Add(hint);
         panel.Controls.Add(picture);
+        panel.Controls.Add(btnShare);
         Controls.Add(panel);
 
         userActions.LogInformation("My QR: opened (user {Nickname}, network id {NetworkId})",
             u.Nickname, u.NetworkIdShort);
+    }
+
+    private void OnShareClicked()
+    {
+        if (_qrPng == null || _qrPng.Length == 0)
+        {
+            MessageBox.Show(this, "QR-код пока не готов.", "QR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("В мессенджеры", null, (_, _) => ShareToMessengers());
+        menu.Items.Add("Почта", null, (_, _) => ShareToEmail());
+        menu.Items.Add("Bluetooth", null, (_, _) => ShareToBluetooth());
+        menu.Show(Cursor.Position);
+    }
+
+    private string EnsureQrTempFile()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"shortp2p-my-qr-{DateTime.UtcNow:yyyyMMddHHmmss}.png");
+        File.WriteAllBytes(path, _qrPng!);
+        return path;
+    }
+
+    private void ShareToMessengers()
+    {
+        try
+        {
+            var path = EnsureQrTempFile();
+            Clipboard.SetText(path);
+            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+            MessageBox.Show(this,
+                "PNG QR-кода сохранен во временный файл, путь скопирован в буфер обмена. Прикрепите файл в нужном мессенджере.",
+                "Поделиться", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Не удалось подготовить QR для мессенджера: {ex.Message}", "Поделиться",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void ShareToEmail()
+    {
+        try
+        {
+            var subject = Uri.EscapeDataString("ShortP2P: мой QR-код");
+            var body = Uri.EscapeDataString(
+                "Во вложение добавьте PNG QR-кода из проводника.\r\n\r\nТакже можно импортировать по JSON:\r\n" +
+                _qrPayloadJson);
+            Process.Start(new ProcessStartInfo($"mailto:?subject={subject}&body={body}") { UseShellExecute = true });
+            ShareToMessengers();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Не удалось открыть почту: {ex.Message}", "Поделиться",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void ShareToBluetooth()
+    {
+        try
+        {
+            _ = EnsureQrTempFile();
+            Process.Start(new ProcessStartInfo("fsquirt.exe") { UseShellExecute = true });
+            MessageBox.Show(this,
+                "Открыт мастер передачи Bluetooth. Выберите 'Send files' и укажите сохраненный PNG QR-кода.",
+                "Bluetooth", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Не удалось открыть передачу Bluetooth: {ex.Message}", "Bluetooth",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
 }

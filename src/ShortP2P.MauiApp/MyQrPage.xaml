@@ -15,6 +15,9 @@
                    Aspect="AspectFit"
                    HorizontalOptions="Center"
                    BackgroundColor="#F5F5F5" />
+            <Button Text="Поделиться"
+                    Clicked="OnShareQrClicked"
+                    HorizontalOptions="Center" />
         </VerticalStackLayout>
     </ScrollView>
 </ContentPage>
