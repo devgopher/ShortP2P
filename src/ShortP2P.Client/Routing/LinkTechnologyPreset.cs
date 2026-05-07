@@ -79,7 +79,7 @@ public static class LinkTechnologyPresetExtensions
     public static TimeSpan GetMessageAckTimeout(this LinkTechnologyPreset preset)
     {
         var bps = preset.GetSimulatedMinBitsPerSecond();
-        return TimeSpan.FromSeconds(bps is > 0 and <= 32_000 ? 10 : 3);
+        return TimeSpan.FromSeconds(bps is > 0 and <= 32_000 ? 30 : 10);
     }
 
     public static readonly LinkTechnologyPreset[] AllPresets =

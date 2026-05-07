@@ -1363,41 +1363,44 @@ public sealed class ChatP2pSession : IAsyncDisposable
                 return;
         }
 
-        TaskCompletionSource<bool>? waitHandshake = null;
-        await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        TaskCompletionSource<bool> waitHandshake;
+        var shouldSendSessionRequest = false;
+        lock (_sync)
         {
-            lock (_sync)
-            {
-                if (TryGetCryptoSession(out _) && _messenger != null)
-                    return;
-                _followerHandshakeTcs?.TrySetCanceled();
-                _followerHandshakeTcs = waitHandshake =
-                    new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            }
+            if (TryGetCryptoSession(out _) && _messenger != null)
+                return;
 
-            await SendSessionSetupRequestPacketAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            lock (_sync)
+            if (_followerHandshakeTcs != null && !_followerHandshakeTcs.Task.IsCompleted)
             {
-                if (waitHandshake != null && ReferenceEquals(_followerHandshakeTcs, waitHandshake))
+                // Single-flight: повторные вызовы просто ждут уже существующий handshake.
+                waitHandshake = _followerHandshakeTcs;
+            }
+            else
+            {
+                waitHandshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _followerHandshakeTcs = waitHandshake;
+                shouldSendSessionRequest = true;
+            }
+        }
+
+        if (shouldSendSessionRequest)
+        {
+            try
+            {
+                await SendSessionSetupRequestPacketAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                lock (_sync)
                 {
-                    _followerHandshakeTcs.TrySetCanceled();
-                    _followerHandshakeTcs = null;
+                    if (ReferenceEquals(_followerHandshakeTcs, waitHandshake))
+                        _followerHandshakeTcs = null;
                 }
+
+                waitHandshake.TrySetException(ex);
+                throw;
             }
-
-            throw;
         }
-        finally
-        {
-            _sessionSetup.Release();
-        }
-
-        if (waitHandshake == null)
-            return;
 
         try
         {
