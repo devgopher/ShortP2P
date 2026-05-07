@@ -181,7 +181,7 @@ public sealed class ChatForm : Form
         _buttonTooltips.SetToolTip(_attachDocument, "Отправить документ");
         _buttonTooltips.SetToolTip(_send, "Отправить сообщение");
         _buttonTooltips.SetToolTip(_techHandshake, "Временно: сброс крипто-сессии и повторный RSA handshake");
-        _buttonTooltips.SetToolTip(_techPing, "Временно: presence ping на порт discovery (50101)");
+        _buttonTooltips.SetToolTip(_techPing, "Временно: presence ping на порт discovery (17501)");
 
         var techFlow = new FlowLayoutPanel
         {

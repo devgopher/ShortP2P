@@ -49,7 +49,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private UserEntity? _currentDataPortUser;
     private readonly List<Task> _dataReceiveTasks = [];
 
-    /// <summary>Глобальный invite-транспивер (порт 50102). Поднимается в <see cref="EnsureInviteListenerRunningAsync" />.</summary>
+    /// <summary>Глобальный invite-транспивер (порт 17502). Поднимается в <see cref="EnsureInviteListenerRunningAsync" />.</summary>
     public InviteTransceiver? Invite => _inviteTransceiver;
 
     /// <summary>Handshake-транспивер на data UDP-порту пользователя.</summary>
@@ -65,7 +65,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     public ITransport? BluetoothTransport => _bluetooth;
 
     /// <summary>
-    ///     Сканирование LAN: presence UDP 50101; wire discovery (gossip / маршруты)
+    ///     Сканирование LAN: presence UDP 17501; wire discovery (gossip / маршруты)
     ///     <see cref="UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort" />
     /// </summary>
     public LocalNetworkScanner LocalScan { get; }

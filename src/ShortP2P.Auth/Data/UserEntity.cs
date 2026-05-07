@@ -20,7 +20,7 @@ public class UserEntity
 
     public string RsaPublicJson { get; set; } = "";
 
-    public int DataUdpPort { get; set; } = 50100;
+    public int DataUdpPort { get; set; } = 17500;
 
     public long CreatedUtcTicks { get; set; }
 }

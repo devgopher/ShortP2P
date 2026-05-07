@@ -14,7 +14,7 @@ public sealed class PeerIdentity
     }
 #pragma warning restore CS8618
 
-    public PeerIdentity(string nickname, CompressedNetworkId networkId, int dataUdpPort = 50100,
+    public PeerIdentity(string nickname, CompressedNetworkId networkId, int dataUdpPort = 17500,
         int maxNicknameUtf8Bytes = 64)
     {
         ArgumentNullException.ThrowIfNull(nickname);

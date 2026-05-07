@@ -50,7 +50,7 @@ internal static class DiscoveryBeaconCodec
         var minLen = HeaderBytes + nickLen;
         if (data.Length < minLen) return false;
 
-        ushort dataPort = 50100;
+        ushort dataPort = 17500;
         if (data.Length >= minLen + 2)
         {
             dataPort = BinaryPrimitives.ReadUInt16BigEndian(data.Slice(minLen, 2));

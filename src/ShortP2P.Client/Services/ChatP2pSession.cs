@@ -1104,7 +1104,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
     
     private List<TransportAddress> BuildOrderedBroadcastAddresses()
     {
-        var endpoints = LanBroadcastHelper.GetIpv4BroadcastEndpoints(50101);// EnumerateBroadcastAddresses
+        var endpoints = LanBroadcastHelper.GetIpv4BroadcastEndpoints(17501);// EnumerateBroadcastAddresses
 
         return endpoints.Select(UdpTransportAddress.FromIPEndPoint).ToList();
     }

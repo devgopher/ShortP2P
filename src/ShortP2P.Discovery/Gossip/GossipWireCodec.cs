@@ -70,7 +70,7 @@ public static class GossipWireCodec
     {
         nonce = 0;
         responderNetworkId = Guid.Empty;
-        dataUdpPort = 50100;
+        dataUdpPort = 17500;
         nickname = "";
         if (datagram.Length < AckHeaderLength || datagram[0] != FrameAck)
             return false;

@@ -9,7 +9,7 @@ using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.WinForms;
 
-/// <summary>Ручное сканирование LAN: presence UDP 50101; discovery wire — UdpPeerDiscoveryOptions (17890).</summary>
+/// <summary>Ручное сканирование LAN: presence UDP 17501; discovery wire — UdpPeerDiscoveryOptions (17890).</summary>
 public sealed class LocalNetworkScanForm : Form
 {
     private readonly UserP2pRuntime _p2P;
