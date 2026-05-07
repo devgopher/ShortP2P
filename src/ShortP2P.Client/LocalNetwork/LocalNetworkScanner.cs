@@ -7,6 +7,7 @@ using ShortP2P.Client.Routing;
 using ShortP2P.Discovery.Gossip;
 using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
+using ShortP2P.Discovery.Transceivers;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
@@ -53,9 +54,12 @@ public sealed class LocalNetworkScanner(
         additionalDiscoveryTransports);
     private readonly ConcurrentDictionary<string, TransportAddress> _bluetoothTargets = new();
     private readonly ConcurrentDictionary<string, string> _udpPresenceTargets = new(StringComparer.OrdinalIgnoreCase);
-    private Task? _presenceReceiveLoop;
-    private Task? _discoveryWireReceiveLoop;
-    private readonly List<Task> _secondaryPresenceReceiveLoops = [];
+    private PingTransceiver? _presencePingTransceiver;
+    private DiscoveryWireTransceiver? _discoveryWireTransceiver;
+    private readonly List<PingTransceiver> _secondaryPingTransceivers = [];
+    private Task? _presenceReceiveTask;
+    private Task? _discoveryWireReceiveTask;
+    private readonly List<Task> _secondaryPresenceReceiveTasks = [];
     private Task? _periodicScanLoop;
     private Task? _staleLoop;
     private PeerIdentity? _localPeer;
@@ -124,10 +128,27 @@ public sealed class LocalNetworkScanner(
             if (transport.Kind == TransportKind.Bluetooth)
                 _isBluetoothListening = true;
         }
-        _presenceReceiveLoop = Task.Run(() => PresenceReceiveLoopAsync(token), token);
-        _discoveryWireReceiveLoop = Task.Run(() => DiscoveryWireReceiveLoopAsync(token), token);
+
+        _presencePingTransceiver = new PingTransceiver(_presenceUdp);
+        _presencePingTransceiver.GotData += OnPresencePingReceived;
+        await _presencePingTransceiver.StartAsync(token).ConfigureAwait(false);
+        _presenceReceiveTask = Task.Run(() => PresenceReceiveLoopAsync(_presenceUdp, _presencePingTransceiver, token), token);
+
+        _discoveryWireTransceiver = new DiscoveryWireTransceiver(_discoveryWireUdp);
+        _discoveryWireTransceiver.GotData += OnDiscoveryWireReceived;
+        await _discoveryWireTransceiver.StartAsync(token).ConfigureAwait(false);
+        _discoveryWireReceiveTask = Task.Run(
+            () => DiscoveryWireReceiveLoopAsync(_discoveryWireUdp, _discoveryWireTransceiver, token), token);
+
         foreach (var transport in _secondaryPresenceTransports)
-            _secondaryPresenceReceiveLoops.Add(Task.Run(() => PresenceSecondaryReceiveLoopAsync(transport, token), token));
+        {
+            var tx = new PingTransceiver(transport);
+            tx.GotData += OnPresencePingReceived;
+            await tx.StartAsync(token).ConfigureAwait(false);
+            _secondaryPingTransceivers.Add(tx);
+            _secondaryPresenceReceiveTasks.Add(Task.Run(() => PresenceReceiveLoopAsync(transport, tx, token), token));
+        }
+
         _periodicScanLoop = Task.Run(() => PeriodicScanLoopAsync(token), token);
         _staleLoop = Task.Run(() => StaleLoopAsync(token), token);
     }
@@ -146,25 +167,70 @@ public sealed class LocalNetworkScanner(
             await _cts.CancelAsync().ConfigureAwait(false);
         }
 
-        var loops = new List<Task?>(_secondaryPresenceReceiveLoops.Count + 4)
+        if (_presencePingTransceiver != null)
         {
-            _presenceReceiveLoop,
-            _discoveryWireReceiveLoop,
+            _presencePingTransceiver.GotData -= OnPresencePingReceived;
+            try
+            {
+                await _presencePingTransceiver.StopAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // ignore
+            }
+
+            _presencePingTransceiver = null;
+        }
+
+        if (_discoveryWireTransceiver != null)
+        {
+            _discoveryWireTransceiver.GotData -= OnDiscoveryWireReceived;
+            try
+            {
+                await _discoveryWireTransceiver.StopAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // ignore
+            }
+
+            _discoveryWireTransceiver = null;
+        }
+
+        foreach (var tx in _secondaryPingTransceivers)
+        {
+            tx.GotData -= OnPresencePingReceived;
+            try
+            {
+                await tx.StopAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // ignore
+            }
+        }
+
+        _secondaryPingTransceivers.Clear();
+
+        var activeLoops = new List<Task?>(_secondaryPresenceReceiveTasks.Count + 4)
+        {
+            _presenceReceiveTask,
+            _discoveryWireReceiveTask,
             _periodicScanLoop,
             _staleLoop
         };
-        loops.AddRange(_secondaryPresenceReceiveLoops);
-        var activeLoops = loops.Where(t => t != null).ToArray();
-        _presenceReceiveLoop = null;
-        _discoveryWireReceiveLoop = null;
-        _secondaryPresenceReceiveLoops.Clear();
+        activeLoops.AddRange(_secondaryPresenceReceiveTasks);
+        var toWait = activeLoops.Where(t => t != null).ToArray();
+        _presenceReceiveTask = null;
+        _discoveryWireReceiveTask = null;
+        _secondaryPresenceReceiveTasks.Clear();
         _periodicScanLoop = null;
         _staleLoop = null;
-        if (activeLoops.Length > 0)
+        if (toWait.Length > 0)
         {
             try
             {
-                await Task.WhenAll(activeLoops!).ConfigureAwait(false);
+                await Task.WhenAll(toWait!).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -287,71 +353,102 @@ public sealed class LocalNetworkScanner(
         ClientsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private async Task PresenceReceiveLoopAsync(CancellationToken cancellationToken)
+    private void OnPresencePingReceived(object? sender, PingMessage msg)
     {
-        if (_presenceUdp == null)
+        if (Volatile.Read(ref _presencePingTransmitDepth) != 0)
             return;
+        if (!IsTransportEnabled(msg.RemoteAddress.Kind))
+            return;
+
+        if (msg.RemoteAddress.Kind == TransportKind.Bluetooth)
+            RememberBluetoothPeer(msg.RemoteAddress);
+
+        var localPeer = _localPeer;
+        if (localPeer == null)
+            return;
+        if (msg.PeerNetworkId == localPeer.NetworkId.Value)
+            return;
+
+        var peer = new DiscoveredLocalPeer(msg.PeerNetworkId, msg.Nickname, msg.RemoteAddress,
+            msg.RemoteAddress.Kind, DateTimeOffset.UtcNow, msg.PeerDataUdpPort, msg.AdvertisedLink,
+            msg.AdvertisedCapabilities);
+
+        OnDiscoveryPingReceived(peer);
+        DiscoveryPingReceived?.Invoke(this, new DiscoveryPingReceivedEventArgs(peer));
+    }
+
+    private static async Task PresenceReceiveLoopAsync(ITransport transport, PingTransceiver transceiver,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            await foreach (var msg in _presenceUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-            {
-                if (Volatile.Read(ref _presencePingTransmitDepth) != 0)
-                    continue;
-                if (!IsTransportEnabled(msg.RemoteAddress.Kind))
-                    continue;
-                var buf = msg.Payload.ToArray();
-                if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick, out var dataPort, out var advLink,
-                        out var advCaps))
-                    continue;
-
-                var peer = new DiscoveredLocalPeer(pingSender, nick, msg.RemoteAddress,
-                    msg.RemoteAddress.Kind, DateTimeOffset.UtcNow, dataPort, advLink, advCaps);
-                var localPeer = _localPeer;
-                if (localPeer == null)
-                    continue;
-                var myId = localPeer.NetworkId.Value;
-                if (peer.NetworkId == myId)
-                    continue;
-
-                OnDiscoveryPingReceived(peer);
-                DiscoveryPingReceived?.Invoke(this, new DiscoveryPingReceivedEventArgs(peer));
-            }
+            await foreach (var msg in transport.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+                transceiver.HandleIncoming(msg);
         }
         catch (OperationCanceledException)
         {
-            // ignore
+            // expected on stop
         }
     }
 
-    private async Task DiscoveryWireReceiveLoopAsync(CancellationToken cancellationToken)
+    private void OnDiscoveryWireReceived(object? sender, DiscoveryWireMessage msg)
     {
-        if (_discoveryWireUdp == null)
+        if (Volatile.Read(ref _presencePingTransmitDepth) != 0)
             return;
+        if (!IsTransportEnabled(TransportKind.Udp))
+            return;
+
+        var token = _cts?.Token ?? CancellationToken.None;
+        _ = Task.Run(() => HandleDiscoveryWireAsync(msg, token), token);
+    }
+
+    private static async Task DiscoveryWireReceiveLoopAsync(ITransport transport, DiscoveryWireTransceiver transceiver,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            await foreach (var msg in _discoveryWireUdp.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (var msg in transport.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+                transceiver.HandleIncoming(msg);
+        }
+        catch (OperationCanceledException)
+        {
+            // expected on stop
+        }
+    }
+
+    private async Task HandleDiscoveryWireAsync(DiscoveryWireMessage msg, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var wireUdp = _discoveryWireUdp;
+            if (wireUdp == null)
+                return;
+            var buf = msg.RawPayload.ToArray();
+            switch (msg.Kind)
             {
-                await Task.Delay(10, cancellationToken);
-                if (Volatile.Read(ref _presencePingTransmitDepth) != 0)
-                    continue;
-                if (!IsTransportEnabled(TransportKind.Udp))
-                    continue;
-                var buf = msg.Payload.ToArray();
-                if (TryHandleGossipAckAsDiscovery(buf, msg.RemoteAddress))
-                    continue;
-
-                if (await TryReplyToGossipProbeAsync(_discoveryWireUdp, buf, msg.RemoteAddress, cancellationToken)
-                        .ConfigureAwait(false))
-                    continue;
-
-                if (!await TryReplyToRouteTableRequestAsync(_discoveryWireUdp, buf, msg.RemoteAddress,
-                        cancellationToken).ConfigureAwait(false))
-                    break;
+                case DiscoveryWireKind.GossipAck:
+                    TryHandleGossipAckAsDiscovery(buf, msg.RemoteAddress);
+                    return;
+                case DiscoveryWireKind.GossipProbe:
+                    await TryReplyToGossipProbeAsync(wireUdp, buf, msg.RemoteAddress, cancellationToken)
+                        .ConfigureAwait(false);
+                    return;
+                case DiscoveryWireKind.RouteTableRequest:
+                    await TryReplyToRouteTableRequestAsync(wireUdp, buf, msg.RemoteAddress, cancellationToken)
+                        .ConfigureAwait(false);
+                    return;
+                case DiscoveryWireKind.RouteTableReply:
+                    // Reply парсится потребителем (Discovery), здесь — только ack-стейт через DiscoveryPingReceived при необходимости.
+                    return;
             }
         }
         catch (OperationCanceledException)
         {
             // ignore
+        }
+        catch
+        {
+            // safety: подписчик не должен ронять цикл приёма транспивера
         }
     }
 
@@ -399,42 +496,6 @@ public sealed class LocalNetworkScanner(
 
     private bool IsRecentGossipBroadcastNonce(long n) =>
         n == Volatile.Read(ref _lastGossipBroadcastNonce) || n == Volatile.Read(ref _priorGossipBroadcastNonce);
-
-    private async Task PresenceSecondaryReceiveLoopAsync(ITransport transport, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await foreach (var msg in transport.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-            {
-                if (Volatile.Read(ref _presencePingTransmitDepth) != 0)
-                    continue;
-                if (!IsTransportEnabled(msg.RemoteAddress.Kind))
-                    continue;
-                var buf = msg.Payload.ToArray();
-                if (!PresencePingCodec.TryParse(buf, out var pingSender, out var nick, out var dataPort, out var advLink,
-                        out var advCaps))
-                    continue;
-
-                if (msg.RemoteAddress.Kind == TransportKind.Bluetooth)
-                    RememberBluetoothPeer(msg.RemoteAddress);
-                var peer = new DiscoveredLocalPeer(pingSender, nick, msg.RemoteAddress,
-                    msg.RemoteAddress.Kind, DateTimeOffset.UtcNow, dataPort, advLink, advCaps);
-                var localPeer = _localPeer;
-                if (localPeer == null)
-                    continue;
-                var myId = localPeer.NetworkId.Value;
-                if (peer.NetworkId == myId)
-                    continue;
-
-                OnDiscoveryPingReceived(peer);
-                DiscoveryPingReceived?.Invoke(this, new DiscoveryPingReceivedEventArgs(peer));
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // ignore
-        }
-    }
 
     private async Task<bool> TryReplyToGossipProbeAsync(ITransport replyTransport, byte[] buf,
         TransportAddress remote, CancellationToken cancellationToken)

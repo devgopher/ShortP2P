@@ -4,7 +4,6 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-using System.Threading.Channels;
 using System.Diagnostics.CodeAnalysis;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
@@ -12,8 +11,10 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
+using ShortP2P.Client.Transceivers;
 using ShortP2P.Crypto;
 using ShortP2P.Discovery;
+using ShortP2P.Discovery.Transceivers;
 using ShortP2P.Messenger;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
@@ -33,8 +34,9 @@ public sealed class ChatP2pSession : IAsyncDisposable
     private readonly SynchronizationContext? uiSynchronizationContext;
     private readonly P2pRoutingSettings? routingSettings;
     private readonly LocalNetworkScanner? localNetworkScanner;
-    private readonly ITransport? bluetoothTransport;
+    private readonly UserP2pRuntime _runtime;
     private readonly P2pCryptoSessionCache _cryptoSessionCache;
+    private ITransport? bluetoothTransport => _runtime.BluetoothTransport;
 
     private const byte FrameHandshake = 0x01;
     private const byte FrameCipher = 0x02;
@@ -52,11 +54,8 @@ public sealed class ChatP2pSession : IAsyncDisposable
     private readonly SemaphoreSlim _sessionSetup = new(1, 1);
 
     private readonly object _sync = new();
-    private Channel<TransportReceiveMessage> _bridge = Channel.CreateUnbounded<TransportReceiveMessage>();
     private CancellationTokenSource? _cts;
     private int _decryptRecoveryGate;
-    private bool _incomingStarted;
-    private Task? _incomingTask;
     private DateTimeOffset _lastDecryptRecoveryUtc = DateTimeOffset.MinValue;
     private MessengerService? _messenger;
     /// <summary>True только у лидера (меньший NetworkId): отправлен свой RSA-handshake; зонд ACK/OK только с лидера.</summary>
@@ -69,32 +68,29 @@ public sealed class ChatP2pSession : IAsyncDisposable
     private TransportAddress? _peerAddress;
     private List<TransportAddress> _peerEndpoints = [];
     private RsaPublicKey? _peerPublicKey;
-    private PrefixedCipherTransport? _prefixed;
     private volatile bool _presenceHooked;
-    private AdaptiveChatTransportLayer? _transportLayer;
-    private Task? _transportReceiveTask;
-    private UdpTransport? _udp;
+    private bool _transceiverSubscribed;
 
     private ChatP2pSession(
         ChatEntity chat,
         UserEntity user,
         AuthService auth,
         ChatRepository repo,
+        UserP2pRuntime runtime,
         SynchronizationContext? uiSynchronizationContext = null,
         P2pRoutingSettings? routingSettings = null,
         LocalNetworkScanner? localNetworkScanner = null,
         ChatMediaOptions? chatMediaOptions = null,
-        ITransport? bluetoothTransport = null,
         P2pCryptoSessionCache? cryptoSessionCache = null)
     {
         this.chat = chat;
         this.user = user;
         this.auth = auth;
         this.repo = repo;
+        _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         this.uiSynchronizationContext = uiSynchronizationContext;
         this.routingSettings = routingSettings;
         this.localNetworkScanner = localNetworkScanner;
-        this.bluetoothTransport = bluetoothTransport;
         _cryptoSessionCache = cryptoSessionCache ?? new P2pCryptoSessionCache();
         _media = chatMediaOptions ?? new ChatMediaOptions();
     }
@@ -104,15 +100,15 @@ public sealed class ChatP2pSession : IAsyncDisposable
         UserEntity user,
         AuthService auth,
         ChatRepository repo,
+        UserP2pRuntime runtime,
         SynchronizationContext? uiSynchronizationContext = null,
         P2pRoutingSettings? routingSettings = null,
         LocalNetworkScanner? localNetworkScanner = null,
         ChatMediaOptions? chatMediaOptions = null,
-        ITransport? bluetoothTransport = null,
         P2pCryptoSessionCache? cryptoSessionCache = null)
     {
-        return new ChatP2pSession(chat, user, auth, repo, uiSynchronizationContext, routingSettings,
-            localNetworkScanner, chatMediaOptions, bluetoothTransport, cryptoSessionCache);
+        return new ChatP2pSession(chat, user, auth, repo, runtime, uiSynchronizationContext, routingSettings,
+            localNetworkScanner, chatMediaOptions, cryptoSessionCache);
     }
 
     private bool TryGetCryptoSession([NotNullWhen(true)] out P2PSession? session) =>
@@ -228,40 +224,11 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
-        // await StopAsync(cancellationToken).ConfigureAwait(false);
-
-        _bridge = Channel.CreateUnbounded<TransportReceiveMessage>();
-
         RebuildRouteFromChat();
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        if (IsTransportEnabled(TransportKind.Udp))
-        {
-            _udp = UdpTransport.CreateUdpTransport(IPAddress.Any, user.DataUdpPort);
-            await _udp.StartAsync(cancellationToken).ConfigureAwait(false);
-        }
-        else
-        {
-            _udp = null;
-        }
-
-        if (bluetoothTransport != null && IsTransportEnabled(TransportKind.Bluetooth))
-            await bluetoothTransport.StartAsync(cancellationToken).ConfigureAwait(false);
-        _prefixed = new PrefixedCipherTransport(_bridge,
-            async (mem, dest, ct) =>
-            {
-                await ResolveTransportForAddress(dest).SendAsync(mem, dest, ct).ConfigureAwait(false);
-            });
-
-        _transportLayer = new AdaptiveChatTransportLayer(
-            () => _peerEndpoints.ToArray(),
-            ResolveTransportForAddressOrNull,
-            GetInboundTransports,
-            IsTransportEnabled,
-            ShouldAcceptIncomingFrom);
-        await _transportLayer.StartAsync(_cts.Token).ConfigureAwait(false);
-        _transportReceiveTask = Task.Run(() => TransportReceiveLoopAsync(_cts.Token), _cts.Token);
+        SubscribeToTransceivers();
 
         try
         {
@@ -277,6 +244,174 @@ public sealed class ChatP2pSession : IAsyncDisposable
         _ = TryConfirmCryptoSessionAsync(cancellationToken);
 
         HookPresenceForPendingFlush();
+    }
+
+    private void SubscribeToTransceivers()
+    {
+        if (_transceiverSubscribed)
+            return;
+        var handshake = _runtime.Handshake;
+        if (handshake != null)
+            handshake.GotData += OnHandshakeReceived;
+
+        var message = _runtime.Message;
+        if (message != null)
+            message.GotData += OnCipherReceived;
+
+        var invite = _runtime.Invite;
+        if (invite != null)
+            invite.GotData += OnInviteReceived;
+
+        _transceiverSubscribed = true;
+    }
+
+    private void UnsubscribeFromTransceivers()
+    {
+        if (!_transceiverSubscribed)
+            return;
+        var handshake = _runtime.Handshake;
+        if (handshake != null)
+            handshake.GotData -= OnHandshakeReceived;
+
+        var message = _runtime.Message;
+        if (message != null)
+            message.GotData -= OnCipherReceived;
+
+        var invite = _runtime.Invite;
+        if (invite != null)
+            invite.GotData -= OnInviteReceived;
+
+        _transceiverSubscribed = false;
+    }
+
+    private void OnHandshakeReceived(object? sender, HandshakeMessage msg)
+    {
+        if (!ShouldAcceptIncomingFrom(msg.RemoteAddress))
+            return;
+        var token = _cts?.Token ?? CancellationToken.None;
+        _ = Task.Run(() => HandleHandshakeAsync(msg, token), token);
+    }
+
+    private async Task HandleHandshakeAsync(HandshakeMessage msg, CancellationToken cancellationToken)
+    {
+        try
+        {
+            switch (msg.Kind)
+            {
+                case HandshakeKind.Handshake:
+                    await ProcessHandshakePacketAsync(msg.Body, msg.RemoteAddress, cancellationToken)
+                        .ConfigureAwait(false);
+                    return;
+                case HandshakeKind.SessionSetupRequest:
+                    await ProcessSessionSetupRequestAsync(msg.Body, msg.RemoteAddress, cancellationToken)
+                        .ConfigureAwait(false);
+                    return;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // ignore
+        }
+        catch
+        {
+            // safety: подписчик не должен ронять цикл приёма транспивера
+        }
+    }
+
+    private void OnCipherReceived(object? sender, TransportReceiveMessage msg)
+    {
+        if (!ShouldAcceptIncomingFrom(msg.RemoteAddress))
+            return;
+        var messenger = _messenger;
+        messenger?.TryAcceptCipher(msg);
+    }
+
+    private async void OnMessengerGotData(object? sender, IncomingBinaryMessage incoming)
+    {
+        try
+        {
+            var shouldNotify = false;
+            var payload = incoming.Payload.ToArray();
+            var cancellationToken = _cts?.Token ?? CancellationToken.None;
+            if (ChatWireCodec.TryParse(payload, out var wire) && wire != null)
+            {
+                switch (wire)
+                {
+                    case ChatWireText t:
+                        if (!TryHandleSessionCryptoProbeText(t.Text, cancellationToken))
+                        {
+                            _ = await repo.AddMessageAsync(chat.Id, false, t.Text).ConfigureAwait(false);
+                            shouldNotify = true;
+                        }
+
+                        break;
+                    case ChatWireImage img:
+                        _ = await repo.AddImageMessageAsync(chat.Id, false, img.MimeType, img.ImageBytes)
+                            .ConfigureAwait(false);
+                        shouldNotify = true;
+                        break;
+                    case ChatWireFile f:
+                        try
+                        {
+                            _media.ValidateDocumentMime(f.MimeType);
+                            _media.ValidateDocumentSize(f.FileBytes.Length);
+                            _ = await repo.AddFileMessageAsync(chat.Id, false, f.FileName, f.MimeType, f.FileBytes)
+                                .ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            _ = await repo.AddMessageAsync(chat.Id, false,
+                                    "[Входящий файл отклонён: неподдерживаемый тип или размер.]")
+                                .ConfigureAwait(false);
+                        }
+
+                        shouldNotify = true;
+                        break;
+                }
+            }
+            else if (ChatWireCodec.LooksLikeFramedWire(payload))
+            {
+                _ = await repo.AddMessageAsync(chat.Id, false,
+                        "[Входящее сообщение не распознано. Обновите клиент.]")
+                    .ConfigureAwait(false);
+                shouldNotify = true;
+            }
+            else
+            {
+                var text = Encoding.UTF8.GetString(payload);
+                if (!TryHandleSessionCryptoProbeText(text, cancellationToken))
+                {
+                    _ = await repo.AddMessageAsync(chat.Id, false, text).ConfigureAwait(false);
+                    shouldNotify = true;
+                }
+            }
+
+            if (shouldNotify)
+                RaiseMessagesChanged();
+        }
+        catch
+        {
+            // ignore to avoid breaking messenger callbacks
+        }
+    }
+
+    private void OnInviteReceived(object? sender, InviteMessage msg)
+    {
+        if (!ShouldAcceptIncomingFrom(msg.RemoteAddress))
+            return;
+        var token = _cts?.Token ?? CancellationToken.None;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await IncomingChatInviteHandler.TryAcceptAsync(msg.RawPayload, auth, repo,
+                    SendInviteRawAsync, msg.RemoteAddress, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore
+            }
+        }, token);
     }
 
     /// <summary>
@@ -322,7 +457,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
     /// <summary>Временная отладка UI: сброс AES и повторная установка сессии по правилам лидера/подписчика.</summary>
     public async Task TechSendHandshakeAsync(CancellationToken cancellationToken = default)
     {
-        if (_cts == null || _transportLayer == null)
+        if (_cts == null)
             throw new InvalidOperationException("Сессия чата не запущена.");
 
         await ResetCryptoStateAsync(cancellationToken).ConfigureAwait(false);
@@ -356,7 +491,9 @@ public sealed class ChatP2pSession : IAsyncDisposable
                     var key = $"{ipEp.Address}:{PresencePingCodec.UdpPort}";
                     if (!sentUdpTargets.Add(key))
                         break;
-                    await ResolveTransportForAddress(dest).SendAsync(ping, dest, cancellationToken).ConfigureAwait(false);
+                    var udp = ResolveOutbound(dest);
+                    if (udp != null)
+                        await udp.SendAsync(ping, dest, cancellationToken).ConfigureAwait(false);
                     break;
                 }
                 case TransportKind.Bluetooth when bluetoothTransport != null:
@@ -372,7 +509,9 @@ public sealed class ChatP2pSession : IAsyncDisposable
             if (!sentUdpTargets.Add(key))
                 continue;
             var dest = UdpTransportAddress.FromIPEndPoint(ep);
-            await ResolveTransportForAddress(dest).SendAsync(ping, dest, cancellationToken).ConfigureAwait(false);
+            var udp = ResolveOutbound(dest);
+            if (udp != null)
+                await udp.SendAsync(ping, dest, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -576,7 +715,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
     private async Task TryFlushPendingOutgoingAsync(CancellationToken cancellationToken)
     {
-        if (_udp == null || _transportLayer == null)
+        if (_runtime.Message == null)
             return;
 
         await _flushPendingSem.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -836,20 +975,9 @@ public sealed class ChatP2pSession : IAsyncDisposable
     private async Task ResetCryptoStateAsync(CancellationToken cancellationToken)
     {
         if (_messenger != null)
-            await _messenger.StopAsync(cancellationToken).ConfigureAwait(false);
-
-        if (_incomingTask != null)
         {
-            try
-            {
-                await _incomingTask.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // ignore
-            }
-
-            _incomingTask = null;
+            _messenger.GotData -= OnMessengerGotData;
+            await _messenger.StopAsync(cancellationToken).ConfigureAwait(false);
         }
 
         lock (_sync)
@@ -861,15 +989,99 @@ public sealed class ChatP2pSession : IAsyncDisposable
             _handshakeWeInitiated = false;
             _cryptoProbeRoundTripOk = false;
             _messenger = null;
-            _incomingStarted = false;
         }
         ClearCryptoSession();
     }
 
+    /// <summary>
+    ///     Отправка «сырых» пакетов на пира: invite (0x30) и handshake-фреймы (0x01/0x04). Перебирает peer endpoints
+    ///     в порядке предпочтения (свежий <c>_peerAddress</c> первым), останавливается на первом успешном.
+    ///     Маршрут UDP идёт через общий data-сокет в <see cref="UserP2pRuntime" />, BT — через общий BT-транспорт.
+    /// </summary>
     private async ValueTask SendRouteRawAsync(ReadOnlyMemory<byte> packet, CancellationToken cancellationToken)
     {
-        var layer = _transportLayer ?? throw new InvalidOperationException("Transport layer is not initialized.");
-        await layer.SendPacketAsync(packet, cancellationToken).ConfigureAwait(false);
+        Exception? last = null;
+        foreach (var dest in BuildOrderedDirectPeerAddresses())
+        {
+            var transport = ResolveOutbound(dest);
+            if (transport == null)
+                continue;
+            try
+            {
+                await transport.SendAsync(packet, dest, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                last = ex;
+            }
+        }
+
+        if (last != null)
+            throw last;
+    }
+
+    private async Task SendInviteRawAsync(ReadOnlyMemory<byte> payload, TransportAddress destination,
+        CancellationToken cancellationToken)
+    {
+        var transport = ResolveOutbound(destination);
+        if (transport == null)
+            return;
+        await transport.SendAsync(payload, destination, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    ///     Отправка cipher payload (без префикса 0x02) через глобальный <see cref="MessageTransceiver" />.
+    ///     Делегируется в <see cref="MessengerService" /> при каждом исходящем сообщении/чанке.
+    /// </summary>
+    private async ValueTask SendCipherAsync(ReadOnlyMemory<byte> cipherPayload, TransportAddress destination,
+        CancellationToken cancellationToken)
+    {
+        var message = _runtime.Message
+                      ?? throw new InvalidOperationException("Message transceiver is not initialized.");
+        await message.SendAsync(new TransportReceiveMessage(cipherPayload, destination), destination,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private ITransport? ResolveOutbound(TransportAddress destination)
+    {
+        return destination.Kind switch
+        {
+            TransportKind.Udp when IsTransportEnabled(TransportKind.Udp) => _runtime.DataUdp,
+            TransportKind.Bluetooth when IsTransportEnabled(TransportKind.Bluetooth) => bluetoothTransport,
+            _ => null
+        };
+    }
+
+    private async Task ProcessHandshakePacketAsync(ReadOnlyMemory<byte> body, TransportAddress remoteAddress,
+        CancellationToken cancellationToken)
+    {
+        if (body.Length != 128)
+            return;
+        await HandleResponderHandshakeAsync(body.ToArray(), cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task ProcessSessionSetupRequestAsync(ReadOnlyMemory<byte> body, TransportAddress remoteAddress,
+        CancellationToken cancellationToken)
+    {
+        if (!IsCryptoSessionLeader())
+            return;
+        if (body.Length != 16)
+            return;
+        var peerGuid = new Guid(body.Span);
+        var expected = CompressedNetworkId.FromShortString(chat.PeerNetworkIdShort.Trim()).Value;
+        if (peerGuid != expected)
+            return;
+
+        await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureLeaderCryptoSessionCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _sessionSetup.Release();
+        }
     }
 
     private List<TransportAddress> BuildOrderedDirectPeerAddresses()
@@ -1115,14 +1327,15 @@ public sealed class ChatP2pSession : IAsyncDisposable
                 return;
             _ = _cryptoSessionCache.GetSession(chat.Id, () => hs.Session);
             _messenger =
-                new MessengerService(_prefixed!, WaitForCryptoSessionAsync, CreateMessengerOptions(), OnDecryptFailureAsync);
+                new MessengerService(SendCipherAsync, WaitForCryptoSessionAsync, CreateMessengerOptions(),
+                    OnDecryptFailureAsync);
+            _messenger.GotData += OnMessengerGotData;
             _handshakeWeInitiated = true;
             ms = _messenger;
         }
 
         await ms.StartAsync(cancellationToken).ConfigureAwait(false);
         Console.WriteLine("messenger started (leader)");
-        StartIncomingReaderIfNeeded();
     }
 
     private async Task EnsureSessionAsInitiatorAsync(CancellationToken cancellationToken)
@@ -1208,86 +1421,19 @@ public sealed class ChatP2pSession : IAsyncDisposable
             if (!TryGetCryptoSession(out _) || _messenger != null)
                 return;
             _messenger =
-                new MessengerService(_prefixed!, WaitForCryptoSessionAsync, CreateMessengerOptions(), OnDecryptFailureAsync);
+                new MessengerService(SendCipherAsync, WaitForCryptoSessionAsync, CreateMessengerOptions(),
+                    OnDecryptFailureAsync);
+            _messenger.GotData += OnMessengerGotData;
             created = _messenger;
         }
 
         await created.StartAsync(cancellationToken).ConfigureAwait(false);
         Console.WriteLine($"messenger started ({(_handshakeWeInitiated ? "leader" : "follower")})");
-        StartIncomingReaderIfNeeded();
     }
 
     private MessengerOptions CreateMessengerOptions()
     {
         return new MessengerOptions { MaxBinaryMessageBytes = _media.MaxMessengerBinaryBytes };
-    }
-
-    private async Task TransportReceiveLoopAsync(CancellationToken cancellationToken)
-    {
-        var layer = _transportLayer;
-        if (layer == null)
-            return;
-
-        await foreach (var msg in layer.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-            try
-            {
-                var buf = msg.Payload.ToArray();
-                if (buf.Length == 0)
-                    continue;
-
-                switch (buf[0])
-                {
-                    case ChatInviteCodec.FrameChatInvite:
-                        await IncomingChatInviteHandler.TryAcceptAsync(buf, auth, repo,
-                            async (payload, dest, ct) =>
-                            {
-                                await ResolveTransportForAddress(dest).SendAsync(payload, dest, ct)
-                                    .ConfigureAwait(false);
-                            }, msg.RemoteAddress, cancellationToken).ConfigureAwait(false);
-                        continue;
-                    case FrameHandshake when buf.Length == 129:
-                    {
-                        var handshake = new byte[128];
-                        Buffer.BlockCopy(buf, 1, handshake, 0, 128);
-                        await HandleResponderHandshakeAsync(handshake, cancellationToken).ConfigureAwait(false);
-                        continue;
-                    }
-                    case FrameSessionSetupRequest when buf.Length == 17:
-                    {
-                        if (!IsCryptoSessionLeader())
-                            continue;
-                        var peerGuid = new Guid(buf.AsSpan(1, 16));
-                        var expected = CompressedNetworkId.FromShortString(chat.PeerNetworkIdShort.Trim()).Value;
-                        if (peerGuid != expected)
-                            continue;
-                        await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
-                        try
-                        {
-                            await EnsureLeaderCryptoSessionCoreAsync(cancellationToken).ConfigureAwait(false);
-                        }
-                        finally
-                        {
-                            _sessionSetup.Release();
-                        }
-
-                        continue;
-                    }
-                }
-
-                if (buf[0] != FrameCipher || buf.Length <= 1)
-                    continue;
-
-                var inner = new byte[buf.Length - 1];
-                Buffer.BlockCopy(buf, 1, inner, 0, inner.Length);
-                await _bridge.Writer
-                    .WriteAsync(new TransportReceiveMessage(inner, msg.RemoteAddress), cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // ignore 
-                continue;
-            }
     }
 
     private async Task HandleResponderHandshakeAsync(byte[] handshakePacket, CancellationToken cancellationToken)
@@ -1313,8 +1459,9 @@ public sealed class ChatP2pSession : IAsyncDisposable
                     () => P2PCrypto.CreateSession(localPrivate, handshakePacket));
 
                 _messenger ??=
-                    new MessengerService(_prefixed!, WaitForCryptoSessionAsync, CreateMessengerOptions(),
+                    new MessengerService(SendCipherAsync, WaitForCryptoSessionAsync, CreateMessengerOptions(),
                         OnDecryptFailureAsync);
+                _messenger.GotData += OnMessengerGotData;
                 _handshakeWeInitiated = false;
                 followerSignal = _followerHandshakeTcs;
                 _followerHandshakeTcs = null;
@@ -1325,7 +1472,6 @@ public sealed class ChatP2pSession : IAsyncDisposable
             {
                 await created.StartAsync(cancellationToken).ConfigureAwait(false);
                 Console.WriteLine("messenger started (follower)");
-                StartIncomingReaderIfNeeded();
             }
 
             followerSignal?.TrySetResult(true);
@@ -1336,143 +1482,22 @@ public sealed class ChatP2pSession : IAsyncDisposable
         }
     }
 
-    private void StartIncomingReaderIfNeeded()
-    {
-        lock (_sync)
-        {
-            if (_incomingStarted || _messenger == null)
-                return;
-            _incomingStarted = true;
-        }
-
-        _incomingTask = Task.Run(() => IncomingLoopAsync(_cts!.Token));
-    }
-
-    private async Task IncomingLoopAsync(CancellationToken cancellationToken)
-    {
-        MessengerService? m;
-        lock (_sync)
-        {
-            m = _messenger;
-        }
-
-        if (m == null)
-            return;
-
-        try
-        {
-            await foreach (var incoming in m.Incoming.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-            {
-                var shouldNotify = false;
-                var payload = incoming.Payload.ToArray();
-                if (ChatWireCodec.TryParse(payload, out var wire) && wire != null)
-                {
-                    switch (wire)
-                    {
-                        case ChatWireText t:
-                            if (!TryHandleSessionCryptoProbeText(t.Text, cancellationToken))
-                            {
-                                _ = await repo.AddMessageAsync(chat.Id, false, t.Text).ConfigureAwait(false);
-                                shouldNotify = true;
-                            }
-
-                            break;
-                        case ChatWireImage img:
-                            _ = await repo.AddImageMessageAsync(chat.Id, false, img.MimeType, img.ImageBytes)
-                                .ConfigureAwait(false);
-                            shouldNotify = true;
-                            break;
-                        case ChatWireFile f:
-                            try
-                            {
-                                _media.ValidateDocumentMime(f.MimeType);
-                                _media.ValidateDocumentSize(f.FileBytes.Length);
-                                _ = await repo.AddFileMessageAsync(chat.Id, false, f.FileName, f.MimeType, f.FileBytes)
-                                    .ConfigureAwait(false);
-                            }
-                            catch
-                            {
-                                _ = await repo.AddMessageAsync(chat.Id, false,
-                                        "[Входящий файл отклонён: неподдерживаемый тип или размер.]")
-                                    .ConfigureAwait(false);
-                            }
-
-                            shouldNotify = true;
-                            break;
-                    }
-                }
-                else if (ChatWireCodec.LooksLikeFramedWire(payload))
-                {
-                    _ = await repo.AddMessageAsync(chat.Id, false,
-                            "[Входящее сообщение не распознано. Обновите клиент.]")
-                        .ConfigureAwait(false);
-                    shouldNotify = true;
-                }
-                else
-                {
-                    var text = Encoding.UTF8.GetString(payload);
-                    if (!TryHandleSessionCryptoProbeText(text, cancellationToken))
-                    {
-                        _ = await repo.AddMessageAsync(chat.Id, false, text).ConfigureAwait(false);
-                        shouldNotify = true;
-                    }
-                }
-
-                if (shouldNotify)
-                    RaiseMessagesChanged();
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // expected
-        }
-    }
-
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
         UnhookPresenceAndClearPending();
+        UnsubscribeFromTransceivers();
 
         if (_cts != null)
             await _cts.CancelAsync();
 
-        if (_transportLayer != null)
-            await _transportLayer.StopAsync(cancellationToken).ConfigureAwait(false);
-
         if (_messenger != null)
+        {
+            _messenger.GotData -= OnMessengerGotData;
             await _messenger.StopAsync(cancellationToken).ConfigureAwait(false);
+        }
 
-        if (_transportReceiveTask != null)
-            try
-            {
-                await _transportReceiveTask.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // ignore
-            }
-
-        if (_incomingTask != null)
-            try
-            {
-                await _incomingTask.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // ignore
-            }
-
-        if (_udp != null)
-            await _udp.StopAsync(cancellationToken).ConfigureAwait(false);
-
-        if (bluetoothTransport != null)
-            await bluetoothTransport.StopAsync(cancellationToken).ConfigureAwait(false);
-
-        _bridge.Writer.TryComplete();
         _cts?.Dispose();
         _cts = null;
-        _udp = null;
-        _prefixed = null;
-        _transportLayer = null;
         lock (_sync)
         {
             _cryptoProbeOkAwaiter?.TrySetCanceled();
@@ -1485,35 +1510,6 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
         _messenger = null;
         ClearCryptoSession();
-        _transportReceiveTask = null;
-        _incomingTask = null;
-        _incomingStarted = false;
-    }
-
-    private IReadOnlyList<ITransport> GetInboundTransports()
-    {
-        var list = new List<ITransport>();
-        if (_udp != null && IsTransportEnabled(TransportKind.Udp))
-            list.Add(_udp);
-        if (bluetoothTransport != null && IsTransportEnabled(TransportKind.Bluetooth))
-            list.Add(bluetoothTransport);
-        return list;
-    }
-
-    private ITransport ResolveTransportForAddress(TransportAddress destination)
-    {
-        return ResolveTransportForAddressOrNull(destination) ??
-               throw new InvalidOperationException($"Transport is not started for {destination.Kind}.");
-    }
-
-    private ITransport? ResolveTransportForAddressOrNull(TransportAddress destination)
-    {
-        return destination.Kind switch
-        {
-            TransportKind.Udp when IsTransportEnabled(TransportKind.Udp) => _udp,
-            TransportKind.Bluetooth when IsTransportEnabled(TransportKind.Bluetooth) => bluetoothTransport,
-            _ => null
-        };
     }
 
     private bool IsTransportEnabled(TransportKind kind)
@@ -1526,37 +1522,4 @@ public sealed class ChatP2pSession : IAsyncDisposable
         };
     }
 
-    private sealed class PrefixedCipherTransport(
-        Channel<TransportReceiveMessage> bridge,
-        Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> sendRaw)
-        : ITransport
-    {
-        public TransportKind Kind => TransportKind.Udp;
-
-        public ChannelReader<TransportReceiveMessage> Inbound => bridge.Reader;
-
-        public ValueTask StartAsync(CancellationToken cancellationToken = default)
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        public ValueTask StopAsync(CancellationToken cancellationToken = default)
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, TransportAddress destination,
-            CancellationToken cancellationToken = default)
-        {
-            var buf = new byte[payload.Length + 1];
-            buf[0] = FrameCipher;
-            payload.CopyTo(buf.AsMemory(1));
-            await sendRaw(buf.AsMemory(0, buf.Length), destination, cancellationToken).ConfigureAwait(false);
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            return ValueTask.CompletedTask;
-        }
-    }
 }

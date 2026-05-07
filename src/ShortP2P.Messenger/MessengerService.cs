@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.Security.Cryptography;
-using System.Threading.Channels;
 using ShortP2P.Crypto;
 using ShortP2P.Transport.Abstractions;
 
@@ -13,7 +12,8 @@ namespace ShortP2P.Messenger;
 ///     и собирает входящие фрагменты обратно. Поддерживает квитанции доставки, дедупликацию по id сообщения
 ///     и отбрасывание пакетов с id исходящих сообщений этого клиента (эхо на тот же ключ сессии).
 /// </summary>
-public sealed class MessengerService(ITransport transport,
+public sealed class MessengerService(
+    Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> sendCipherAsync,
     Func<CancellationToken, ValueTask<P2PSession>> sessionProvider,
     MessengerOptions? options = null,
     Func<ValueTask>? onDecryptFailure = null)
@@ -22,22 +22,20 @@ public sealed class MessengerService(ITransport transport,
     private const int MaxTrackedDeliveredIds = 8192;
     private const int MaxTrackedOutboundIds = 8192;
 
-    private readonly Channel<IncomingBinaryMessage> _incoming = Channel.CreateUnbounded<IncomingBinaryMessage>();
     private readonly MessengerOptions _options = options ?? new MessengerOptions();
     private readonly Dictionary<Guid, Reassembly> _pending = new();
     private readonly Func<CancellationToken, ValueTask<P2PSession>> _sessionProvider =
         sessionProvider ?? throw new ArgumentNullException(nameof(sessionProvider));
     private readonly object _sync = new();
-    private readonly ITransport _transport = transport ?? throw new ArgumentNullException(nameof(transport));
+    private readonly Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> _sendCipherAsync =
+        sendCipherAsync ?? throw new ArgumentNullException(nameof(sendCipherAsync));
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource> _ackWaiters = new();
     private readonly HashSet<Guid> _deliveredMessageIds = [];
     /// <summary>Идентификаторы сообщений, отправленных этим экземпляром (защита от приёма собственного эха/hairpin).</summary>
     private readonly HashSet<Guid> _ownOutboundMessageIds = [];
 
     private CancellationTokenSource? _cts;
-    private Task? _receiveTask;
-
-    public ChannelReader<IncomingBinaryMessage> Incoming => _incoming.Reader;
+    public event EventHandler<IncomingBinaryMessage>? GotData;
 
     public ValueTask DisposeAsync()
     {
@@ -46,10 +44,32 @@ public sealed class MessengerService(ITransport transport,
 
     public ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
-        if (_receiveTask != null) return ValueTask.CompletedTask;
+        if (_cts != null) return ValueTask.CompletedTask;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _receiveTask = Task.Run(() => ReceiveLoopAsync(_cts.Token), _cts.Token);
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    ///     Передаёт уже снятый с префикса 0x02 cipher payload в очередь обработки.
+    ///     Вызывается из подписки на <c>MessageTransceiver.GotData</c>.
+    /// </summary>
+    public bool TryAcceptCipher(TransportReceiveMessage message)
+    {
+        var token = _cts?.Token ?? CancellationToken.None;
+        if (token.IsCancellationRequested)
+            return false;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ProcessIncomingPacketAsync(message, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // expected on stop
+            }
+        }, token);
+        return true;
     }
 
     public async ValueTask SendBinaryAsync(byte[] data, TransportAddress destination,
@@ -134,7 +154,7 @@ public sealed class MessengerService(ITransport transport,
                 Buffer.BlockCopy(data, offset, sliceBytes, 0, len);
             var plain = ChunkCodec.BuildChunk(messageId, i, totalChunks, sliceBytes);
             var encrypted = session.Encrypt(plain);
-            await _transport.SendAsync(encrypted, destination, cancellationToken).ConfigureAwait(false);
+            await _sendCipherAsync(encrypted, destination, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -148,26 +168,6 @@ public sealed class MessengerService(ITransport transport,
         {
             return $"{destination.Kind}";
         }
-    }
-
-    private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            while (await _transport.Inbound.WaitToReadAsync(CancellationToken.None).ConfigureAwait(false))
-            {
-                while (_transport.Inbound.TryRead(out var msg))
-                {
-                    if (cancellationToken.IsCancellationRequested)
-                        return;
-
-                    await ProcessIncomingPacketAsync(msg, cancellationToken).ConfigureAwait(false);
-                    await Task.Delay(100).ConfigureAwait(false);
-                }
-            }
-        }
-
-        _incoming.Writer.TryComplete();
     }
 
     private async Task ProcessIncomingPacketAsync(TransportReceiveMessage msg, CancellationToken cancellationToken)
@@ -242,7 +242,7 @@ public sealed class MessengerService(ITransport transport,
 
             var shouldEnqueue = TrackDeliverOnce(messageId);
             if (shouldEnqueue)
-                _incoming.Writer.TryWrite(new IncomingBinaryMessage(buffer, msg.RemoteAddress));
+                GotData?.Invoke(this, new IncomingBinaryMessage(buffer, msg.RemoteAddress));
         }
 
         _ = SendDeliveryAckAsync(messageId, msg.RemoteAddress, cancellationToken);
@@ -265,7 +265,7 @@ public sealed class MessengerService(ITransport transport,
             var session = await _sessionProvider(cancellationToken).ConfigureAwait(false);
             var plain = DeliveryAckCodec.ToBytes(messageId);
             var encrypted = session.Encrypt(plain);
-            await _transport.SendAsync(encrypted, replyTo, CancellationToken.None).ConfigureAwait(false);
+            await _sendCipherAsync(encrypted, replyTo, CancellationToken.None).ConfigureAwait(false);
         }
         catch
         {
@@ -323,17 +323,6 @@ public sealed class MessengerService(ITransport transport,
             _cts.Cancel();
         }
 
-        if (_receiveTask != null)
-            try
-            {
-                await _receiveTask.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // ignore
-            }
-
-        _receiveTask = null;
         _cts.Dispose();
         _cts = null;
 
