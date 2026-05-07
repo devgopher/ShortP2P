@@ -13,7 +13,9 @@ namespace ShortP2P.Messenger;
 ///     и собирает входящие фрагменты обратно. Поддерживает квитанции доставки, дедупликацию по id сообщения
 ///     и отбрасывание пакетов с id исходящих сообщений этого клиента (эхо на тот же ключ сессии).
 /// </summary>
-public sealed class MessengerService(ITransport transport, P2PSession session, MessengerOptions? options = null,
+public sealed class MessengerService(ITransport transport,
+    Func<CancellationToken, ValueTask<P2PSession>> sessionProvider,
+    MessengerOptions? options = null,
     Func<ValueTask>? onDecryptFailure = null)
     : IAsyncDisposable
 {
@@ -23,7 +25,8 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
     private readonly Channel<IncomingBinaryMessage> _incoming = Channel.CreateUnbounded<IncomingBinaryMessage>();
     private readonly MessengerOptions _options = options ?? new MessengerOptions();
     private readonly Dictionary<Guid, Reassembly> _pending = new();
-    private readonly P2PSession _session = session ?? throw new ArgumentNullException(nameof(session));
+    private readonly Func<CancellationToken, ValueTask<P2PSession>> _sessionProvider =
+        sessionProvider ?? throw new ArgumentNullException(nameof(sessionProvider));
     private readonly object _sync = new();
     private readonly ITransport _transport = transport ?? throw new ArgumentNullException(nameof(transport));
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource> _ackWaiters = new();
@@ -109,7 +112,8 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
             throw new ArgumentException($"Message exceeds MaxBinaryMessageBytes ({_options.MaxBinaryMessageBytes}).",
                 nameof(data));
 
-        var maxPayload = ChunkCodec.MaxPayloadPerChunk(_session);
+        var session = await _sessionProvider(cancellationToken).ConfigureAwait(false);
+        var maxPayload = ChunkCodec.MaxPayloadPerChunk(session);
         var totalChunks = data.Length == 0 ? 1 : (data.Length + maxPayload - 1) / maxPayload;
 
         lock (_sync)
@@ -129,7 +133,7 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
             if (len > 0)
                 Buffer.BlockCopy(data, offset, sliceBytes, 0, len);
             var plain = ChunkCodec.BuildChunk(messageId, i, totalChunks, sliceBytes);
-            var encrypted = _session.Encrypt(plain);
+            var encrypted = session.Encrypt(plain);
             await _transport.SendAsync(encrypted, destination, cancellationToken).ConfigureAwait(false);
         }
     }
@@ -157,7 +161,7 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
                     if (cancellationToken.IsCancellationRequested)
                         return;
 
-                    ProcessIncomingPacket(msg);
+                    await ProcessIncomingPacketAsync(msg, cancellationToken).ConfigureAwait(false);
                     await Task.Delay(100).ConfigureAwait(false);
                 }
             }
@@ -166,12 +170,13 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
         _incoming.Writer.TryComplete();
     }
 
-    private void ProcessIncomingPacket(TransportReceiveMessage msg)
+    private async Task ProcessIncomingPacketAsync(TransportReceiveMessage msg, CancellationToken cancellationToken)
     {
+        var session = await _sessionProvider(cancellationToken).ConfigureAwait(false);
         byte[] decrypted;
         try
         {
-            decrypted = _session.Decrypt(msg.Payload.ToArray());
+            decrypted = session.Decrypt(msg.Payload.ToArray());
         }
         catch (CryptographicException)
         {
@@ -186,16 +191,7 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
             return;
         }
 
-        Guid messageId;
-        int chunkIndex;
-        int totalChunks;
-        byte[] payloadBytes;
-        try
-        {
-            ChunkCodec.ParseChunk(decrypted, out messageId, out chunkIndex, out totalChunks, out var payload);
-            payloadBytes = payload.ToArray();
-        }
-        catch (CryptographicException)
+        if (!TryParseChunk(decrypted, out var messageId, out var chunkIndex, out var totalChunks, out var payloadBytes))
         {
             return;
         }
@@ -249,7 +245,7 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
                 _incoming.Writer.TryWrite(new IncomingBinaryMessage(buffer, msg.RemoteAddress));
         }
 
-        _ = SendDeliveryAckAsync(messageId, msg.RemoteAddress);
+        _ = SendDeliveryAckAsync(messageId, msg.RemoteAddress, cancellationToken);
     }
 
     private bool TrackDeliverOnce(Guid messageId)
@@ -262,17 +258,37 @@ public sealed class MessengerService(ITransport transport, P2PSession session, M
         return true;
     }
 
-    private async Task SendDeliveryAckAsync(Guid messageId, TransportAddress replyTo)
+    private async Task SendDeliveryAckAsync(Guid messageId, TransportAddress replyTo, CancellationToken cancellationToken)
     {
         try
         {
+            var session = await _sessionProvider(cancellationToken).ConfigureAwait(false);
             var plain = DeliveryAckCodec.ToBytes(messageId);
-            var encrypted = _session.Encrypt(plain);
+            var encrypted = session.Encrypt(plain);
             await _transport.SendAsync(encrypted, replyTo, CancellationToken.None).ConfigureAwait(false);
         }
         catch
         {
             // ignore: доставка ack best-effort
+        }
+    }
+
+    private static bool TryParseChunk(byte[] decrypted, out Guid messageId, out int chunkIndex, out int totalChunks,
+        out byte[] payloadBytes)
+    {
+        try
+        {
+            ChunkCodec.ParseChunk(decrypted, out messageId, out chunkIndex, out totalChunks, out var payload);
+            payloadBytes = payload.ToArray();
+            return true;
+        }
+        catch (CryptographicException)
+        {
+            messageId = Guid.Empty;
+            chunkIndex = 0;
+            totalChunks = 0;
+            payloadBytes = [];
+            return false;
         }
     }
 
