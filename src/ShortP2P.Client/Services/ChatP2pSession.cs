@@ -791,8 +791,8 @@ public sealed class ChatP2pSession : IAsyncDisposable
             async ct =>
             {
                 await EnsureSessionAsInitiatorAsync(ct).ConfigureAwait(false);
-                if (_handshakeWeInitiated && !_cryptoProbeRoundTripOk)
-                    _ = TryConfirmCryptoSessionAsync(ct);
+                 if (_handshakeWeInitiated && !_cryptoProbeRoundTripOk)
+                     _ = TryConfirmCryptoSessionAsync(ct);
 
                 if (string.IsNullOrEmpty(chat.RelayRouteBlob))
                 {
@@ -1370,7 +1370,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
             if (TryGetCryptoSession(out _) && _messenger != null)
                 return;
 
-            if (_followerHandshakeTcs != null && !_followerHandshakeTcs.Task.IsCompleted)
+            if (_followerHandshakeTcs is { Task.IsCompleted: false })
             {
                 // Single-flight: повторные вызовы просто ждут уже существующий handshake.
                 waitHandshake = _followerHandshakeTcs;
@@ -1404,7 +1404,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
         try
         {
-            await waitHandshake.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken).ConfigureAwait(false);
+            await waitHandshake.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
         }
         finally
         {

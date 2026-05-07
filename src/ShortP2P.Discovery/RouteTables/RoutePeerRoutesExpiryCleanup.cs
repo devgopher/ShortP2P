@@ -44,10 +44,6 @@ public static class RoutePeerRoutesExpiryCleanup
                     var db = scope.ServiceProvider.GetRequiredService<RouteDbContext>();
                     await RunOnceAsync(db, options.StaleAfter, cancellationToken).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "Route peer address expiry cleanup failed");
