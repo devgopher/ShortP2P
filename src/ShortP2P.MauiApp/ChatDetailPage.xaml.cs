@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.ApplicationModel.DataTransfer;
@@ -46,9 +47,14 @@ public partial class ChatDetailPage : ContentPage
     private readonly UserP2pRuntime _p2p;
     private readonly ChatMediaOptions _media;
     private readonly ILogger<ChatDetailPage> _logger;
+    private const int MessagesPageSize = 10;
+    private readonly ObservableCollection<MessageRowVm> _messageItems = [];
+    private readonly List<ChatMessageEntity> _loadedRows = [];
     private ChatP2pSession? _p2pSession;
     private string? _peerNetworkIdShort;
     private IDispatcherTimer? _presenceRefreshTimer;
+    private bool _hasMoreRows = true;
+    private bool _isLoadingRows;
 
     public ChatDetailPage(AuthService auth, ChatRepository repo, UserP2pRuntime p2p, ChatMediaOptions media,
         ILogger<ChatDetailPage> logger)
@@ -59,6 +65,7 @@ public partial class ChatDetailPage : ContentPage
         _p2p = p2p;
         _media = media;
         _logger = logger;
+        MessagesCollection.ItemsSource = _messageItems;
     }
 
     public int ChatId { get; set; }
@@ -151,92 +158,117 @@ public partial class ChatDetailPage : ContentPage
 
     private async Task ReloadMessagesAsync()
     {
-        var rows = (await _repo.ListMessagesAsync(ChatId).ConfigureAwait(true))
-            .OrderByDescending(m => m.SentUtcTicks)
-            .ThenByDescending(m => m.Id);
-        var list = new List<MessageRowVm>();
-        foreach (var m in rows)
-        {
-            var sender = m.Outgoing ? "You" : Title ?? "Peer";
-            var peerNick = Title ?? "Peer";
-            var whoPrefix = m.Outgoing ? "[Я:]" : $"[{peerNick}:]";
-            var color = m.Outgoing ? Colors.DodgerBlue : GetPaletteColor(sender);
-            var sentLocal = new DateTimeOffset(m.SentUtcTicks, TimeSpan.Zero).ToLocalTime();
-            var ts = sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture);
-            var ds = (MessageDeliveryStatus)m.DeliveryStatus;
-            if (m.Outgoing && ds == MessageDeliveryStatus.NotApplicable)
-                ds = MessageDeliveryStatus.Delivered;
-            var (glyph, gColor, show) = DeliveryUiFor(ds, m.Outgoing);
+        _loadedRows.Clear();
+        _messageItems.Clear();
+        _hasMoreRows = true;
+        await LoadNextMessagesPageAsync().ConfigureAwait(true);
+    }
 
-            if (m.PayloadKind == (int)ChatPayloadKind.File && m.ImageBlob is { Length: > 0 } docBlob)
+    private async Task LoadNextMessagesPageAsync()
+    {
+        if (_isLoadingRows || !_hasMoreRows)
+            return;
+        _isLoadingRows = true;
+        try
+        {
+            var page = await _repo.ListMessagesPageDescAsync(ChatId, _loadedRows.Count, MessagesPageSize)
+                .ConfigureAwait(true);
+            _hasMoreRows = page.Count == MessagesPageSize;
+            _loadedRows.AddRange(page);
+            foreach (var m in page)
             {
-                var kb = (docBlob.Length + 1023) / 1024;
-                var name = string.IsNullOrEmpty(m.Text) ? "file" : m.Text;
-                var kindCaption = m.MimeType?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true
-                    ? "видео"
-                    : "документ";
-                var fileBody = new FormattedString();
-                fileBody.Spans.Add(new Span
-                {
-                    Text = $"{name} · {kb} КБ · нажмите строку — ",
-                    TextColor = color,
-                });
-                fileBody.Spans.Add(new Span { Text = "Скачать", TextColor = Colors.DodgerBlue });
-                list.Add(new MessageRowVm
-                {
-                    CaptionLine = $"{whoPrefix} [{ts}] · {kindCaption}",
-                    TextBody = "",
-                    FileBodyFormatted = fileBody,
-                    ShowTextBody = false,
-                    IsImage = false,
-                    IsFile = true,
-                    MessageId = m.Id,
-                    ImagePreview = null,
-                    MessageColor = color,
-                    ShowDelivery = show,
-                    DeliveryGlyph = glyph,
-                    DeliveryGlyphColor = gColor,
-                });
-            }
-            else if (m.PayloadKind == (int)ChatPayloadKind.Image && m.ImageBlob is { Length: > 0 } blob)
-            {
-                var kb = (blob.Length + 1023) / 1024;
-                var mimeShort = string.IsNullOrEmpty(m.MimeType) ? "image" : m.MimeType.Replace("image/", "");
-                list.Add(new MessageRowVm
-                {
-                    CaptionLine = $"{whoPrefix} [{ts}] · {mimeShort} · {kb} КБ",
-                    TextBody = "",
-                    ShowTextBody = false,
-                    IsImage = true,
-                    IsFile = false,
-                    MessageId = 0,
-                    ImagePreview = ImageSource.FromStream(() => new MemoryStream(blob)),
-                    MessageColor = color,
-                    ShowDelivery = show,
-                    DeliveryGlyph = glyph,
-                    DeliveryGlyphColor = gColor,
-                });
-            }
-            else
-            {
-                list.Add(new MessageRowVm
-                {
-                    CaptionLine = $"{whoPrefix} [{ts}]",
-                    TextBody = m.Text,
-                    ShowTextBody = true,
-                    IsImage = false,
-                    IsFile = false,
-                    MessageId = 0,
-                    ImagePreview = null,
-                    MessageColor = color,
-                    ShowDelivery = show,
-                    DeliveryGlyph = glyph,
-                    DeliveryGlyphColor = gColor,
-                });
+                _messageItems.Add(BuildMessageRowVm(m));
             }
         }
+        finally
+        {
+            _isLoadingRows = false;
+        }
+    }
 
-        MessagesCollection.ItemsSource = list;
+    private MessageRowVm BuildMessageRowVm(ChatMessageEntity m)
+    {
+        var sender = m.Outgoing ? "You" : Title ?? "Peer";
+        var peerNick = Title ?? "Peer";
+        var whoPrefix = m.Outgoing ? "[Я:]" : $"[{peerNick}:]";
+        var color = m.Outgoing ? Colors.DodgerBlue : GetPaletteColor(sender);
+        var sentLocal = new DateTimeOffset(m.SentUtcTicks, TimeSpan.Zero).ToLocalTime();
+        var ts = sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture);
+        var ds = (MessageDeliveryStatus)m.DeliveryStatus;
+        if (m.Outgoing && ds == MessageDeliveryStatus.NotApplicable)
+            ds = MessageDeliveryStatus.Delivered;
+        var (glyph, gColor, show) = DeliveryUiFor(ds, m.Outgoing);
+
+        if (m.PayloadKind == (int)ChatPayloadKind.File && m.ImageBlob is { Length: > 0 } docBlob)
+        {
+            var kb = (docBlob.Length + 1023) / 1024;
+            var name = string.IsNullOrEmpty(m.Text) ? "file" : m.Text;
+            var kindCaption = m.MimeType?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true
+                ? "видео"
+                : "документ";
+            var fileBody = new FormattedString();
+            fileBody.Spans.Add(new Span
+            {
+                Text = $"{name} · {kb} КБ · нажмите строку — ",
+                TextColor = color,
+            });
+            fileBody.Spans.Add(new Span { Text = "Скачать", TextColor = Colors.DodgerBlue });
+            return new MessageRowVm
+            {
+                CaptionLine = $"{whoPrefix} [{ts}] · {kindCaption}",
+                TextBody = "",
+                FileBodyFormatted = fileBody,
+                ShowTextBody = false,
+                IsImage = false,
+                IsFile = true,
+                MessageId = m.Id,
+                ImagePreview = null,
+                MessageColor = color,
+                ShowDelivery = show,
+                DeliveryGlyph = glyph,
+                DeliveryGlyphColor = gColor,
+            };
+        }
+
+        if (m.PayloadKind == (int)ChatPayloadKind.Image && m.ImageBlob is { Length: > 0 } blob)
+        {
+            var kb = (blob.Length + 1023) / 1024;
+            var mimeShort = string.IsNullOrEmpty(m.MimeType) ? "image" : m.MimeType.Replace("image/", "");
+            return new MessageRowVm
+            {
+                CaptionLine = $"{whoPrefix} [{ts}] · {mimeShort} · {kb} КБ",
+                TextBody = "",
+                ShowTextBody = false,
+                IsImage = true,
+                IsFile = false,
+                MessageId = 0,
+                ImagePreview = ImageSource.FromStream(() => new MemoryStream(blob)),
+                MessageColor = color,
+                ShowDelivery = show,
+                DeliveryGlyph = glyph,
+                DeliveryGlyphColor = gColor,
+            };
+        }
+
+        return new MessageRowVm
+        {
+            CaptionLine = $"{whoPrefix} [{ts}]",
+            TextBody = m.Text,
+            ShowTextBody = true,
+            IsImage = false,
+            IsFile = false,
+            MessageId = 0,
+            ImagePreview = null,
+            MessageColor = color,
+            ShowDelivery = show,
+            DeliveryGlyph = glyph,
+            DeliveryGlyphColor = gColor,
+        };
+    }
+
+    private async void OnMessagesRemainingItemsThresholdReached(object? sender, EventArgs e)
+    {
+        await LoadNextMessagesPageAsync().ConfigureAwait(true);
     }
 
     private async void OnSendClicked(object? sender, EventArgs e)

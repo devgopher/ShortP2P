@@ -1,6 +1,7 @@
 using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using NAudio.Vorbis;
 using NAudio.Wave;
 using Microsoft.Extensions.Logging;
@@ -20,6 +21,7 @@ public sealed class ChatForm : Form
     private const string FileDownloadHintPrefix = "Двойной щелчок — ";
     private const string FileDownloadHintAction = "Скачать";
     private static readonly Color FileDownloadActionColor = Color.FromArgb(0, 102, 204);
+    private const int MessagesPageSize = 15;
 
     private readonly ChatEntity _chat;
     private readonly UserEntity _user;
@@ -113,6 +115,9 @@ public sealed class ChatForm : Form
     private readonly ToolTip _buttonTooltips = new() { ShowAlways = true };
     private ChatP2pSession? _p2PSession;
     private bool _pairingPromptShown;
+    private readonly List<ChatMessageEntity> _loadedRows = [];
+    private bool _hasMoreRows = true;
+    private bool _isLoadingRows;
 
     private readonly object _voiceCapLock = new();
     private WaveInEvent? _voiceWaveIn;
@@ -212,6 +217,8 @@ public sealed class ChatForm : Form
         _techPing.Click += async (_, _) => await OnTechPingAsync().ConfigureAwait(true);
         _messages.DrawItem += OnMessagesDrawItem;
         _messages.MeasureItem += OnMessagesMeasureItem;
+        _messages.MouseWheel += OnMessagesMouseWheel;
+        _messages.KeyUp += OnMessagesKeyUp;
         _messages.MouseClick += OnMessagesMouseClick;
         _messages.DoubleClick += OnMessageDoubleClick;
         Shown += async (_, _) => await OnShownAsync().ConfigureAwait(true);
@@ -272,9 +279,24 @@ public sealed class ChatForm : Form
 
     private async Task ReloadMessagesAsync()
     {
+        _loadedRows.Clear();
+        _hasMoreRows = true;
+        await LoadNextMessagesPageAsync().ConfigureAwait(true);
+    }
+
+    private async Task LoadNextMessagesPageAsync()
+    {
+        if (_isLoadingRows || !_hasMoreRows)
+            return;
+        _isLoadingRows = true;
         try
         {
-            var rows = (await _repo.ListMessagesAsync(_chat.Id).ConfigureAwait(true)).OrderByDescending(m => m.SentUtcTicks).ToList();
+            var page = await _repo.ListMessagesPageDescAsync(_chat.Id, _loadedRows.Count, MessagesPageSize)
+                .ConfigureAwait(true);
+            _hasMoreRows = page.Count == MessagesPageSize;
+            _loadedRows.AddRange(page);
+
+            var rows = _loadedRows;
             if (!IsHandleCreated || IsDisposed)
                 return;
             _messages.BeginUpdate();
@@ -287,51 +309,7 @@ public sealed class ChatForm : Form
             _messages.Items.Clear();
             foreach (var m in rows)
             {
-                var sender = m.Outgoing ? "You" : _chat.PeerNickname;
-                var whoPrefix = m.Outgoing ? "[Я:]" : $"[{_chat.PeerNickname}:]";
-                var color = m.Outgoing ? Color.DodgerBlue : GetPaletteColor(sender);
-                var sentLocal = new DateTimeOffset(m.SentUtcTicks, TimeSpan.Zero).ToLocalTime();
-                var ts = sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture);
-                var ds = (MessageDeliveryStatus)m.DeliveryStatus;
-                if (m.Outgoing && ds == MessageDeliveryStatus.NotApplicable)
-                    ds = MessageDeliveryStatus.Delivered;
-
-                if (m.PayloadKind == (int)ChatPayloadKind.File && m.ImageBlob is { Length: > 0 } voiceBlob &&
-                    string.Equals(m.MimeType, VoiceRecordHelper.VoiceMessageMime, StringComparison.OrdinalIgnoreCase))
-                {
-                    var kb = (voiceBlob.Length + 1023) / 1024;
-                    var caption = $"{whoPrefix} [{ts}] · голосовое · Ogg Opus · ~6 kbps mono · {kb} КБ";
-                    _messages.Items.Add(new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.Voice, voiceBlob,
-                        VoiceRecordHelper.VoiceFileName));
-                }
-                else if (m.PayloadKind == (int)ChatPayloadKind.File && m.ImageBlob is { Length: > 0 } fileBlob)
-                {
-                    var kb = (fileBlob.Length + 1023) / 1024;
-                    var name = string.IsNullOrEmpty(m.Text) ? "file" : m.Text;
-                    if (m.MimeType?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true)
-                    {
-                        var caption = $"{whoPrefix} [{ts}] · видео · {name} · {kb} КБ";
-                        _messages.Items.Add(new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.Video, fileBlob, name));
-                    }
-                    else
-                    {
-                        var caption =
-                            $"{whoPrefix} [{ts}] · документ · {name} · {kb} КБ{FileCaptionNewline}{FileDownloadHintPrefix}{FileDownloadHintAction}";
-                        _messages.Items.Add(new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.File, fileBlob, name));
-                    }
-                }
-                else if (m.PayloadKind == (int)ChatPayloadKind.Image && m.ImageBlob is { Length: > 0 } blob)
-                {
-                    var kb = (blob.Length + 1023) / 1024;
-                    var mimeShort = string.IsNullOrEmpty(m.MimeType) ? "image" : m.MimeType.Replace("image/", "");
-                    var caption = $"{whoPrefix} [{ts}] · {mimeShort} · {kb} КБ";
-                    _messages.Items.Add(new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.Image, blob, null));
-                }
-                else
-                {
-                    var full = $"{whoPrefix} [{ts}] {m.Text}";
-                    _messages.Items.Add(new ChatLine(full, color, m.Outgoing, ds, ChatLineKind.Text, null, null));
-                }
+                _messages.Items.Add(BuildChatLine(m));
             }
             _messages.EndUpdate();
         }
@@ -339,6 +317,74 @@ public sealed class ChatForm : Form
         {
             // expected while closing
         }
+        finally
+        {
+            _isLoadingRows = false;
+        }
+    }
+
+    private ChatLine BuildChatLine(ChatMessageEntity m)
+    {
+        var sender = m.Outgoing ? "You" : _chat.PeerNickname;
+        var whoPrefix = m.Outgoing ? "[Я:]" : $"[{_chat.PeerNickname}:]";
+        var color = m.Outgoing ? Color.DodgerBlue : GetPaletteColor(sender);
+        var sentLocal = new DateTimeOffset(m.SentUtcTicks, TimeSpan.Zero).ToLocalTime();
+        var ts = sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture);
+        var ds = (MessageDeliveryStatus)m.DeliveryStatus;
+        if (m.Outgoing && ds == MessageDeliveryStatus.NotApplicable)
+            ds = MessageDeliveryStatus.Delivered;
+
+        if (m.PayloadKind == (int)ChatPayloadKind.File && m.ImageBlob is { Length: > 0 } voiceBlob &&
+            string.Equals(m.MimeType, VoiceRecordHelper.VoiceMessageMime, StringComparison.OrdinalIgnoreCase))
+        {
+            var kb = (voiceBlob.Length + 1023) / 1024;
+            var caption = $"{whoPrefix} [{ts}] · голосовое · Ogg Opus · ~6 kbps mono · {kb} КБ";
+            return new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.Voice, voiceBlob, VoiceRecordHelper.VoiceFileName);
+        }
+
+        if (m.PayloadKind == (int)ChatPayloadKind.File && m.ImageBlob is { Length: > 0 } fileBlob)
+        {
+            var kb = (fileBlob.Length + 1023) / 1024;
+            var name = string.IsNullOrEmpty(m.Text) ? "file" : m.Text;
+            if (m.MimeType?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                var caption = $"{whoPrefix} [{ts}] · видео · {name} · {kb} КБ";
+                return new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.Video, fileBlob, name);
+            }
+
+            var captionWithHint =
+                $"{whoPrefix} [{ts}] · документ · {name} · {kb} КБ{FileCaptionNewline}{FileDownloadHintPrefix}{FileDownloadHintAction}";
+            return new ChatLine(captionWithHint, color, m.Outgoing, ds, ChatLineKind.File, fileBlob, name);
+        }
+
+        if (m.PayloadKind == (int)ChatPayloadKind.Image && m.ImageBlob is { Length: > 0 } blob)
+        {
+            var kb = (blob.Length + 1023) / 1024;
+            var mimeShort = string.IsNullOrEmpty(m.MimeType) ? "image" : m.MimeType.Replace("image/", "");
+            var caption = $"{whoPrefix} [{ts}] · {mimeShort} · {kb} КБ";
+            return new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.Image, blob, null);
+        }
+
+        var full = $"{whoPrefix} [{ts}] {m.Text}";
+        return new ChatLine(full, color, m.Outgoing, ds, ChatLineKind.Text, null, null);
+    }
+
+    private async void OnMessagesMouseWheel(object? sender, MouseEventArgs e)
+    {
+        if (e.Delta >= 0)
+            return;
+        if (!IsScrolledToBottom(_messages))
+            return;
+        await LoadNextMessagesPageAsync().ConfigureAwait(true);
+    }
+
+    private async void OnMessagesKeyUp(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyCode is not (Keys.PageDown or Keys.Down or Keys.End))
+            return;
+        if (!IsScrolledToBottom(_messages))
+            return;
+        await LoadNextMessagesPageAsync().ConfigureAwait(true);
     }
 
     private async Task OnAttachVideoAsync()
@@ -1325,6 +1371,22 @@ public sealed class ChatForm : Form
         v.ShowDialog(this);
     }
 
+    private static bool IsScrolledToBottom(ListBox listBox)
+    {
+        if (!listBox.IsHandleCreated || listBox.Items.Count == 0)
+            return false;
+
+        var si = new SCROLLINFO
+        {
+            cbSize = (uint)Marshal.SizeOf<SCROLLINFO>(),
+            fMask = SIF_ALL
+        };
+        if (!GetScrollInfo(listBox.Handle, SB_VERT, ref si))
+            return false;
+
+        return si.nPos + (int)si.nPage >= si.nMax;
+    }
+
     private static (string Glyph, Color Color) OutgoingDeliveryDraw(MessageDeliveryStatus status) =>
         status switch
         {
@@ -1395,6 +1457,25 @@ public sealed class ChatForm : Form
             return null;
         }
     }
+
+    private const int SB_VERT = 1;
+    private const uint SIF_ALL = 0x17;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SCROLLINFO
+    {
+        public uint cbSize;
+        public uint fMask;
+        public int nMin;
+        public int nMax;
+        public uint nPage;
+        public int nPos;
+        public int nTrackPos;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetScrollInfo(IntPtr hWnd, int nBar, ref SCROLLINFO lpScrollInfo);
 
     private enum ChatLineKind
     {

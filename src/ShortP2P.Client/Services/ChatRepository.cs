@@ -150,6 +150,21 @@ public sealed class ChatRepository
             .ToListAsync();
     }
 
+    public async Task<IReadOnlyList<ChatMessageEntity>> ListMessagesPageDescAsync(int chatId, int offset, int limit)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(limit, 0);
+
+        var conn = await _db.GetConnectionAsync();
+        return await conn.Table<ChatMessageEntity>()
+            .Where(m => m.ChatId == chatId)
+            .OrderByDescending(m => m.SentUtcTicks)
+            .ThenByDescending(m => m.Id)
+            .Skip(offset)
+            .Take(limit)
+            .ToListAsync();
+    }
+
     public async Task<int> AddMessageAsync(int chatId, bool outgoing, string text,
         MessageDeliveryStatus deliveryStatus = MessageDeliveryStatus.Delivered)
     {

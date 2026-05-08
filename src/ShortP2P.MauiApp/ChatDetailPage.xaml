@@ -16,7 +16,9 @@
                 <Label x:Name="PeerStatusLabel" FontSize="12" TextColor="Gray" VerticalOptions="Center" />
             </HorizontalStackLayout>
         </VerticalStackLayout>
-        <CollectionView x:Name="MessagesCollection" Grid.Row="1">
+        <CollectionView x:Name="MessagesCollection" Grid.Row="1"
+                        RemainingItemsThreshold="2"
+                        RemainingItemsThresholdReached="OnMessagesRemainingItemsThresholdReached">
             <CollectionView.ItemTemplate>
                 <DataTemplate>
                     <Grid Padding="8" ColumnDefinitions="*,Auto" ColumnSpacing="6">
