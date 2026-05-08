@@ -5,4 +5,6 @@ public enum ChatPayloadKind : int
     Text = 0,
     Image = 1,
     File = 2,
+    TransferOffer = 3,
+    TransferControl = 4,
 }

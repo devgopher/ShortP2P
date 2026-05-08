@@ -230,6 +230,7 @@ public partial class ChatDetailPage : ContentPage
                 ShowTextBody = false,
                 IsImage = false,
                 IsFile = true,
+                IsTransferOffer = false,
                 MessageId = m.Id,
                 ImagePreview = null,
                 MessageColor = color,
@@ -252,8 +253,47 @@ public partial class ChatDetailPage : ContentPage
                 ShowTextBody = false,
                 IsImage = true,
                 IsFile = false,
+                IsTransferOffer = false,
                 MessageId = m.Id,
                 ImagePreview = ImageSource.FromStream(() => new MemoryStream(blob)),
+                MessageColor = color,
+                ShowDelivery = show,
+                DeliveryGlyph = glyph,
+                DeliveryGlyphColor = gColor,
+                Outgoing = m.Outgoing,
+                DeliveryStatus = ds,
+            };
+        }
+
+        if (m.PayloadKind == (int)ChatPayloadKind.TransferOffer)
+        {
+            var kb = (m.TransferSizeBytes + 1023) / 1024;
+            var state = (ChatTransferState)m.TransferState;
+            var stateText = state switch
+            {
+                ChatTransferState.Transferring => "загрузка...",
+                ChatTransferState.Received => "получено",
+                ChatTransferState.Failed => "ошибка, нажмите для повтора",
+                _ => "нажмите строку — Скачать"
+            };
+            var name = string.IsNullOrWhiteSpace(m.TransferFileName) ? m.Text : m.TransferFileName;
+            var fileBody = new FormattedString();
+            fileBody.Spans.Add(new Span
+            {
+                Text = $"{name} · {kb} КБ · {stateText}",
+                TextColor = color,
+            });
+            return new MessageRowVm
+            {
+                CaptionLine = $"{whoPrefix} [{ts}] · {m.TransferPayloadKind}",
+                TextBody = "",
+                FileBodyFormatted = fileBody,
+                ShowTextBody = false,
+                IsImage = false,
+                IsFile = true,
+                IsTransferOffer = true,
+                MessageId = m.Id,
+                ImagePreview = null,
                 MessageColor = color,
                 ShowDelivery = show,
                 DeliveryGlyph = glyph,
@@ -270,6 +310,7 @@ public partial class ChatDetailPage : ContentPage
             ShowTextBody = true,
             IsImage = false,
             IsFile = false,
+            IsTransferOffer = false,
             MessageId = m.Id,
             ImagePreview = null,
             MessageColor = color,
@@ -709,6 +750,11 @@ public partial class ChatDetailPage : ContentPage
 
         try
         {
+            if (vm.IsTransferOffer && _p2pSession != null)
+            {
+                await _p2pSession.RequestBinaryDownloadAsync(vm.MessageId).ConfigureAwait(true);
+                await ReloadMessagesAsync().ConfigureAwait(true);
+            }
             var row = await _repo.GetMessageAsync(vm.MessageId).ConfigureAwait(true);
             if (row?.ImageBlob is not { Length: > 0 } blob)
             {

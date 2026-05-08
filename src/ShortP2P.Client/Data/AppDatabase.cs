@@ -92,6 +92,89 @@ public sealed class AppDatabase
             // column already exists
         }
 
+        try
+        {
+            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN TransferId TEXT NOT NULL DEFAULT ''");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
+            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN TransferToken TEXT NOT NULL DEFAULT ''");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
+            await _connection.ExecuteAsync(
+                "ALTER TABLE messages ADD COLUMN TransferPayloadKind TEXT NOT NULL DEFAULT ''");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
+            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN TransferFileName TEXT NOT NULL DEFAULT ''");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
+            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN TransferSizeBytes INTEGER NOT NULL DEFAULT 0");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
+            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN TransferHost TEXT NOT NULL DEFAULT ''");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
+            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN TransferPort INTEGER NOT NULL DEFAULT 0");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
+            await _connection.ExecuteAsync(
+                "ALTER TABLE messages ADD COLUMN TransferExpiresUtcTicks INTEGER NOT NULL DEFAULT 0");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
+            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN TransferState INTEGER NOT NULL DEFAULT 0");
+        }
+        catch
+        {
+            // column already exists
+        }
+
         return _connection;
     }
 }

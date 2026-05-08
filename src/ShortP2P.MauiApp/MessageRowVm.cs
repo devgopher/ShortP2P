@@ -14,6 +14,7 @@ public sealed class MessageRowVm
     public bool IsImage { get; init; }
     /// <summary>Вложение-документ; для сохранения используйте <see cref="MessageId" />.</summary>
     public bool IsFile { get; init; }
+    public bool IsTransferOffer { get; init; }
     public int MessageId { get; init; }
     public ImageSource? ImagePreview { get; init; }
     public required Color MessageColor { get; init; }

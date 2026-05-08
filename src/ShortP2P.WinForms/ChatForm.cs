@@ -381,6 +381,22 @@ public sealed class ChatForm : Form
             return new ChatLine(m.Id, caption, color, m.Outgoing, ds, ChatLineKind.Image, blob, null);
         }
 
+        if (m.PayloadKind == (int)ChatPayloadKind.TransferOffer)
+        {
+            var kb = (m.TransferSizeBytes + 1023) / 1024;
+            var state = (ChatTransferState)m.TransferState;
+            var stateText = state switch
+            {
+                ChatTransferState.Transferring => "загрузка...",
+                ChatTransferState.Received => "получено",
+                ChatTransferState.Failed => "ошибка",
+                _ => "нажмите для скачивания"
+            };
+            var name = string.IsNullOrWhiteSpace(m.TransferFileName) ? m.Text : m.TransferFileName;
+            var caption = $"{whoPrefix} [{ts}] · {m.TransferPayloadKind} · {name} · {kb} КБ{FileCaptionNewline}{stateText}";
+            return new ChatLine(m.Id, caption, color, m.Outgoing, ds, ChatLineKind.TransferOffer, null, name);
+        }
+
         var full = $"{whoPrefix} [{ts}] {m.Text}";
         return new ChatLine(m.Id, full, color, m.Outgoing, ds, ChatLineKind.Text, null, null);
     }
@@ -1131,6 +1147,12 @@ public sealed class ChatForm : Form
             _ = RetryFailedMessageAsync(line.MessageId);
             return;
         }
+        if (line.Kind == ChatLineKind.TransferOffer)
+        {
+            _ = DownloadTransferOfferAsync(line.MessageId);
+            return;
+        }
+
         if (line.Kind is not (ChatLineKind.Voice or ChatLineKind.Video))
             return;
         if (line.PayloadBytes is not { Length: > 0 })
@@ -1270,6 +1292,12 @@ public sealed class ChatForm : Form
             return;
         }
 
+        if (line.Kind == ChatLineKind.TransferOffer)
+        {
+            _ = DownloadTransferOfferAsync(line.MessageId);
+            return;
+        }
+
         if (line.Kind == ChatLineKind.Video && line.PayloadBytes is { Length: > 0 })
         {
             _userActions.LogInformation("Chat {Peer}: play video message (double-click)", _chat.PeerNickname);
@@ -1305,6 +1333,27 @@ public sealed class ChatForm : Form
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Retry failed message failed in chat {ChatId}", _chat.Id);
+            ShowDeliveryIssue(ex.Message);
+        }
+        finally
+        {
+            await ReloadMessagesAsync().ConfigureAwait(true);
+        }
+    }
+
+    private async Task DownloadTransferOfferAsync(int messageId)
+    {
+        if (_p2PSession == null)
+            return;
+        ClearDeliveryIssue();
+        try
+        {
+            await _p2PSession.RequestBinaryDownloadAsync(messageId).ConfigureAwait(true);
+            ClearDeliveryIssue();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Transfer download failed in chat {ChatId}", _chat.Id);
             ShowDeliveryIssue(ex.Message);
         }
         finally
@@ -1555,6 +1604,7 @@ public sealed class ChatForm : Form
         File,
         Voice,
         Video,
+        TransferOffer,
     }
 
     private sealed class ChatLine : IDisposable

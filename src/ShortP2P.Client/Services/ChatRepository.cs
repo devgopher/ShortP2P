@@ -182,6 +182,15 @@ public sealed class ChatRepository
             PayloadKind = (int)ChatPayloadKind.Text,
             MimeType = "",
             ImageBlob = null,
+            TransferId = "",
+            TransferToken = "",
+            TransferPayloadKind = "",
+            TransferFileName = "",
+            TransferSizeBytes = 0,
+            TransferHost = "",
+            TransferPort = 0,
+            TransferExpiresUtcTicks = 0,
+            TransferState = (int)ChatTransferState.None,
         };
         await conn.InsertAsync(msg);
 
@@ -214,6 +223,15 @@ public sealed class ChatRepository
             PayloadKind = (int)ChatPayloadKind.Image,
             MimeType = mimeType.Trim(),
             ImageBlob = imageBytes,
+            TransferId = "",
+            TransferToken = "",
+            TransferPayloadKind = "",
+            TransferFileName = "",
+            TransferSizeBytes = 0,
+            TransferHost = "",
+            TransferPort = 0,
+            TransferExpiresUtcTicks = 0,
+            TransferState = (int)ChatTransferState.None,
         };
         await conn.InsertAsync(msg);
 
@@ -246,6 +264,15 @@ public sealed class ChatRepository
             PayloadKind = (int)ChatPayloadKind.File,
             MimeType = mimeType.Trim(),
             ImageBlob = fileBytes,
+            TransferId = "",
+            TransferToken = "",
+            TransferPayloadKind = "",
+            TransferFileName = "",
+            TransferSizeBytes = 0,
+            TransferHost = "",
+            TransferPort = 0,
+            TransferExpiresUtcTicks = 0,
+            TransferState = (int)ChatTransferState.None,
         };
         await conn.InsertAsync(msg);
 
@@ -273,6 +300,50 @@ public sealed class ChatRepository
         if (m == null)
             return;
         m.DeliveryStatus = (int)status;
+        await conn.UpdateAsync(m);
+    }
+
+    public async Task UpdateTransferStateAsync(int messageId, ChatTransferState state)
+    {
+        var conn = await _db.GetConnectionAsync();
+        var m = await conn.FindAsync<ChatMessageEntity>(messageId);
+        if (m == null)
+            return;
+        m.TransferState = (int)state;
+        await conn.UpdateAsync(m);
+    }
+
+    public async Task UpdateMessageTransferMetadataAsync(int messageId, string transferId, string transferToken,
+        string transferPayloadKind, string transferFileName, long transferSizeBytes, string transferHost, int transferPort,
+        long transferExpiresUtcTicks, ChatTransferState transferState)
+    {
+        var conn = await _db.GetConnectionAsync();
+        var m = await conn.FindAsync<ChatMessageEntity>(messageId);
+        if (m == null)
+            return;
+        m.TransferId = transferId?.Trim() ?? "";
+        m.TransferToken = transferToken?.Trim() ?? "";
+        m.TransferPayloadKind = transferPayloadKind?.Trim() ?? "";
+        m.TransferFileName = transferFileName?.Trim() ?? "";
+        m.TransferSizeBytes = Math.Max(0, transferSizeBytes);
+        m.TransferHost = transferHost?.Trim() ?? "";
+        m.TransferPort = transferPort;
+        m.TransferExpiresUtcTicks = transferExpiresUtcTicks;
+        m.TransferState = (int)transferState;
+        await conn.UpdateAsync(m);
+    }
+
+    public async Task UpdateMessagePayloadAsync(int messageId, ChatPayloadKind payloadKind, string text, string mimeType,
+        byte[] payloadBytes)
+    {
+        var conn = await _db.GetConnectionAsync();
+        var m = await conn.FindAsync<ChatMessageEntity>(messageId);
+        if (m == null)
+            return;
+        m.PayloadKind = (int)payloadKind;
+        m.Text = text ?? "";
+        m.MimeType = mimeType ?? "";
+        m.ImageBlob = payloadBytes;
         await conn.UpdateAsync(m);
     }
 

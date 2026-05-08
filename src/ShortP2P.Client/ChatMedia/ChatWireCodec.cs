@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using System.Text.Json;
 
 namespace ShortP2P.Client.ChatMedia;
 
@@ -11,6 +12,8 @@ public static class ChatWireCodec
     private const byte KindText = 0x01;
     private const byte KindImage = 0x02;
     private const byte KindFile = 0x03;
+    private const byte KindTransferOffer = 0x04;
+    private const byte KindTransferControl = 0x05;
 
     /// <summary>Магия S2P1 без успешного разбора вида — чтобы не показывать мусор как текст UTF-8.</summary>
     public static bool LooksLikeFramedWire(ReadOnlySpan<byte> payload) =>
@@ -69,6 +72,22 @@ public static class ChatWireCodec
         BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(o, 4), (uint)fileBytes.Length);
         o += 4;
         fileBytes.CopyTo(buf.AsSpan(o));
+        return buf;
+    }
+
+    public static byte[] EncodeTransferOffer(ChatWireTransferOffer offer) =>
+        EncodeJsonFrame(KindTransferOffer, JsonSerializer.SerializeToUtf8Bytes(offer));
+
+    public static byte[] EncodeTransferControl(ChatWireTransferControl control) =>
+        EncodeJsonFrame(KindTransferControl, JsonSerializer.SerializeToUtf8Bytes(control));
+
+    private static byte[] EncodeJsonFrame(byte kind, byte[] jsonUtf8)
+    {
+        var buf = new byte[Magic.Length + 1 + 4 + jsonUtf8.Length];
+        Magic.CopyTo(buf);
+        buf[Magic.Length] = kind;
+        BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(Magic.Length + 1, 4), (uint)jsonUtf8.Length);
+        jsonUtf8.CopyTo(buf.AsSpan(Magic.Length + 1 + 4));
         return buf;
     }
 
@@ -144,6 +163,38 @@ public static class ChatWireCodec
             return true;
         }
 
+        if (kind is KindTransferOffer or KindTransferControl)
+        {
+            if (rest.Length < 4)
+                return false;
+            var len = BinaryPrimitives.ReadUInt32LittleEndian(rest);
+            rest = rest.Slice(4);
+            if (rest.Length < len)
+                return false;
+            var jsonBytes = rest.Slice(0, (int)len).ToArray();
+            try
+            {
+                if (kind == KindTransferOffer)
+                {
+                    var offer = JsonSerializer.Deserialize<ChatWireTransferOffer>(jsonBytes);
+                    if (offer == null)
+                        return false;
+                    message = offer;
+                    return true;
+                }
+
+                var control = JsonSerializer.Deserialize<ChatWireTransferControl>(jsonBytes);
+                if (control == null)
+                    return false;
+                message = control;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         return false;
     }
 }
@@ -155,3 +206,23 @@ public sealed record ChatWireText(string Text) : ChatWireMessage;
 public sealed record ChatWireImage(string MimeType, byte[] ImageBytes) : ChatWireMessage;
 
 public sealed record ChatWireFile(string FileName, string MimeType, byte[] FileBytes) : ChatWireMessage;
+
+public sealed record ChatWireTransferOffer(
+    string TransferId,
+    string TransferToken,
+    string PayloadKind,
+    string FileName,
+    string MimeType,
+    long SizeBytes,
+    string Host,
+    int Port,
+    long ExpiresUtcTicks) : ChatWireMessage;
+
+public sealed record ChatWireTransferControl(
+    string Command,
+    string TransferId,
+    string TransferToken,
+    string Host,
+    int Port,
+    long ExpiresUtcTicks,
+    string ErrorCode) : ChatWireMessage;
