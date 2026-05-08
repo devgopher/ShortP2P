@@ -21,6 +21,7 @@ public sealed class MessengerService(
 {
     private const int MaxTrackedDeliveredIds = 8192;
     private const int MaxTrackedOutboundIds = 8192;
+    private static readonly TimeSpan NackMinInterval = TimeSpan.FromMilliseconds(500);
 
     private readonly MessengerOptions _options = options ?? new MessengerOptions();
     private readonly Dictionary<Guid, Reassembly> _pending = new();
@@ -33,6 +34,7 @@ public sealed class MessengerService(
     private readonly HashSet<Guid> _deliveredMessageIds = [];
     /// <summary>Идентификаторы сообщений, отправленных этим экземпляром (защита от приёма собственного эха/hairpin).</summary>
     private readonly HashSet<Guid> _ownOutboundMessageIds = [];
+    private readonly Dictionary<Guid, OutboundCacheEntry> _outboundChunks = new();
 
     private CancellationTokenSource? _cts;
     public event EventHandler<IncomingBinaryMessage>? GotData;
@@ -143,6 +145,7 @@ public sealed class MessengerService(
             _ownOutboundMessageIds.Add(messageId);
         }
 
+        var encryptedChunks = new byte[totalChunks][];
         Console.WriteLine($"sending to {FormatDestinationForLog(destination)}");
 
         for (var i = 0; i < totalChunks; i++)
@@ -154,7 +157,13 @@ public sealed class MessengerService(
                 Buffer.BlockCopy(data, offset, sliceBytes, 0, len);
             var plain = ChunkCodec.BuildChunk(messageId, i, totalChunks, sliceBytes);
             var encrypted = session.Encrypt(plain);
+            encryptedChunks[i] = encrypted;
             await _sendCipherAsync(encrypted, destination, cancellationToken).ConfigureAwait(false);
+        }
+
+        lock (_sync)
+        {
+            _outboundChunks[messageId] = new OutboundCacheEntry(destination, encryptedChunks);
         }
     }
 
@@ -172,6 +181,14 @@ public sealed class MessengerService(
 
     private async Task ProcessIncomingPacketAsync(TransportReceiveMessage msg, CancellationToken cancellationToken)
     {
+        List<(Guid MessageId, TransportAddress ReplyTo, int[] MissingIndices)> nacksToSend;
+        lock (_sync)
+        {
+            nacksToSend = SweepStateAndCollectNacksLocked(DateTimeOffset.UtcNow);
+        }
+        foreach (var nack in nacksToSend)
+            _ = SendDeliveryNackAsync(nack.MessageId, nack.MissingIndices, nack.ReplyTo, cancellationToken);
+
         var session = await _sessionProvider(cancellationToken).ConfigureAwait(false);
         byte[] decrypted;
         try
@@ -186,8 +203,19 @@ public sealed class MessengerService(
 
         if (DeliveryAckCodec.TryParse(decrypted, out var ackId))
         {
+            lock (_sync)
+            {
+                _outboundChunks.Remove(ackId);
+            }
             if (_ackWaiters.TryRemove(ackId, out var w))
                 w.TrySetResult();
+            return;
+        }
+
+        if (DeliveryNackCodec.TryParse(decrypted, out var nackMessageId, out var missingChunkIndices))
+        {
+            await ResendMissingChunksAsync(nackMessageId, missingChunkIndices, msg.RemoteAddress, cancellationToken)
+                .ConfigureAwait(false);
             return;
         }
 
@@ -196,6 +224,11 @@ public sealed class MessengerService(
             return;
         }
 
+        var sendDeliveryAck = false;
+        byte[]? assembledBuffer = null;
+        var now = DateTimeOffset.UtcNow;
+        int[]? missing = null;
+
         lock (_sync)
         {
             if (_ownOutboundMessageIds.Contains(messageId))
@@ -203,7 +236,7 @@ public sealed class MessengerService(
 
             if (!_pending.TryGetValue(messageId, out var state))
             {
-                state = new Reassembly(totalChunks);
+                state = new Reassembly(totalChunks, msg.RemoteAddress);
                 _pending[messageId] = state;
             }
 
@@ -216,36 +249,52 @@ public sealed class MessengerService(
             if (state.Parts[chunkIndex] != null)
                 return;
 
+            var prevUpdateUtc = state.LastUpdatedUtc;
             state.Parts[chunkIndex] = payloadBytes;
             state.Received++;
+            state.LastUpdatedUtc = now;
 
-            if (state.Received != state.TotalChunks)
-                return;
-
-            _pending.Remove(messageId);
-
-            var fullLen = 0;
-            for (var i = 0; i < state.TotalChunks; i++)
-                fullLen += state.Parts[i]!.Length;
-
-            var buffer = new byte[fullLen];
-            var pos = 0;
-            for (var i = 0; i < state.TotalChunks; i++)
+            sendDeliveryAck = state.Received == state.TotalChunks;
+            if (sendDeliveryAck)
             {
-                var part = state.Parts[i]!;
-                Buffer.BlockCopy(part, 0, buffer, pos, part.Length);
-                pos += part.Length;
+                _pending.Remove(messageId);
+
+                var fullLen = 0;
+                for (var i = 0; i < state.TotalChunks; i++)
+                    fullLen += state.Parts[i]!.Length;
+
+                var buffer = new byte[fullLen];
+                var pos = 0;
+                for (var i = 0; i < state.TotalChunks; i++)
+                {
+                    var part = state.Parts[i]!;
+                    Buffer.BlockCopy(part, 0, buffer, pos, part.Length);
+                    pos += part.Length;
+                }
+
+                if (buffer.Length <= _options.MaxBinaryMessageBytes)
+                    assembledBuffer = buffer;
             }
-
-            if (buffer.Length > _options.MaxBinaryMessageBytes)
-                return;
-
-            var shouldEnqueue = TrackDeliverOnce(messageId);
-            if (shouldEnqueue)
-                GotData?.Invoke(this, new IncomingBinaryMessage(buffer, msg.RemoteAddress));
+            else if (now - prevUpdateUtc >= _options.ReassemblyTimeout &&
+                     now - state.LastNackUtc >= NackMinInterval)
+            {
+                missing = CollectMissingChunkIndices(state);
+                state.LastNackUtc = now;
+            }
         }
 
-        _ = SendDeliveryAckAsync(messageId, msg.RemoteAddress, cancellationToken);
+        if (assembledBuffer != null)
+        {
+            var shouldEnqueue = TrackDeliverOnce(messageId);
+            if (shouldEnqueue)
+                GotData?.Invoke(this, new IncomingBinaryMessage(assembledBuffer, msg.RemoteAddress));
+        }
+
+        if (missing is { Length: > 0 })
+            _ = SendDeliveryNackAsync(messageId, missing, msg.RemoteAddress, cancellationToken);
+
+        if (sendDeliveryAck)
+            _ = SendDeliveryAckAsync(messageId, msg.RemoteAddress, cancellationToken);
     }
 
     private bool TrackDeliverOnce(Guid messageId)
@@ -271,6 +320,95 @@ public sealed class MessengerService(
         {
             // ignore: доставка ack best-effort
         }
+    }
+
+    private async Task SendDeliveryNackAsync(Guid messageId, int[] missingChunkIndices, TransportAddress replyTo,
+        CancellationToken cancellationToken)
+    {
+        if (missingChunkIndices.Length == 0)
+            return;
+        try
+        {
+            var session = await _sessionProvider(cancellationToken).ConfigureAwait(false);
+            var plain = DeliveryNackCodec.ToBytes(messageId, missingChunkIndices);
+            var encrypted = session.Encrypt(plain);
+            await _sendCipherAsync(encrypted, replyTo, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // best-effort
+        }
+    }
+
+    private async ValueTask ResendMissingChunksAsync(Guid messageId, int[] missingChunkIndices, TransportAddress replyTo,
+        CancellationToken cancellationToken)
+    {
+        byte[][]? encryptedChunks = null;
+        lock (_sync)
+        {
+            if (_outboundChunks.TryGetValue(messageId, out var cached))
+            {
+                cached.LastAccessUtc = DateTimeOffset.UtcNow;
+                encryptedChunks = cached.EncryptedChunks;
+            }
+        }
+
+        if (encryptedChunks == null)
+            return;
+
+        foreach (var idx in missingChunkIndices)
+        {
+            if (idx < 0 || idx >= encryptedChunks.Length)
+                continue;
+            var packet = encryptedChunks[idx];
+            if (packet.Length == 0)
+                continue;
+            await _sendCipherAsync(packet, replyTo, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private int[] CollectMissingChunkIndices(Reassembly state)
+    {
+        var result = new List<int>(Math.Min(state.TotalChunks - state.Received, _options.MaxNackChunkIndices));
+        for (var i = 0; i < state.TotalChunks && result.Count < _options.MaxNackChunkIndices; i++)
+        {
+            if (state.Parts[i] == null)
+                result.Add(i);
+        }
+
+        return result.ToArray();
+    }
+
+    private List<(Guid MessageId, TransportAddress ReplyTo, int[] MissingIndices)> SweepStateAndCollectNacksLocked(
+        DateTimeOffset nowUtc)
+    {
+        var nacks = new List<(Guid, TransportAddress, int[])>();
+
+        foreach (var kv in _pending.ToArray())
+        {
+            var state = kv.Value;
+            var idleFor = nowUtc - state.LastUpdatedUtc;
+            if (idleFor >= _options.ReassemblyTimeout && nowUtc - state.LastNackUtc >= NackMinInterval)
+            {
+                var missing = CollectMissingChunkIndices(state);
+                if (missing.Length > 0)
+                {
+                    state.LastNackUtc = nowUtc;
+                    nacks.Add((kv.Key, state.RemoteAddress, missing));
+                }
+            }
+
+            if (idleFor >= _options.ReassemblyTimeout + _options.ReassemblyTimeout)
+                _pending.Remove(kv.Key);
+        }
+
+        foreach (var kv in _outboundChunks.ToArray())
+        {
+            if (nowUtc - kv.Value.LastAccessUtc >= _options.OutboundChunkCacheTtl)
+                _outboundChunks.Remove(kv.Key);
+        }
+
+        return nacks;
     }
 
     private static bool TryParseChunk(byte[] decrypted, out Guid messageId, out int chunkIndex, out int totalChunks,
@@ -329,14 +467,29 @@ public sealed class MessengerService(
         foreach (var kv in _ackWaiters.ToArray())
             kv.Value.TrySetCanceled();
         _ackWaiters.Clear();
+        lock (_sync)
+        {
+            _pending.Clear();
+            _outboundChunks.Clear();
+        }
     }
 
-    private sealed class Reassembly(int totalChunks)
+    private sealed class Reassembly(int totalChunks, TransportAddress remoteAddress)
     {
         public int TotalChunks { get; } = totalChunks;
+        public TransportAddress RemoteAddress { get; } = remoteAddress;
 
         public byte[][] Parts { get; } = new byte[totalChunks][];
 
         public int Received { get; set; }
+        public DateTimeOffset LastUpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+        public DateTimeOffset LastNackUtc { get; set; } = DateTimeOffset.MinValue;
+    }
+
+    private sealed class OutboundCacheEntry(TransportAddress destination, byte[][] encryptedChunks)
+    {
+        public TransportAddress Destination { get; } = destination;
+        public byte[][] EncryptedChunks { get; } = encryptedChunks;
+        public DateTimeOffset LastAccessUtc { get; set; } = DateTimeOffset.UtcNow;
     }
 }
