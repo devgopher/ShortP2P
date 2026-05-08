@@ -12,6 +12,8 @@ internal static class IncomingMessageSound
 
 #if WINDOWS
     private static global::Windows.Media.Playback.MediaPlayer? _windowsPlayer;
+#elif ANDROID
+    private static Android.Media.MediaPlayer? _androidPlayer;
 #endif
 
     public static void EnsureHooked(ChatRepository repo, ILogger logger)
@@ -88,21 +90,60 @@ internal static class IncomingMessageSound
         var path = cache;
         await MainThread.InvokeOnMainThreadAsync(() =>
         {
-            var p = new Android.Media.MediaPlayer();
-            p.SetDataSource(path);
-            p.Prepare();
-            p.Start();
-            p.Completion += (_, _) =>
+            try
             {
-                try
+                _androidPlayer?.Stop();
+                _androidPlayer?.Release();
+                _androidPlayer?.Dispose();
+
+                var player = new Android.Media.MediaPlayer();
+                _androidPlayer = player;
+                var attrs = new Android.Media.AudioAttributes.Builder()
+                    .SetUsage(Android.Media.AudioUsageKind.NotificationEvent)
+                    .SetContentType(Android.Media.AudioContentType.Sonification)
+                    .Build();
+                if (attrs != null)
+                    player.SetAudioAttributes(attrs);
+                player.SetDataSource(path);
+                player.Prepare();
+                player.Completion += (_, _) =>
                 {
-                    p.Release();
-                }
-                catch
+                    try
+                    {
+                        player.Release();
+                        player.Dispose();
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+
+                    if (ReferenceEquals(_androidPlayer, player))
+                        _androidPlayer = null;
+                };
+                player.Error += (_, _) =>
                 {
-                    // ignore
-                }
-            };
+                    try
+                    {
+                        player.Release();
+                        player.Dispose();
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+
+                    if (ReferenceEquals(_androidPlayer, player))
+                        _androidPlayer = null;
+                };
+                player.Start();
+            }
+            catch
+            {
+                // Fallback, if MediaPlayer failed (codec/file race etc.)
+                using var tone = new Android.Media.ToneGenerator(Android.Media.Stream.Notification, 90);
+                tone.StartTone(Android.Media.Tone.PropBeep, 160);
+            }
         }).ConfigureAwait(true);
     }
 #endif

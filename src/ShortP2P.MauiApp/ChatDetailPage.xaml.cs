@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using Microsoft.Extensions.Logging;
+using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Devices;
 using ShortP2P.Auth;
@@ -55,6 +56,13 @@ public partial class ChatDetailPage : ContentPage
     private IDispatcherTimer? _presenceRefreshTimer;
     private bool _hasMoreRows = true;
     private bool _isLoadingRows;
+    private const string VoiceMessageMime = "audio/ogg";
+    private const string VoiceFileName = "voice.ogg";
+#if ANDROID
+    private global::Android.Media.MediaRecorder? _voiceRecorder;
+    private string? _voiceTempPath;
+#endif
+    private bool _isVoiceRecording;
 
     public ChatDetailPage(AuthService auth, ChatRepository repo, UserP2pRuntime p2p, ChatMediaOptions media,
         ILogger<ChatDetailPage> logger)
@@ -127,6 +135,7 @@ public partial class ChatDetailPage : ContentPage
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
+        _ = StopVoiceRecordingAndDiscardAsync();
         _p2p.LocalScan.ClientsChanged -= OnPeerLanPresenceChanged;
         if (_presenceRefreshTimer != null)
             _presenceRefreshTimer.Stop();
@@ -298,6 +307,190 @@ public partial class ChatDetailPage : ContentPage
         {
             await ReloadMessagesAsync().ConfigureAwait(true);
         }
+    }
+
+    private async void OnVoiceClicked(object? sender, EventArgs e)
+    {
+        if (_p2pSession == null)
+            return;
+
+        if (_isVoiceRecording)
+        {
+            await StopVoiceRecordingAndSendAsync().ConfigureAwait(true);
+            return;
+        }
+
+        await StartVoiceRecordingAsync().ConfigureAwait(true);
+    }
+
+    private async Task StartVoiceRecordingAsync()
+    {
+        ClearDeliveryIssue();
+#if ANDROID
+        var mic = await Permissions.RequestAsync<Permissions.Microphone>().ConfigureAwait(true);
+        if (mic != PermissionStatus.Granted)
+        {
+            ShowDeliveryIssue("Нет разрешения на запись звука.");
+            return;
+        }
+
+        try
+        {
+            _voiceTempPath = Path.Combine(FileSystem.CacheDirectory, $"voice_{DateTime.UtcNow.Ticks}.ogg");
+            var recorder = new global::Android.Media.MediaRecorder();
+            _voiceRecorder = recorder;
+            recorder.SetAudioSource(global::Android.Media.AudioSource.Mic);
+            recorder.SetOutputFormat(global::Android.Media.OutputFormat.Ogg);
+            recorder.SetAudioEncoder(global::Android.Media.AudioEncoder.Opus);
+            recorder.SetAudioEncodingBitRate(18_000);
+            recorder.SetAudioSamplingRate(48_000);
+            recorder.SetOutputFile(_voiceTempPath);
+            recorder.Prepare();
+            recorder.Start();
+
+            _isVoiceRecording = true;
+            VoiceButton.Text = "Stop";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Voice recording start failed");
+            ShowDeliveryIssue(ex.Message);
+            await StopVoiceRecordingAndDiscardAsync().ConfigureAwait(true);
+        }
+#else
+        ShowDeliveryIssue("Запись голосовых сейчас доступна только на Android.");
+#endif
+    }
+
+    private async Task StopVoiceRecordingAndSendAsync()
+    {
+#if ANDROID
+        try
+        {
+            if (_voiceRecorder != null)
+                _voiceRecorder.Stop();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Voice recording stop failed");
+            ShowDeliveryIssue(ex.Message);
+            await StopVoiceRecordingAndDiscardAsync().ConfigureAwait(true);
+            return;
+        }
+        finally
+        {
+            try
+            {
+                _voiceRecorder?.Release();
+                _voiceRecorder?.Dispose();
+            }
+            catch
+            {
+                // ignore
+            }
+
+            _voiceRecorder = null;
+            _isVoiceRecording = false;
+            VoiceButton.Text = "Voice";
+        }
+
+        try
+        {
+            if (string.IsNullOrEmpty(_voiceTempPath) || !File.Exists(_voiceTempPath))
+            {
+                ShowDeliveryIssue("Не удалось получить записанный голосовой файл.");
+                return;
+            }
+
+            var bytes = await File.ReadAllBytesAsync(_voiceTempPath).ConfigureAwait(true);
+            if (bytes.Length == 0)
+            {
+                ShowDeliveryIssue("Голосовая запись пустая.");
+                return;
+            }
+
+            _media.ValidateDocumentMime(VoiceMessageMime);
+            _media.ValidateDocumentSize(bytes.Length);
+            await _p2pSession!.SendFileAsync(VoiceFileName, bytes, VoiceMessageMime).ConfigureAwait(true);
+            ClearDeliveryIssue();
+        }
+        catch (OutboundMessageQueuedException ex)
+        {
+            _logger.LogInformation(ex, "Voice message queued until peer is on LAN");
+            ShowDeliveryIssue(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Send voice message failed");
+            ShowDeliveryIssue(ex.Message);
+        }
+        finally
+        {
+            if (!string.IsNullOrEmpty(_voiceTempPath))
+            {
+                try
+                {
+                    File.Delete(_voiceTempPath);
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            _voiceTempPath = null;
+            await ReloadMessagesAsync().ConfigureAwait(true);
+        }
+#else
+        await Task.CompletedTask;
+#endif
+    }
+
+    private async Task StopVoiceRecordingAndDiscardAsync()
+    {
+#if ANDROID
+        try
+        {
+            if (_voiceRecorder != null)
+            {
+                try
+                {
+                    _voiceRecorder.Stop();
+                }
+                catch
+                {
+                    // ignore invalid state
+                }
+
+                _voiceRecorder.Release();
+                _voiceRecorder.Dispose();
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+        finally
+        {
+            _voiceRecorder = null;
+            _isVoiceRecording = false;
+            VoiceButton.Text = "Voice";
+            if (!string.IsNullOrEmpty(_voiceTempPath))
+            {
+                try
+                {
+                    File.Delete(_voiceTempPath);
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            _voiceTempPath = null;
+        }
+#endif
+        await Task.CompletedTask.ConfigureAwait(true);
     }
 
     private async void OnTechHandshakeClicked(object? sender, EventArgs e)

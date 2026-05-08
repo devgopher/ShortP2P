@@ -51,9 +51,10 @@
             </VerticalStackLayout>
         </Border>
         <Label x:Name="DeliveryIssueLabel" Grid.Row="3" TextColor="#B22222" IsVisible="False" LineBreakMode="WordWrap" />
-        <Grid Grid.Row="4" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+        <Grid Grid.Row="4" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
             <Entry x:Name="MessageEntry" Grid.Column="0" Placeholder="Message" MaxLength="32768" />
-            <Button Grid.Column="1" Text="Send" Clicked="OnSendClicked" />
+            <Button x:Name="VoiceButton" Grid.Column="1" Text="Voice" Clicked="OnVoiceClicked" />
+            <Button Grid.Column="2" Text="Send" Clicked="OnSendClicked" />
         </Grid>
     </Grid>
 </ContentPage>
