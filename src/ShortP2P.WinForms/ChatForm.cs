@@ -38,6 +38,14 @@ public sealed class ChatForm : Form
         ForeColor = SystemColors.GrayText,
         Padding = new Padding(0, 0, 0, 2),
     };
+    private readonly Label _deliveryIssueLabel = new()
+    {
+        Dock = DockStyle.Fill,
+        AutoSize = false,
+        Visible = false,
+        ForeColor = Color.DarkRed,
+        Padding = new Padding(8, 2, 8, 4),
+    };
     private readonly ListBox _messages = new()
     {
         Dock = DockStyle.Fill,
@@ -162,6 +170,13 @@ public sealed class ChatForm : Form
         };
         top.Controls.Add(_peerInfoLabel, 0, 0);
 
+        var deliveryIssuePanel = new Panel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 26,
+        };
+        deliveryIssuePanel.Controls.Add(_deliveryIssueLabel);
+
         var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 76, ColumnCount = 7 };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -205,6 +220,7 @@ public sealed class ChatForm : Form
         Controls.Add(_messages);
         Controls.Add(top);
         Controls.Add(_techGroup);
+        Controls.Add(deliveryIssuePanel);
         Controls.Add(bottom);
 
         _attachVoice.Click += (_, _) => OnAttachVoice();
@@ -391,6 +407,7 @@ public sealed class ChatForm : Form
     {
         if (_p2PSession == null)
             return;
+        ClearDeliveryIssue();
 
         using var dlg = new OpenFileDialog
         {
@@ -427,12 +444,13 @@ public sealed class ChatForm : Form
             await _p2PSession.SendFileAsync(prepared.OutputFileName, prepared.Bytes, prepared.OutputMime).ConfigureAwait(true);
             _userActions.LogInformation("Chat {Peer}: sent ogv video ({Bytes} bytes, {Mime})",
                 _chat.PeerNickname, prepared.Bytes.Length, prepared.OutputMime);
+            ClearDeliveryIssue();
         }
         catch (OutboundMessageQueuedException ex)
         {
             _logger.LogInformation(ex, "Video queued until peer is on LAN (chat {ChatId})", _chat.Id);
             _userActions.LogInformation("Chat {Peer}: video queued for LAN delivery", _chat.PeerNickname);
-            MessageBox.Show(this, ex.Message, "Ожидание сети", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ShowDeliveryIssue(ex.Message);
         }
         catch (Exception ex)
         {
@@ -440,7 +458,7 @@ public sealed class ChatForm : Form
             _userActions.LogInformation("Chat {Peer}: send video failed ({Message})", _chat.PeerNickname, ex.Message);
             if (HandleBluetoothUnavailable(ex))
                 return;
-            MessageBox.Show(this, ex.Message, "Видео", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            ShowDeliveryIssue(ex.Message);
         }
         finally
         {
@@ -452,6 +470,7 @@ public sealed class ChatForm : Form
     {
         if (_p2PSession == null)
             return;
+        ClearDeliveryIssue();
         using var win = new CameraRecordForm(_appSettings.Current.TrafficSavingEnabled,
             _appSettings.Current.VideoInputDeviceId);
         if (win.ShowDialog(this) != DialogResult.OK || win.Result == null)
@@ -464,18 +483,19 @@ public sealed class ChatForm : Form
             await _p2PSession.SendFileAsync(win.Result.FileName, win.Result.Bytes, win.Result.MimeType).ConfigureAwait(true);
             _userActions.LogInformation("Chat {Peer}: sent camera video ({Bytes} bytes, {Mime})",
                 _chat.PeerNickname, win.Result.Bytes.Length, win.Result.MimeType);
+            ClearDeliveryIssue();
         }
         catch (OutboundMessageQueuedException ex)
         {
             _logger.LogInformation(ex, "Camera video queued until peer is on LAN (chat {ChatId})", _chat.Id);
-            MessageBox.Show(this, ex.Message, "Ожидание сети", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ShowDeliveryIssue(ex.Message);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Send camera video failed in chat {ChatId}", _chat.Id);
             if (HandleBluetoothUnavailable(ex))
                 return;
-            MessageBox.Show(this, ex.Message, "Камера", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            ShowDeliveryIssue(ex.Message);
         }
         finally
         {
@@ -487,6 +507,7 @@ public sealed class ChatForm : Form
     {
         if (_p2PSession == null)
             return;
+        ClearDeliveryIssue();
 
         using var dlg = new OpenFileDialog
         {
@@ -548,12 +569,13 @@ public sealed class ChatForm : Form
             await _p2PSession.SendImageAsync(bytes, mime).ConfigureAwait(true);
             _userActions.LogInformation("Chat {Peer}: sent image ({Bytes} bytes, {Mime})", _chat.PeerNickname,
                 bytes.Length, mime);
+            ClearDeliveryIssue();
         }
         catch (OutboundMessageQueuedException ex)
         {
             _logger.LogInformation(ex, "Image queued until peer is on LAN (chat {ChatId})", _chat.Id);
             _userActions.LogInformation("Chat {Peer}: image queued for LAN delivery", _chat.PeerNickname);
-            MessageBox.Show(this, ex.Message, "Ожидание сети", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ShowDeliveryIssue(ex.Message);
         }
         catch (Exception ex)
         {
@@ -561,7 +583,7 @@ public sealed class ChatForm : Form
             _userActions.LogInformation("Chat {Peer}: send image failed ({Message})", _chat.PeerNickname, ex.Message);
             if (HandleBluetoothUnavailable(ex))
                 return;
-            MessageBox.Show(this, ex.Message, "Изображение", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            ShowDeliveryIssue(ex.Message);
         }
         finally
         {
@@ -573,6 +595,7 @@ public sealed class ChatForm : Form
     {
         if (_p2PSession == null)
             return;
+        ClearDeliveryIssue();
 
         using var dlg = new OpenFileDialog
         {
@@ -621,12 +644,13 @@ public sealed class ChatForm : Form
             await _p2PSession.SendFileAsync(dlg.FileName, bytes, mime).ConfigureAwait(true);
             _userActions.LogInformation("Chat {Peer}: sent document ({Bytes} bytes, {Mime})", _chat.PeerNickname,
                 bytes.Length, mime);
+            ClearDeliveryIssue();
         }
         catch (OutboundMessageQueuedException ex)
         {
             _logger.LogInformation(ex, "Document queued until peer is on LAN (chat {ChatId})", _chat.Id);
             _userActions.LogInformation("Chat {Peer}: document queued for LAN delivery", _chat.PeerNickname);
-            MessageBox.Show(this, ex.Message, "Ожидание сети", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ShowDeliveryIssue(ex.Message);
         }
         catch (Exception ex)
         {
@@ -634,7 +658,7 @@ public sealed class ChatForm : Form
             _userActions.LogInformation("Chat {Peer}: send document failed ({Message})", _chat.PeerNickname, ex.Message);
             if (HandleBluetoothUnavailable(ex))
                 return;
-            MessageBox.Show(this, ex.Message, "Документ", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            ShowDeliveryIssue(ex.Message);
         }
         finally
         {
@@ -647,17 +671,19 @@ public sealed class ChatForm : Form
         var text = _input.Text.Trim();
         if (text.Length == 0 || _p2PSession == null)
             return;
+        ClearDeliveryIssue();
         try
         {
             await _p2PSession.SendTextAsync(text).ConfigureAwait(true);
             _userActions.LogInformation("Chat {Peer}: sent message ({Length} chars)", _chat.PeerNickname, text.Length);
             _input.Clear();
+            ClearDeliveryIssue();
         }
         catch (OutboundMessageQueuedException ex)
         {
             _logger.LogInformation(ex, "Message queued until peer is on LAN (chat {ChatId})", _chat.Id);
             _userActions.LogInformation("Chat {Peer}: message queued for LAN delivery", _chat.PeerNickname);
-            MessageBox.Show(this, ex.Message, "Ожидание сети", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ShowDeliveryIssue(ex.Message);
         }
         catch (Exception ex)
         {
@@ -665,7 +691,7 @@ public sealed class ChatForm : Form
             _userActions.LogInformation("Chat {Peer}: send message failed ({Message})", _chat.PeerNickname, ex.Message);
             if (HandleBluetoothUnavailable(ex))
                 return;
-            MessageBox.Show(this, ex.Message, "Send failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            ShowDeliveryIssue(ex.Message);
         }
         finally
         {
@@ -916,7 +942,7 @@ public sealed class ChatForm : Form
                 _logger.LogWarning(ex, "Send voice failed");
                 if (HandleBluetoothUnavailable(ex))
                     return;
-                MessageBox.Show(this, ex.Message, "Голосовое", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ShowDeliveryIssue(ex.Message);
             }
             finally
             {
@@ -1155,6 +1181,20 @@ public sealed class ChatForm : Form
     {
         _peerInfoLabel.Text = PeerInfoText("Статус: офлайн");
         _peerInfoLabel.ForeColor = SystemColors.GrayText;
+    }
+
+    private void ShowDeliveryIssue(string message)
+    {
+        _deliveryIssueLabel.Text = string.IsNullOrWhiteSpace(message)
+            ? "Проблема с доставкой текущего сообщения."
+            : message.Trim();
+        _deliveryIssueLabel.Visible = true;
+    }
+
+    private void ClearDeliveryIssue()
+    {
+        _deliveryIssueLabel.Text = string.Empty;
+        _deliveryIssueLabel.Visible = false;
     }
 
     private string PeerInfoText(string statusLine) => $"Id: {_chat.PeerNetworkIdShort}\r\n{statusLine}";

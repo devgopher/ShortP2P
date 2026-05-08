@@ -276,21 +276,23 @@ public partial class ChatDetailPage : ContentPage
         var text = MessageEntry.Text?.Trim() ?? "";
         if (text.Length == 0 || _p2pSession == null)
             return;
+        ClearDeliveryIssue();
 
         try
         {
             await _p2pSession.SendTextAsync(text).ConfigureAwait(true);
             MessageEntry.Text = string.Empty;
+            ClearDeliveryIssue();
         }
         catch (OutboundMessageQueuedException ex)
         {
             _logger.LogInformation(ex, "Message queued until peer is on LAN");
-            await DisplayAlert("Ожидание сети", ex.Message, "OK").ConfigureAwait(true);
+            ShowDeliveryIssue(ex.Message);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Send message failed");
-            await DisplayAlert("Send failed", ex.Message, "OK").ConfigureAwait(true);
+            ShowDeliveryIssue(ex.Message);
         }
         finally
         {
@@ -332,6 +334,7 @@ public partial class ChatDetailPage : ContentPage
     {
         if (_p2pSession == null)
             return;
+        ClearDeliveryIssue();
 
         try
         {
@@ -387,16 +390,17 @@ public partial class ChatDetailPage : ContentPage
 
             _media.ValidateMime(mime);
             await _p2pSession.SendImageAsync(bytes, mime).ConfigureAwait(true);
+            ClearDeliveryIssue();
         }
         catch (OutboundMessageQueuedException ex)
         {
             _logger.LogInformation(ex, "Image queued until peer is on LAN");
-            await DisplayAlert("Ожидание сети", ex.Message, "OK").ConfigureAwait(true);
+            ShowDeliveryIssue(ex.Message);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Send image failed");
-            await DisplayAlert("Изображение", ex.Message, "OK").ConfigureAwait(true);
+            ShowDeliveryIssue(ex.Message);
         }
         finally
         {
@@ -408,6 +412,7 @@ public partial class ChatDetailPage : ContentPage
     {
         if (_p2pSession == null)
             return;
+        ClearDeliveryIssue();
 
         try
         {
@@ -455,16 +460,17 @@ public partial class ChatDetailPage : ContentPage
 
             _media.ValidateDocumentMime(mime);
             await _p2pSession.SendFileAsync(pick.FileName, bytes, mime).ConfigureAwait(true);
+            ClearDeliveryIssue();
         }
         catch (OutboundMessageQueuedException ex)
         {
             _logger.LogInformation(ex, "Document queued until peer is on LAN");
-            await DisplayAlert("Ожидание сети", ex.Message, "OK").ConfigureAwait(true);
+            ShowDeliveryIssue(ex.Message);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Send document failed");
-            await DisplayAlert("Документ", ex.Message, "OK").ConfigureAwait(true);
+            ShowDeliveryIssue(ex.Message);
         }
         finally
         {
@@ -567,5 +573,19 @@ public partial class ChatDetailPage : ContentPage
         PeerPresenceDot.Fill = online ? PresenceOnline : PresenceOffline;
         PeerStatusLabel.Text = online ? "Статус: онлайн" : "Статус: офлайн";
         PeerStatusLabel.TextColor = online ? PresenceOnline : Colors.Gray;
+    }
+
+    private void ShowDeliveryIssue(string message)
+    {
+        DeliveryIssueLabel.Text = string.IsNullOrWhiteSpace(message)
+            ? "Проблема с доставкой текущего сообщения."
+            : message.Trim();
+        DeliveryIssueLabel.IsVisible = true;
+    }
+
+    private void ClearDeliveryIssue()
+    {
+        DeliveryIssueLabel.Text = string.Empty;
+        DeliveryIssueLabel.IsVisible = false;
     }
 }
