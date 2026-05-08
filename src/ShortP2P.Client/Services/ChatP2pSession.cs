@@ -813,6 +813,31 @@ public sealed class ChatP2pSession : IAsyncDisposable
         RaiseMessagesChanged();
     }
 
+    public async ValueTask RetryFailedMessageAsync(int messageId, CancellationToken cancellationToken = default)
+    {
+        var row = await repo.GetMessageAsync(messageId).ConfigureAwait(false);
+        if (row == null || row.ChatId != chat.Id || !row.Outgoing)
+            return;
+
+        await repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Pending).ConfigureAwait(false);
+        RaiseMessagesChanged();
+        try
+        {
+            var wire = BuildOutgoingWire(row);
+            await DeliverOutgoingWireAsync(messageId, wire, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            await repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Failed).ConfigureAwait(false);
+            RaiseMessagesChanged();
+            throw;
+        }
+    }
+
     public async ValueTask SendTextAsync(string text, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(text))
@@ -833,16 +858,6 @@ public sealed class ChatP2pSession : IAsyncDisposable
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
-        }
-        catch (Exception ex) when (CanQueueUntilPeerSeenOnLan() && !cancellationToken.IsCancellationRequested &&
-                                   (ex is OperationCanceledException || IsDeferrableSendFailure(ex)))
-        {
-            lock (_pendingSync)
-            {
-                _pendingOutgoing.Add(messageId);
-            }
-
-            throw new OutboundMessageQueuedException();
         }
         catch (Exception)
         {
@@ -873,16 +888,6 @@ public sealed class ChatP2pSession : IAsyncDisposable
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
-        }
-        catch (Exception ex) when (CanQueueUntilPeerSeenOnLan() && !cancellationToken.IsCancellationRequested &&
-                                   (ex is OperationCanceledException || IsDeferrableSendFailure(ex)))
-        {
-            lock (_pendingSync)
-            {
-                _pendingOutgoing.Add(messageId);
-            }
-
-            throw new OutboundMessageQueuedException();
         }
         catch (Exception)
         {
@@ -918,16 +923,6 @@ public sealed class ChatP2pSession : IAsyncDisposable
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
-        }
-        catch (Exception ex) when (CanQueueUntilPeerSeenOnLan() && !cancellationToken.IsCancellationRequested &&
-                                   (ex is OperationCanceledException || IsDeferrableSendFailure(ex)))
-        {
-            lock (_pendingSync)
-            {
-                _pendingOutgoing.Add(messageId);
-            }
-
-            throw new OutboundMessageQueuedException();
         }
         catch (Exception)
         {

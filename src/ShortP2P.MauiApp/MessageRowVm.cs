@@ -1,4 +1,5 @@
 using Microsoft.Maui.Controls;
+using ShortP2P.Client.Data;
 
 namespace ShortP2P.MauiApp;
 
@@ -19,4 +20,7 @@ public sealed class MessageRowVm
     public bool ShowDelivery { get; init; }
     public required string DeliveryGlyph { get; init; }
     public required Color DeliveryGlyphColor { get; init; }
+    public bool Outgoing { get; init; }
+    public MessageDeliveryStatus DeliveryStatus { get; init; }
+    public bool IsRetryable => Outgoing && DeliveryStatus == MessageDeliveryStatus.Failed && MessageId > 0;
 }

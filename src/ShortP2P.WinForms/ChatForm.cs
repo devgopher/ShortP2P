@@ -355,7 +355,7 @@ public sealed class ChatForm : Form
         {
             var kb = (voiceBlob.Length + 1023) / 1024;
             var caption = $"{whoPrefix} [{ts}] · голосовое · Ogg Opus · ~6 kbps mono · {kb} КБ";
-            return new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.Voice, voiceBlob, VoiceRecordHelper.VoiceFileName);
+            return new ChatLine(m.Id, caption, color, m.Outgoing, ds, ChatLineKind.Voice, voiceBlob, VoiceRecordHelper.VoiceFileName);
         }
 
         if (m.PayloadKind == (int)ChatPayloadKind.File && m.ImageBlob is { Length: > 0 } fileBlob)
@@ -365,12 +365,12 @@ public sealed class ChatForm : Form
             if (m.MimeType?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true)
             {
                 var caption = $"{whoPrefix} [{ts}] · видео · {name} · {kb} КБ";
-                return new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.Video, fileBlob, name);
+                return new ChatLine(m.Id, caption, color, m.Outgoing, ds, ChatLineKind.Video, fileBlob, name);
             }
 
             var captionWithHint =
                 $"{whoPrefix} [{ts}] · документ · {name} · {kb} КБ{FileCaptionNewline}{FileDownloadHintPrefix}{FileDownloadHintAction}";
-            return new ChatLine(captionWithHint, color, m.Outgoing, ds, ChatLineKind.File, fileBlob, name);
+            return new ChatLine(m.Id, captionWithHint, color, m.Outgoing, ds, ChatLineKind.File, fileBlob, name);
         }
 
         if (m.PayloadKind == (int)ChatPayloadKind.Image && m.ImageBlob is { Length: > 0 } blob)
@@ -378,11 +378,11 @@ public sealed class ChatForm : Form
             var kb = (blob.Length + 1023) / 1024;
             var mimeShort = string.IsNullOrEmpty(m.MimeType) ? "image" : m.MimeType.Replace("image/", "");
             var caption = $"{whoPrefix} [{ts}] · {mimeShort} · {kb} КБ";
-            return new ChatLine(caption, color, m.Outgoing, ds, ChatLineKind.Image, blob, null);
+            return new ChatLine(m.Id, caption, color, m.Outgoing, ds, ChatLineKind.Image, blob, null);
         }
 
         var full = $"{whoPrefix} [{ts}] {m.Text}";
-        return new ChatLine(full, color, m.Outgoing, ds, ChatLineKind.Text, null, null);
+        return new ChatLine(m.Id, full, color, m.Outgoing, ds, ChatLineKind.Text, null, null);
     }
 
     private async void OnMessagesMouseWheel(object? sender, MouseEventArgs e)
@@ -1126,6 +1126,11 @@ public sealed class ChatForm : Form
             return;
         if (_messages.Items[idx] is not ChatLine line)
             return;
+        if (line.IsRetryable)
+        {
+            _ = RetryFailedMessageAsync(line.MessageId);
+            return;
+        }
         if (line.Kind is not (ChatLineKind.Voice or ChatLineKind.Video))
             return;
         if (line.PayloadBytes is not { Length: > 0 })
@@ -1235,6 +1240,11 @@ public sealed class ChatForm : Form
     {
         if (_messages.SelectedItem is not ChatLine line)
             return;
+        if (line.IsRetryable)
+        {
+            _ = RetryFailedMessageAsync(line.MessageId);
+            return;
+        }
         if (line.Kind == ChatLineKind.Voice && line.PayloadBytes is { Length: > 0 })
         {
             _userActions.LogInformation("Chat {Peer}: play voice message (double-click)", _chat.PeerNickname);
@@ -1280,6 +1290,27 @@ public sealed class ChatForm : Form
         _userActions.LogInformation("Chat {Peer}: open long message viewer", _chat.PeerNickname);
         using var dlg = new MessageViewForm("Сообщение", line.DisplayText);
         dlg.ShowDialog(this);
+    }
+
+    private async Task RetryFailedMessageAsync(int messageId)
+    {
+        if (_p2PSession == null)
+            return;
+        ClearDeliveryIssue();
+        try
+        {
+            await _p2PSession.RetryFailedMessageAsync(messageId).ConfigureAwait(true);
+            ClearDeliveryIssue();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Retry failed message failed in chat {ChatId}", _chat.Id);
+            ShowDeliveryIssue(ex.Message);
+        }
+        finally
+        {
+            await ReloadMessagesAsync().ConfigureAwait(true);
+        }
     }
 
     private void OnMessagesDrawItem(object? sender, DrawItemEventArgs e)
@@ -1532,9 +1563,10 @@ public sealed class ChatForm : Form
         private bool _disposed;
         private Bitmap? _thumbnail;
 
-        public ChatLine(string displayText, Color color, bool outgoing, MessageDeliveryStatus deliveryStatus,
+        public ChatLine(int messageId, string displayText, Color color, bool outgoing, MessageDeliveryStatus deliveryStatus,
             ChatLineKind kind, byte[]? payloadBytes, string? fileSuggestedName)
         {
+            MessageId = messageId;
             DisplayText = displayText;
             Color = color;
             Outgoing = outgoing;
@@ -1547,6 +1579,7 @@ public sealed class ChatForm : Form
                 _thumbnail = TryCreateThumbnail(payloadBytes, ThumbMaxEdge);
         }
 
+        public int MessageId { get; }
         public string DisplayText { get; }
         public Color Color { get; }
         public bool Outgoing { get; }
@@ -1557,6 +1590,7 @@ public sealed class ChatForm : Form
         public Rectangle PlayButtonBounds { get; set; }
         public Rectangle SaveButtonBounds { get; set; }
         public Bitmap? Thumbnail => _thumbnail;
+        public bool IsRetryable => Outgoing && DeliveryStatus == MessageDeliveryStatus.Failed && MessageId > 0;
 
         public void Dispose()
         {

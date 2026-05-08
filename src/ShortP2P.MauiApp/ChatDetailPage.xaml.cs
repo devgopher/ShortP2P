@@ -236,6 +236,8 @@ public partial class ChatDetailPage : ContentPage
                 ShowDelivery = show,
                 DeliveryGlyph = glyph,
                 DeliveryGlyphColor = gColor,
+                Outgoing = m.Outgoing,
+                DeliveryStatus = ds,
             };
         }
 
@@ -250,12 +252,14 @@ public partial class ChatDetailPage : ContentPage
                 ShowTextBody = false,
                 IsImage = true,
                 IsFile = false,
-                MessageId = 0,
+                MessageId = m.Id,
                 ImagePreview = ImageSource.FromStream(() => new MemoryStream(blob)),
                 MessageColor = color,
                 ShowDelivery = show,
                 DeliveryGlyph = glyph,
                 DeliveryGlyphColor = gColor,
+                Outgoing = m.Outgoing,
+                DeliveryStatus = ds,
             };
         }
 
@@ -266,12 +270,14 @@ public partial class ChatDetailPage : ContentPage
             ShowTextBody = true,
             IsImage = false,
             IsFile = false,
-            MessageId = 0,
+            MessageId = m.Id,
             ImagePreview = null,
             MessageColor = color,
             ShowDelivery = show,
             DeliveryGlyph = glyph,
             DeliveryGlyphColor = gColor,
+            Outgoing = m.Outgoing,
+            DeliveryStatus = ds,
         };
     }
 
@@ -689,7 +695,16 @@ public partial class ChatDetailPage : ContentPage
             }
         }
 
-        if (vm == null || !vm.IsFile || vm.MessageId == 0)
+        if (vm == null || vm.MessageId == 0)
+            return;
+
+        if (vm.IsRetryable)
+        {
+            await RetryFailedMessageAsync(vm.MessageId).ConfigureAwait(true);
+            return;
+        }
+
+        if (!vm.IsFile)
             return;
 
         try
@@ -780,5 +795,27 @@ public partial class ChatDetailPage : ContentPage
     {
         DeliveryIssueLabel.Text = string.Empty;
         DeliveryIssueLabel.IsVisible = false;
+    }
+
+    private async Task RetryFailedMessageAsync(int messageId)
+    {
+        if (_p2pSession == null)
+            return;
+
+        ClearDeliveryIssue();
+        try
+        {
+            await _p2pSession.RetryFailedMessageAsync(messageId).ConfigureAwait(true);
+            ClearDeliveryIssue();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Retry failed message failed");
+            ShowDeliveryIssue(ex.Message);
+        }
+        finally
+        {
+            await ReloadMessagesAsync().ConfigureAwait(true);
+        }
     }
 }
