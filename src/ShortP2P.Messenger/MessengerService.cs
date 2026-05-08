@@ -30,7 +30,7 @@ public sealed class MessengerService(
     private readonly object _sync = new();
     private readonly Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> _sendCipherAsync =
         sendCipherAsync ?? throw new ArgumentNullException(nameof(sendCipherAsync));
-    private readonly ConcurrentDictionary<Guid, TaskCompletionSource> _ackWaiters = new();
+    private readonly ConcurrentDictionary<Guid, AckWaiter> _ackWaiters = new();
     private readonly HashSet<Guid> _deliveredMessageIds = [];
     /// <summary>Идентификаторы сообщений, отправленных этим экземпляром (защита от приёма собственного эха/hairpin).</summary>
     private readonly HashSet<Guid> _ownOutboundMessageIds = [];
@@ -98,33 +98,50 @@ public sealed class MessengerService(
                 nameof(data));
 
         Exception? last = null;
-        foreach (var dest in destinationsInOrder)
+        var messageId = Guid.NewGuid();
+        var waiter = new AckWaiter();
+        _ackWaiters[messageId] = waiter;
+        try
         {
-            var messageId = Guid.NewGuid();
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(ackTimeout);
-            var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _ackWaiters[messageId] = tcs;
-            try
+            foreach (var dest in destinationsInOrder)
             {
-                await SendChunksForMessageAsync(data, messageId, dest, cancellationToken).ConfigureAwait(false);
-                await tcs.Task.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
-                return;
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(ackTimeout);
+                try
+                {
+                    await SendChunksForMessageAsync(data, messageId, dest, cancellationToken).ConfigureAwait(false);
+                    await waiter.Task.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+                    return;
+                }
+                catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested &&
+                                                             !cancellationToken.IsCancellationRequested)
+                {
+                    last = ex;
+                    if (waiter.NackObserved)
+                    {
+                        using var nackWaitCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                        nackWaitCts.CancelAfter(ackTimeout);
+                        try
+                        {
+                            await waiter.Task.WaitAsync(nackWaitCts.Token).ConfigureAwait(false);
+                            return;
+                        }
+                        catch (OperationCanceledException nackEx) when (nackWaitCts.IsCancellationRequested &&
+                                                                        !cancellationToken.IsCancellationRequested)
+                        {
+                            last = nackEx;
+                            break;
+                        }
+                    }
+                }
             }
-            catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested &&
-                                                         !cancellationToken.IsCancellationRequested)
-            {
-                last = ex;
-                _ackWaiters.TryRemove(messageId, out _);
-            }
-            catch
-            {
-                _ackWaiters.TryRemove(messageId, out _);
-                throw;
-            }
-        }
 
-        throw new IOException("Peer did not acknowledge message delivery on any address.", last);
+            throw new IOException("Peer did not acknowledge message delivery on any address.", last);
+        }
+        finally
+        {
+            _ackWaiters.TryRemove(messageId, out _);
+        }
     }
 
     private async ValueTask SendChunksForMessageAsync(byte[] data, Guid messageId, TransportAddress destination,
@@ -207,13 +224,15 @@ public sealed class MessengerService(
             {
                 _outboundChunks.Remove(ackId);
             }
-            if (_ackWaiters.TryRemove(ackId, out var w))
+            if (_ackWaiters.TryGetValue(ackId, out var w))
                 w.TrySetResult();
             return;
         }
 
         if (DeliveryNackCodec.TryParse(decrypted, out var nackMessageId, out var missingChunkIndices))
         {
+            if (_ackWaiters.TryGetValue(nackMessageId, out var waiter))
+                waiter.MarkNackObserved();
             await ResendMissingChunksAsync(nackMessageId, missingChunkIndices, msg.RemoteAddress, cancellationToken)
                 .ConfigureAwait(false);
             return;
@@ -280,6 +299,13 @@ public sealed class MessengerService(
             {
                 missing = CollectMissingChunkIndices(state);
                 state.LastNackUtc = now;
+            }
+
+            if (!sendDeliveryAck && !state.NackCheckScheduled)
+            {
+                state.NackCheckScheduled = true;
+                _ = ScheduleReassemblyNackChecksAsync(messageId, msg.RemoteAddress,
+                    _cts?.Token ?? CancellationToken.None);
             }
         }
 
@@ -411,6 +437,52 @@ public sealed class MessengerService(
         return nacks;
     }
 
+    private async Task ScheduleReassemblyNackChecksAsync(Guid messageId, TransportAddress replyTo,
+        CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(_options.ReassemblyTimeout, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            int[] missing;
+            lock (_sync)
+            {
+                if (!_pending.TryGetValue(messageId, out var state))
+                    return;
+
+                var now = DateTimeOffset.UtcNow;
+                var idleFor = now - state.LastUpdatedUtc;
+                if (idleFor >= _options.ReassemblyTimeout + _options.ReassemblyTimeout)
+                {
+                    _pending.Remove(messageId);
+                    return;
+                }
+
+                if (state.Received >= state.TotalChunks)
+                {
+                    _pending.Remove(messageId);
+                    return;
+                }
+
+                if (now - state.LastNackUtc < NackMinInterval)
+                    continue;
+
+                missing = CollectMissingChunkIndices(state);
+                state.LastNackUtc = now;
+            }
+
+            if (missing.Length > 0)
+                _ = SendDeliveryNackAsync(messageId, missing, replyTo, cancellationToken);
+        }
+    }
+
     private static bool TryParseChunk(byte[] decrypted, out Guid messageId, out int chunkIndex, out int totalChunks,
         out byte[] payloadBytes)
     {
@@ -484,6 +556,7 @@ public sealed class MessengerService(
         public int Received { get; set; }
         public DateTimeOffset LastUpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
         public DateTimeOffset LastNackUtc { get; set; } = DateTimeOffset.MinValue;
+        public bool NackCheckScheduled { get; set; }
     }
 
     private sealed class OutboundCacheEntry(TransportAddress destination, byte[][] encryptedChunks)
@@ -491,5 +564,29 @@ public sealed class MessengerService(
         public TransportAddress Destination { get; } = destination;
         public byte[][] EncryptedChunks { get; } = encryptedChunks;
         public DateTimeOffset LastAccessUtc { get; set; } = DateTimeOffset.UtcNow;
+    }
+
+    private sealed class AckWaiter
+    {
+        private readonly TaskCompletionSource _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _nackObserved;
+
+        public Task Task => _tcs.Task;
+        public bool NackObserved => _nackObserved != 0;
+
+        public void MarkNackObserved()
+        {
+            Interlocked.Exchange(ref _nackObserved, 1);
+        }
+
+        public void TrySetResult()
+        {
+            _tcs.TrySetResult();
+        }
+
+        public void TrySetCanceled()
+        {
+            _tcs.TrySetCanceled();
+        }
     }
 }
