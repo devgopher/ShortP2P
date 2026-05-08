@@ -47,7 +47,7 @@ public class P2PCryptoTests
         {
             var plaintext = RandomBytes(size);
             var encrypted = aliceSession.Encrypt(plaintext);
-            Assert.True(encrypted.Length <= 128, $"Encrypted packet len={encrypted.Length}, plaintext len={size}");
+            Assert.True(encrypted.Length <= 1024, $"Encrypted packet len={encrypted.Length}, plaintext len={size}");
 
             var decrypted = bobSession.Decrypt(encrypted);
             Assert.True(plaintext.SequenceEqual(decrypted), $"Mismatch at plaintext len={size}");
@@ -65,7 +65,7 @@ public class P2PCryptoTests
         var plaintext = RandomBytes(32);
         var encrypted = hs.Session.Encrypt(plaintext);
 
-        Assert.True(encrypted.Length <= 128);
+        Assert.True(encrypted.Length <= 1024);
 
         var tampered = (byte[])encrypted.Clone();
         tampered[^1] ^= 0x01;

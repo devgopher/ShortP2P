@@ -6,11 +6,11 @@ namespace ShortP2P.Crypto
     /// <summary>
     ///     Established session keys derived from ECDH.
     ///     Provides packet encryption/decryption (AES-CBC + HMAC-SHA256 truncated).
-    ///     Encrypted packet size is limited to <= 128 bytes.
+    ///     Encrypted packet size is limited to <= 1024 bytes.
     /// </summary>
     public sealed class P2PSession
     {
-        private const int MaxEncryptedPacketBytes = 128;
+        private const int MaxEncryptedPacketBytes = 1024;
         private const int IvBytes = 16;
         private const int TagBytes = 16; // truncated HMAC
         private const int AesBlockBytes = 16;
@@ -30,15 +30,15 @@ namespace ShortP2P.Crypto
         }
 
         /// <summary>
-        ///     Maximum plaintext length that guarantees encrypted packet size &lt;= 128 bytes.
+        ///     Maximum plaintext length that guarantees encrypted packet size &lt;= 1024 bytes.
         /// </summary>
         public int MaxPlaintextBytes
         {
             get
             {
-                // packet = IV(16) + ciphertext(padded to 16) + tag(16) <= 128
-                // => paddedLen <= 96; PKCS7 adds at least one block => plaintextLen <= 95
-                return 95;
+                // packet = IV(16) + ciphertext(padded to 16) + tag(16) <= MaxEncryptedPacketBytes
+                // => paddedLen <= MaxEncryptedPacketBytes - 32; PKCS7 adds at least one block
+                return MaxEncryptedPacketBytes - IvBytes - TagBytes - 1;
             }
         }
 
