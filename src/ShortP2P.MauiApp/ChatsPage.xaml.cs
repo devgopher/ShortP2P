@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
+using ShortP2P.Client;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
 using ShortP2P.Crypto;
@@ -154,6 +155,26 @@ public partial class ChatsPage : ContentPage
     {
         var page = MauiProgram.Services.GetRequiredService<MyQrPage>();
         await Navigation.PushAsync(page).ConfigureAwait(true);
+    }
+
+    private async void OnMyAddressesClicked(object? sender, EventArgs e)
+    {
+        var u = _auth.CurrentUser;
+        if (u == null)
+            return;
+        string? bt = null;
+        try
+        {
+            bt = await PlatformLocalBluetoothMac.TryGetAsync().ConfigureAwait(true);
+        }
+        catch
+        {
+            // ignore
+        }
+
+        var text = MyTransportEndpointsText.Build(u, _p2p.Settings, bt);
+        await Clipboard.Default.SetTextAsync(text).ConfigureAwait(true);
+        await DisplayAlert("Copied", "My addresses copied to clipboard.", "OK").ConfigureAwait(true);
     }
 
     private async void OnCopyKeysClicked(object? sender, EventArgs e)

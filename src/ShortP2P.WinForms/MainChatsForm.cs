@@ -7,6 +7,7 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Crypto;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
+using ShortP2P.Client;
 using ShortP2P.Client.Services;
 using ShortP2P.Transport.Bluetooth.Windows;
 
@@ -79,6 +80,7 @@ public sealed class MainChatsForm : Form
         var toolbar = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
         var btnAdd = new Button { Text = "Add chat", AutoSize = true };
         var btnMyQr = new Button { Text = "My QR", AutoSize = true };
+        var btnMyAddresses = new Button { Text = "My addresses", AutoSize = true };
         var btnCopy = new Button { Text = "Copy keys", AutoSize = true };
         var btnLogout = new Button { Text = "Logout", AutoSize = true };
         var btnRouting = new Button { Text = "P2P routing", AutoSize = true };
@@ -88,6 +90,7 @@ public sealed class MainChatsForm : Form
         toolbar.Controls.Add(btnAdd);
         toolbar.Controls.Add(btnDelete);
         toolbar.Controls.Add(btnMyQr);
+        toolbar.Controls.Add(btnMyAddresses);
         toolbar.Controls.Add(btnCopy);
         toolbar.Controls.Add(btnLanScan);
         toolbar.Controls.Add(btnRouting);
@@ -97,6 +100,7 @@ public sealed class MainChatsForm : Form
         btnAdd.Click += async (_, _) => await OnAddChatAsync().ConfigureAwait(true);
         btnDelete.Click += async (_, _) => await OnDeleteChatAsync().ConfigureAwait(true);
         btnMyQr.Click += OnMyQr;
+        btnMyAddresses.Click += OnMyAddresses;
         btnCopy.Click += OnCopyKeys;
         btnLanScan.Click += OnLanScan;
         btnRouting.Click += OnRoutingSettings;
@@ -346,6 +350,36 @@ public sealed class MainChatsForm : Form
         _userActions.LogInformation("Chats: open My QR");
         using var f = _services.GetRequiredService<MyQrForm>();
         f.ShowDialog(this);
+    }
+
+    private async void OnMyAddresses(object? sender, EventArgs e)
+    {
+        var u = _auth.CurrentUser;
+        if (u == null)
+            return;
+        _userActions.LogInformation("Chats: copy my transport addresses");
+        string? bt = null;
+        try
+        {
+            bt = await LocalAdapterBluetoothMac.TryGetAdapterMacStringAsync().ConfigureAwait(true);
+        }
+        catch
+        {
+            // ignore
+        }
+
+        var text = MyTransportEndpointsText.Build(u, _p2P.Settings, bt);
+        try
+        {
+            Clipboard.SetText(text);
+            MessageBox.Show(this, "My addresses copied to clipboard.", "Copied", MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            _userActions.LogInformation("Chats: copy addresses failed ({Message})", ex.Message);
+            MessageBox.Show(this, ex.Message, "Clipboard", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
 
     private async Task OnAddChatAsync()
