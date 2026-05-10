@@ -1,62 +1,64 @@
-﻿using System;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using Windows.Devices.Bluetooth.Advertisement;
+﻿using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Devices.Enumeration;
 
-class Program
+namespace QuickBlueToothLE;
+
+internal class Program
 {
-    static async Task Main()
+    private static DeviceInformation device = null;
+
+    public static string HEART_RATE_SERVICE_ID = "180d";
+
+
+    private static async Task Main(string[] args)
     {
-        // var watcher = new BluetoothLEAdvertisementWatcher
-        // {
-        //     ScanningMode = BluetoothLEScanningMode.Active
-        // };
-        // watcher.Received += async (s, e) =>
-        // {
-        //     var name = e.Advertisement.LocalName;
-        //     Console.WriteLine($"Addr: {e.BluetoothAddress:X}, RSSI:{e.RawSignalStrengthInDBm}, Name:'{name}'");
-        //     await Demo(e.BluetoothAddress);
-        // };
-        // watcher.Stopped += (s,e) => Console.WriteLine("Watcher stopped: " + e.Error);
-        // watcher.Start();
-        // Console.WriteLine("Scanning... press Enter to stop");
-        // Console.ReadLine();
-        // watcher.Stop();
-        //string selector = $"System.Devices.Aep.DeviceAddress:=\"B960D3FE3ADB\"";
+        void OnAdvertisementReceived(BluetoothLEAdvertisementWatcher sender,
+            BluetoothLEAdvertisementReceivedEventArgs args)
+        {
+            // Bluetooth address в формате шестнадцатеричного
+            string address = args.BluetoothAddress.ToString("X");
+            short rssi = args.RawSignalStrengthInDBm;
+            Console.WriteLine($"Device: 0x{address}, RSSI: {rssi} dBm, Timestamp: {args.Timestamp}");
+
+            // Пример чтения данных из рекламного пакета (local name, manufacturer data)
+            var localName = args.Advertisement.LocalName;
+            if (!string.IsNullOrEmpty(localName))
+                Console.WriteLine($"  LocalName: {localName}");
+
+            foreach (var md in args.Advertisement.ManufacturerData)
+            {
+                var companyId = md.CompanyId;
+                var data = md.Data; // IBuffer
+                byte[] bytes = new byte[data.Length];
+                Windows.Storage.Streams.DataReader.FromBuffer(data).ReadBytes(bytes);
+                Console.WriteLine($"  Manufacturer: 0x{companyId:X}, Data: {BitConverter.ToString(bytes)}");
+            }
+
+            foreach (var section in args.Advertisement.DataSections)
+            {
+                Console.WriteLine($"  DataSection Type: 0x{section.DataType:X}, Length: {section.Data.Length}");
+            }
+        }
+
+        // Query for extra properties you want returned
+        string[] requestedProperties = { "System.Devices.Aep.DeviceAddress", "System.Devices.Aep.IsConnected" };
+
+        var deviceWatcher =
+            new BluetoothLEAdvertisementWatcher
+            {
+                SignalStrengthFilter =
+                {
+                    SamplingInterval = TimeSpan.FromMilliseconds(500)
+                },
+                ScanningMode = BluetoothLEScanningMode.Active
+            };
+        deviceWatcher.Received += OnAdvertisementReceived;
+        deviceWatcher.Start();
         
-        
-        var devices = await DeviceInformation.FindAllAsync();
+        Console.WriteLine("Watcher started. Нажмите Enter для остановки...");
+        Console.ReadLine();
+ач
 
-        // var devices = await DeviceInformation.FindAllAsync(DeviceClass.All);
-        var dd = devices.Where(d => d.IsEnabled && d.Name.Contains("DACHA"));
-        var all = dd.Select(d => JsonSerializer.Serialize(d)).ToArray();
-        var canPair = dd.Where(d => d.Pairing.CanPair).ToArray();
-        var paired = dd.Where(d => d.Pairing.IsPaired).ToArray();
-
-        foreach (var d in devices) Console.WriteLine($"Found: {d.Name} ({d.Id})");
-    }
-    
-    static async Task Demo(ulong address)
-    {
-        // Device address hex uppercase without 0x, e.g., "AABBCCDDEEFF"
-         string addrHex = address.ToString("X");
-         
-        // string selector = $"System.Devices.Aep.DeviceAddress:=\"{addrHex}\" AND System.Devices.Aep.IsConnected:=System.StructuredQueryType.Boolean#False";
-        //
-        // var t = new Thread(async () =>
-        // {
-        //     try
-        //     {
-        //
-        //     }
-        //     catch (Exception ex) { Console.WriteLine("Error: " + ex); }
-        // });
-        // t.SetApartmentState(ApartmentState.STA);
-        // t.Start();
-        // t.Join();
-
-        
-
+        deviceWatcher.Stop();
     }
 }
