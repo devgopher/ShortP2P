@@ -12,9 +12,17 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
 using ShortP2P.MauiApp.Services;
 using ShortP2P.Transport;
+using ShortP2P.Transport.Abstractions;
+#if ANDROID
+using ShortP2P.Transport.Bluetooth.Android;
+#endif
+#if WINDOWS
+using ShortP2P.Transport.Bluetooth.Windows;
+#endif
 
 namespace ShortP2P.MauiApp;
 
@@ -55,7 +63,23 @@ public static class MauiProgram
         builder.Services.AddSingleton<IUdpTransportFactory, UdpTransportFactory>();
         builder.Services.AddSingleton<ChatSessionCache>();
         builder.Services.AddSingleton<P2pCryptoSessionCache>();
-        builder.Services.AddSingleton<UserP2pRuntime>();
+#if ANDROID
+        builder.Services.AddSingleton<ITransport>(_ => new AndroidBluetoothTransport(global::Android.App.Application.Context));
+#elif WINDOWS
+        builder.Services.AddSingleton<ITransport>(_ => new WindowsBluetoothTransport());
+#endif
+        builder.Services.AddSingleton(sp => new UserP2pRuntime(
+            sp.GetRequiredService<P2pRoutingSettingsStore>(),
+            sp.GetRequiredService<AuthService>(),
+            sp.GetRequiredService<ChatRepository>(),
+            sp.GetRequiredService<ChatMediaOptions>(),
+            sp.GetRequiredService<IUdpTransportFactory>(),
+            sp.GetRequiredService<ChatSessionCache>(),
+            sp.GetRequiredService<P2pCryptoSessionCache>(),
+            sp.GetService<ITransport>(),
+            additionalDiscoveryTransports: null,
+            sp.GetService<IRouteTableSnapshotSource>(),
+            sp.GetService<IDiscoveryPingStore>()));
         builder.Services.AddTransient<LoginPage>();
         builder.Services.AddTransient<RegisterPage>();
         builder.Services.AddTransient<ChatsPage>();

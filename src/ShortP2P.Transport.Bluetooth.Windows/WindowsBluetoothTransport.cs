@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.Versioning;
 using System.Threading.Channels;
+using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
@@ -19,9 +20,8 @@ public sealed class WindowsBluetoothTransport : ITransport
 {
     private const int DefaultChannelCapacity = 256;
     private const uint BluetoothUnavailableHResult = 0x800710DF;
-    private static readonly Guid BleServiceUuid = Guid.Parse("9FE8E58B-AF85-4D91-B245-2B40EA0439C7");
-    private static readonly Guid BleRxCharacteristicUuid = Guid.Parse("8DFE6F10-6CB7-4E73-A918-DC47AC34D9E9");
 
+    private readonly WindowsBluetoothTransportOptions _options;
     private readonly Channel<TransportReceiveMessage> _inbound =
         Channel.CreateBounded<TransportReceiveMessage>(new BoundedChannelOptions(DefaultChannelCapacity)
         {
@@ -37,6 +37,15 @@ public sealed class WindowsBluetoothTransport : ITransport
     private CancellationTokenSource? _runCts;
     private GattServiceProvider? _bleServiceProvider;
     private GattLocalCharacteristic? _bleRxCharacteristic;
+
+    public WindowsBluetoothTransport() : this(default)
+    {
+    }
+
+    public WindowsBluetoothTransport(WindowsBluetoothTransportOptions options)
+    {
+        _options = options;
+    }
 
     public TransportKind Kind => TransportKind.Bluetooth;
 
@@ -99,7 +108,8 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     private async Task StartBleGattAsync(CancellationToken ct)
     {
-        var create = await GattServiceProvider.CreateAsync(BleServiceUuid).AsTask(ct).ConfigureAwait(false);
+        var create = await GattServiceProvider.CreateAsync(BleShortP2PGattProtocol.ServiceUuid).AsTask(ct)
+            .ConfigureAwait(false);
         if (create.Error != BluetoothError.Success || create.ServiceProvider == null)
             return;
         _bleServiceProvider = create.ServiceProvider;
@@ -113,20 +123,21 @@ public sealed class WindowsBluetoothTransport : ITransport
             WriteProtectionLevel = GattProtectionLevel.Plain,
             UserDescription = "ShortP2P BLE TX/RX"
         };
-        var charResult = await _bleServiceProvider.Service.CreateCharacteristicAsync(BleRxCharacteristicUuid, charParameters)
+        var charResult = await _bleServiceProvider.Service
+            .CreateCharacteristicAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid, charParameters)
             .AsTask(ct).ConfigureAwait(false);
         if (charResult.Error != BluetoothError.Success || charResult.Characteristic == null)
             return;
         _bleRxCharacteristic = charResult.Characteristic;
         _bleRxCharacteristic.WriteRequested += OnBleWriteRequested;
-        StartBleGattProviderAdvertising(_bleServiceProvider);
+        StartBleGattProviderAdvertising(_bleServiceProvider, _options.GattDiscoverable);
     }
 
-    private static void StartBleGattProviderAdvertising(GattServiceProvider provider)
+    private static void StartBleGattProviderAdvertising(GattServiceProvider provider, bool discoverable)
     {
         var advertising = new GattServiceProviderAdvertisingParameters
         {
-            IsDiscoverable = true,
+            IsDiscoverable = discoverable,
             IsConnectable = true,
         };
 
@@ -297,11 +308,13 @@ public sealed class WindowsBluetoothTransport : ITransport
             _blePeerDevices[bluetoothAddress] = device;
         }
 
-        var serviceResult = await device.GetGattServicesForUuidAsync(BleServiceUuid).AsTask(ct).ConfigureAwait(false);
+        var serviceResult = await device.GetGattServicesForUuidAsync(BleShortP2PGattProtocol.ServiceUuid).AsTask(ct)
+            .ConfigureAwait(false);
         if (serviceResult.Status != GattCommunicationStatus.Success || serviceResult.Services.Count == 0)
             throw new InvalidOperationException("BLE service not found on remote device.");
         var service = serviceResult.Services[0];
-        var charResult = await service.GetCharacteristicsForUuidAsync(BleRxCharacteristicUuid).AsTask(ct)
+        var charResult = await service.GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid)
+            .AsTask(ct)
             .ConfigureAwait(false);
         var rx = charResult.Characteristics.FirstOrDefault()
                  ?? throw new InvalidOperationException("BLE RX characteristic not found on remote device.");

@@ -80,6 +80,10 @@
 		<ProjectReference Include="..\ShortP2P.Client\ShortP2P.Client.csproj" />
 	</ItemGroup>
 
+	<ItemGroup Condition="$(TargetFramework.Contains('-android'))">
+		<ProjectReference Include="..\ShortP2P.Transport.Bluetooth.Android\ShortP2P.Transport.Bluetooth.Android.csproj" />
+	</ItemGroup>
+
 	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'android'">
 		<None Update="nlog.config">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
