@@ -5,6 +5,7 @@ using System.Threading.Channels;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 using Windows.Devices.Bluetooth;
+using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Devices.Enumeration;
 using Windows.Storage.Streams;
@@ -32,11 +33,13 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     private readonly ConcurrentDictionary<ulong, GattCharacteristic> _bleOutboundRx = new();
     private readonly ConcurrentDictionary<ulong, BluetoothLEDevice> _blePeerDevices = new();
+    private readonly ConcurrentDictionary<ulong, BluetoothLEDevice> _bleAdvertisementDeviceCache = new();
     private readonly ConcurrentDictionary<ulong, SemaphoreSlim> _sendLocks = new();
 
     private CancellationTokenSource? _runCts;
     private GattServiceProvider? _bleServiceProvider;
     private GattLocalCharacteristic? _bleRxCharacteristic;
+    private BluetoothLEAdvertisementWatcher? _bleShortP2PAdvertisementWatcher;
 
     public WindowsBluetoothTransport() : this(default)
     {
@@ -131,6 +134,70 @@ public sealed class WindowsBluetoothTransport : ITransport
         _bleRxCharacteristic = charResult.Characteristic;
         _bleRxCharacteristic.WriteRequested += OnBleWriteRequested;
         StartBleGattProviderAdvertising(_bleServiceProvider, _options.GattDiscoverable);
+        StartBleShortP2PAdvertisementWatcher();
+    }
+
+    /// <summary>
+    ///     WinRT часто не открывает устройство только по MAC, пока стек не «видел» рекламу.
+    ///     Пассивный watcher по UUID ShortP2P держит кэш <see cref="BluetoothLEDevice" /> для последующих
+    ///     <see cref="BluetoothLEDevice.FromBluetoothAddressAsync" /> без сопряжения в настройках.
+    /// </summary>
+    private void StartBleShortP2PAdvertisementWatcher()
+    {
+        try
+        {
+            var watcher = new BluetoothLEAdvertisementWatcher
+            {
+                ScanningMode = BluetoothLEScanningMode.Passive,
+            };
+            var filter = new BluetoothLEAdvertisementFilter();
+            filter.Advertisement.ServiceUuids.Add(BleShortP2PGattProtocol.ServiceUuid);
+            watcher.AdvertisementFilter = filter;
+            watcher.Received += OnBleShortP2PAdvertisementReceived;
+            watcher.Start();
+            _bleShortP2PAdvertisementWatcher = watcher;
+        }
+        catch
+        {
+            // нет Bluetooth / политика — только прямое открытие по MAC
+        }
+    }
+
+    private async void OnBleShortP2PAdvertisementReceived(BluetoothLEAdvertisementWatcher sender,
+        BluetoothLEAdvertisementReceivedEventArgs args)
+    {
+        var addr = args.BluetoothAddress;
+        if (addr == 0)
+            return;
+        if (_blePeerDevices.ContainsKey(addr) || _bleAdvertisementDeviceCache.ContainsKey(addr))
+            return;
+        try
+        {
+            var dev = await BluetoothLEDevice.FromBluetoothAddressAsync(addr).AsTask().ConfigureAwait(false);
+            if (dev != null)
+                _bleAdvertisementDeviceCache.TryAdd(addr, dev);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void StopBleShortP2PAdvertisementWatcher()
+    {
+        var w = _bleShortP2PAdvertisementWatcher;
+        _bleShortP2PAdvertisementWatcher = null;
+        if (w == null)
+            return;
+        try
+        {
+            w.Received -= OnBleShortP2PAdvertisementReceived;
+            w.Stop();
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     private static void StartBleGattProviderAdvertising(GattServiceProvider provider, bool discoverable)
@@ -205,6 +272,10 @@ public sealed class WindowsBluetoothTransport : ITransport
         try
         {
             await SendViaBleAsync(btAddr, payload, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // ignore
         }
         finally
         {
@@ -300,33 +371,77 @@ public sealed class WindowsBluetoothTransport : ITransport
             device = await TryOpenBluetoothLeDeviceAsync(bluetoothAddress, ct).ConfigureAwait(false);
             if (device == null)
                 throw new InvalidOperationException(
-                    "Bluetooth LE device not found. Pair the device in Windows Settings, ensure Bluetooth is on, " +
-                    "and that the MAC in the contact matches the peer (try re-adding after a fresh scan). " +
-                    "FromBluetoothAddressAsync only works for paired devices or devices recently seen by the system.");
+                    "Bluetooth LE device not found. Leave ShortP2P running so advertising peers are seen, run a LAN/BLE scan, " +
+                    "or pair in Windows Settings. Windows often cannot open BLE by MAC until the device was seen over the air.");
 
-            await EnsureBlePairedAsync(device, ct).ConfigureAwait(false);
-            _blePeerDevices[bluetoothAddress] = device;
+            try
+            {
+                var rx = await DiscoverBleRxWithOptionalPairingAsync(device, ct).ConfigureAwait(false);
+                _blePeerDevices[bluetoothAddress] = device;
+                _bleOutboundRx[bluetoothAddress] = rx;
+                return rx;
+            }
+            catch
+            {
+                try
+                {
+                    device.Dispose();
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                throw;
+            }
         }
 
+        var rxExisting = await DiscoverBleRxWithOptionalPairingAsync(device, ct).ConfigureAwait(false);
+        _bleOutboundRx[bluetoothAddress] = rxExisting;
+        return rxExisting;
+    }
+
+    private async Task<GattCharacteristic> DiscoverBleRxWithOptionalPairingAsync(BluetoothLEDevice device,
+        CancellationToken ct)
+    {
+        var first = await TryDiscoverBleRxAsync(device, ct).ConfigureAwait(false);
+        if (first.rx != null)
+            return first.rx;
+
+        if (!device.DeviceInformation.Pairing.IsPaired &&
+            (first.status == GattCommunicationStatus.AccessDenied ||
+             first.status == GattCommunicationStatus.ProtocolError))
+        {
+            await EnsureBlePairedAsync(device, ct).ConfigureAwait(false);
+            var second = await TryDiscoverBleRxAsync(device, ct).ConfigureAwait(false);
+            if (second.rx != null)
+                return second.rx;
+        }
+
+        throw new InvalidOperationException("BLE service not found on remote device.");
+    }
+
+    private static async Task<(GattCharacteristic? rx, GattCommunicationStatus status)> TryDiscoverBleRxAsync(
+        BluetoothLEDevice device, CancellationToken ct)
+    {
         var serviceResult = await device.GetGattServicesForUuidAsync(BleShortP2PGattProtocol.ServiceUuid).AsTask(ct)
             .ConfigureAwait(false);
         if (serviceResult.Status != GattCommunicationStatus.Success || serviceResult.Services.Count == 0)
-            throw new InvalidOperationException("BLE service not found on remote device.");
+            return (null, serviceResult.Status);
+
         var service = serviceResult.Services[0];
         var charResult = await service.GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid)
             .AsTask(ct)
             .ConfigureAwait(false);
-        var rx = charResult.Characteristics.FirstOrDefault()
-                 ?? throw new InvalidOperationException("BLE RX characteristic not found on remote device.");
-        _bleOutboundRx[bluetoothAddress] = rx;
-        return rx;
+        var rx = charResult.Characteristics.FirstOrDefault();
+        return rx != null ? (rx, GattCommunicationStatus.Success) : (null, GattCommunicationStatus.ProtocolError);
     }
 
     /// <summary>
     ///     WinRT часто возвращает null из <see cref="BluetoothLEDevice.FromBluetoothAddressAsync"/>, если пир не в кэше
     ///     и не сопряжён. Пробуем несколько API и оба порядка байт MAC (ошибка при ручном вводе / чужой формат QR).
     /// </summary>
-    private static async Task<BluetoothLEDevice?> TryOpenBluetoothLeDeviceAsync(ulong bluetoothAddress,
+    private async Task<BluetoothLEDevice?> TryOpenBluetoothLeDeviceAsync(ulong bluetoothAddress,
         CancellationToken ct)
     {
         foreach (var addr in AlternateBluetoothAddresses(bluetoothAddress))
@@ -350,13 +465,16 @@ public sealed class WindowsBluetoothTransport : ITransport
             yield return reversed;
     }
 
-    private static async Task<BluetoothLEDevice?> TryOpenBluetoothLeDeviceOneAddressAsync(ulong bluetoothAddress,
+    private async Task<BluetoothLEDevice?> TryOpenBluetoothLeDeviceOneAddressAsync(ulong bluetoothAddress,
         CancellationToken ct)
     {
+        if (_bleAdvertisementDeviceCache.TryRemove(bluetoothAddress, out var warmed) && warmed is not null)
+            return warmed;
+
         var dev = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress).AsTask(ct).ConfigureAwait(false);
         if (dev != null)
             return dev;
-        
+
         dev = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress, BluetoothAddressType.Public)
             .AsTask(ct).ConfigureAwait(false);
         if (dev != null)
@@ -377,7 +495,8 @@ public sealed class WindowsBluetoothTransport : ITransport
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
         if (_bleServiceProvider == null && _bleRxCharacteristic == null && _blePeerDevices.Count == 0 &&
-            _bleOutboundRx.Count == 0 && _runCts == null)
+            _bleOutboundRx.Count == 0 && _runCts == null && _bleShortP2PAdvertisementWatcher == null &&
+            _bleAdvertisementDeviceCache.IsEmpty)
             return;
 
         try
@@ -389,12 +508,28 @@ public sealed class WindowsBluetoothTransport : ITransport
             // ignore
         }
 
+        StopBleShortP2PAdvertisementWatcher();
+
         _bleOutboundRx.Clear();
 
         foreach (var kv in _blePeerDevices)
             kv.Value.Dispose();
 
         _blePeerDevices.Clear();
+
+        foreach (var kv in _bleAdvertisementDeviceCache)
+        {
+            try
+            {
+                kv.Value.Dispose();
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        _bleAdvertisementDeviceCache.Clear();
 
         if (_bleRxCharacteristic != null)
         {
