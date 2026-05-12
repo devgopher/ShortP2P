@@ -1,17 +1,18 @@
 using System.Net;
+using ShortP2P.Transport;
 
 namespace ShortP2P.Client;
 
 /// <summary>
-///     Парсинг поля <see cref="Data.ChatEntity.PeerHost" />: один или несколько IP через запятую, точку с запятой,
-///     вертикальную черту или пробел.
+///     Парсинг поля <see cref="Data.ChatEntity.PeerHost" />: один или несколько IPv4/IPv6 и/или MAC Bluetooth
+///     через запятую, точку с запятой, вертикальную черту или пробел.
 /// </summary>
 public static class PeerHostList
 {
     private static readonly char[] Separators = [',', ';', '|', ' ', '\n', '\r', '\t'];
 
     /// <summary>Уникальные корректные IP в порядке появления.</summary>
-    public static IReadOnlyList<string> ParseCandidates(string? peerHost)
+    public static IReadOnlyList<string> ParseIpCandidates(string? peerHost)
     {
         return !string.IsNullOrWhiteSpace(peerHost)
             ? peerHost.Split(Separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -19,19 +20,45 @@ public static class PeerHostList
             : [];
     }
 
-    /// <summary>Первый адрес из списка или <paramref name="fallback" />.</summary>
+    /// <summary>Уникальные IP и нормализованные MAC в порядке появления.</summary>
+    public static IReadOnlyList<string> ParseEndpointCandidates(string? peerHost)
+    {
+        if (string.IsNullOrWhiteSpace(peerHost))
+            return [];
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var list = new List<string>();
+        foreach (var part in peerHost.Split(Separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (IPAddress.TryParse(part, out _))
+            {
+                if (seen.Add(part))
+                    list.Add(part);
+                continue;
+            }
+
+            if (!BluetoothTransportAddress.TryParseMac(part, out var mac))
+                continue;
+            var norm = BluetoothTransportAddress.ToMacString(mac);
+            if (seen.Add(norm))
+                list.Add(norm);
+        }
+
+        return list;
+    }
+
+    /// <summary>Первый endpoint (IP или MAC) или <paramref name="fallback" />.</summary>
     public static string PrimaryHost(string? peerHost, string fallback = "127.0.0.1")
     {
-        var c = ParseCandidates(peerHost);
+        var c = ParseEndpointCandidates(peerHost);
         return c.Count > 0 ? c[0] : fallback;
     }
 
-    /// <summary>Добавляет новые IP в конец списка без дубликатов (регистр не важен).</summary>
+    /// <summary>Добавляет новые IP и MAC в конец списка без дубликатов (регистр не важен).</summary>
     public static string MergeAppend(string? existingPeerHost, params string?[] additionalHostTexts)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        var list = ParseCandidates(existingPeerHost).Where(x => seen.Add(x)).ToList();
+        var list = ParseEndpointCandidates(existingPeerHost).Where(x => seen.Add(x)).ToList();
 
         foreach (var raw in additionalHostTexts)
         {
@@ -40,10 +67,13 @@ public static class PeerHostList
             foreach (var part in raw.Split(Separators,
                          StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                if (!IPAddress.TryParse(part, out _))
-                    continue;
-                if (seen.Add(part))
-                    list.Add(part);
+                string? token = null;
+                if (IPAddress.TryParse(part, out _))
+                    token = part;
+                else if (BluetoothTransportAddress.TryParseMac(part, out var mac))
+                    token = BluetoothTransportAddress.ToMacString(mac);
+                if (token != null && seen.Add(token))
+                    list.Add(token);
             }
         }
 
@@ -59,7 +89,7 @@ public static class PeerHostList
         if (seen.Add(primaryHost))
             list.Add(primaryHost);
 
-        list.AddRange(ParseCandidates(existingPeerHost).Where(x => seen.Add(x)));
+        list.AddRange(ParseEndpointCandidates(existingPeerHost).Where(x => seen.Add(x)));
 
         return string.Join(", ", list);
     }

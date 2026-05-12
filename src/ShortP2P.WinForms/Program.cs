@@ -9,11 +9,13 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Discovery.Ble;
 using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
 using NLog;
 using ShortP2P.Discovery;
 using ShortP2P.Transport;
+using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.WinForms;
 
@@ -39,9 +41,12 @@ internal static class Program
         services.AddSingleton<ISessionStorage>(_ => new FileSessionStorage(Path.Combine(appRoot, "session")));
         services.AddSingleton<AuthService>();
         services.AddSingleton<ChatRepository>();
+        services.AddSingleton<IBleDiscoveredPeerStore, SqliteBleDiscoveredPeerStore>();
         services.AddSingleton<P2pRoutingSettingsStore>();
         services.AddSingleton<AppSettingsStore>();
         services.AddSingleton<BluetoothTransportRegistration>();
+        services.AddSingleton<IBleShortP2PPeripheralScanner>(sp =>
+            sp.GetRequiredService<BluetoothTransportRegistration>().PeripheralScanner);
         services.AddSingleton<IUdpTransportFactory, UdpTransportFactory>();
         services.AddSingleton<ChatSessionCache>();
         services.AddSingleton<P2pCryptoSessionCache>();
@@ -56,7 +61,9 @@ internal static class Program
             sp.GetRequiredService<BluetoothTransportRegistration>().Instance,
             additionalDiscoveryTransports: null,
             sp.GetService<IRouteTableSnapshotSource>(),
-            sp.GetService<IDiscoveryPingStore>()));
+            sp.GetService<IDiscoveryPingStore>(),
+            sp.GetRequiredService<IBleShortP2PPeripheralScanner>(),
+            sp.GetRequiredService<IBleDiscoveredPeerStore>()));
 
         services.AddTransient<LoginForm>();
         services.AddTransient<RegisterForm>();

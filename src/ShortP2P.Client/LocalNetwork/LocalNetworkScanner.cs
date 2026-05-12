@@ -8,6 +8,7 @@ using ShortP2P.Discovery.Gossip;
 using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
 using ShortP2P.Discovery.Transceivers;
+using ShortP2P.Discovery.Ble;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
@@ -16,7 +17,8 @@ namespace ShortP2P.Discovery;
 /// <summary>
 ///     Discovery: UDP presence (<see cref="PresencePingCodec.UdpPort" />) на broadcast подсетей и limited broadcast,
 ///     плюс unicast на известные IPv4 (чаты, QR, публичный адрес этого узла); wire gossip/маршруты —
-///     <see cref="UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort" /> на те же broadcast- и unicast-цели.
+///     <see cref="UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort" /> на те же broadcast- и unicast-цели;
+///     при ручном <see cref="ScanAsync" /> — пассивное BLE-сканирование по UUID сервиса ShortP2P и presence-пинги по BLE.
 ///     Приём на 0.0.0.0 — в том числе датаграммы с интернета при пробросе портов (NAT). Фоновая рассылка —
 ///     <see cref="LinkTechnologyPresetExtensions.GetPresencePingPeriod" />; ручное сканирование —
 ///     <see cref="ScanAsync" />, <see cref="TriggerScanAsync" />. Событие <see cref="DiscoveryPingReceived" /> —
@@ -28,7 +30,9 @@ public sealed class LocalNetworkScanner(
     ITransport? bluetoothTransport = null,
     IEnumerable<ITransport>? additionalDiscoveryTransports = null,
     IRouteTableSnapshotSource? routeTableSnapshotSource = null,
-    IDiscoveryPingStore? discoveryPingStore = null) : IAsyncDisposable
+    IDiscoveryPingStore? discoveryPingStore = null,
+    IBleShortP2PPeripheralScanner? blePeripheralScanner = null,
+    IBleDiscoveredPeerStore? bleDiscoveredPeerStore = null) : IAsyncDisposable
 {
     public bool IsUdpListening => _presenceUdp != null;
     public bool IsBluetoothListening => _isBluetoothListening;
@@ -314,6 +318,11 @@ public sealed class LocalNetworkScanner(
         _udpPresenceTargets[normalized] = normalized;
     }
 
+    private bool ShouldRunBleDiscoveryScan() =>
+        blePeripheralScanner != null
+        && IsTransportEnabled(TransportKind.Bluetooth)
+        && _secondaryPresenceTransports.Any(t => t.Kind == TransportKind.Bluetooth);
+
     private bool IsTransportEnabled(TransportKind kind) => kind switch
     {
         TransportKind.Udp => routingSettings.EnableUdpTransport,
@@ -340,9 +349,36 @@ public sealed class LocalNetworkScanner(
             RebuildSnapshot();
             ClientsChanged?.Invoke(this, EventArgs.Empty);
 
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            if (ShouldRunBleDiscoveryScan())
+            {
+                var blePart = TimeSpan.FromSeconds(
+                    Math.Clamp(listenDuration.TotalSeconds * 0.35, 4, 20));
+                if (blePart > listenDuration)
+                    blePart = listenDuration;
+                try
+                {
+                    await blePeripheralScanner!.ScanAsync(blePart,
+                        addr =>
+                        {
+                            RememberBluetoothPeer(addr);
+                            _ = bleDiscoveredPeerStore?.RecordScanSeenAsync(addr, cancellationToken);
+                        }, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // BLE scan unavailable / permission
+                }
+            }
+
             await SendDiscoveryBroadcastRoundAsync(cancellationToken).ConfigureAwait(false);
-            if (listenDuration > TimeSpan.Zero)
-                await Task.Delay(listenDuration, cancellationToken).ConfigureAwait(false);
+            var remaining = listenDuration - sw.Elapsed;
+            if (remaining > TimeSpan.Zero)
+                await Task.Delay(remaining, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -360,14 +396,22 @@ public sealed class LocalNetworkScanner(
         if (!IsTransportEnabled(msg.RemoteAddress.Kind))
             return;
 
-        if (msg.RemoteAddress.Kind == TransportKind.Bluetooth)
-            RememberBluetoothPeer(msg.RemoteAddress);
-
         var localPeer = _localPeer;
         if (localPeer == null)
             return;
         if (msg.PeerNetworkId == localPeer.NetworkId.Value)
             return;
+
+        if (msg.RemoteAddress.Kind == TransportKind.Bluetooth)
+        {
+            RememberBluetoothPeer(msg.RemoteAddress);
+            if (bleDiscoveredPeerStore != null)
+            {
+                var nick = string.IsNullOrWhiteSpace(msg.Nickname) ? "?" : msg.Nickname.Trim();
+                _ = bleDiscoveredPeerStore.RecordPingAsync(msg.RemoteAddress, msg.PeerNetworkId, nick,
+                    CancellationToken.None);
+            }
+        }
 
         var peer = new DiscoveredLocalPeer(msg.PeerNetworkId, msg.Nickname, msg.RemoteAddress,
             msg.RemoteAddress.Kind, DateTimeOffset.UtcNow, msg.PeerDataUdpPort, msg.AdvertisedLink,

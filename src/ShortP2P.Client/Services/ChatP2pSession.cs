@@ -206,7 +206,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
             if (from.Kind == TransportKind.Udp)
             {
                 var ep = UdpTransportAddress.ToIPEndPoint(from);
-                foreach (var h in PeerHostList.ParseCandidates(chat.PeerHost))
+                foreach (var h in PeerHostList.ParseIpCandidates(chat.PeerHost))
                 {
                     if (!IPAddress.TryParse(h, out var ip))
                         continue;

@@ -12,6 +12,7 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Discovery.Ble;
 using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
 using ShortP2P.MauiApp.Services;
@@ -59,14 +60,18 @@ public static class MauiProgram
         builder.Services.AddSingleton<ISessionStorage, MauiSecureStorage>();
         builder.Services.AddSingleton<AuthService>();
         builder.Services.AddSingleton<ChatRepository>();
+        builder.Services.AddSingleton<IBleDiscoveredPeerStore, SqliteBleDiscoveredPeerStore>();
         builder.Services.AddSingleton<P2pRoutingSettingsStore>();
         builder.Services.AddSingleton<IUdpTransportFactory, UdpTransportFactory>();
         builder.Services.AddSingleton<ChatSessionCache>();
         builder.Services.AddSingleton<P2pCryptoSessionCache>();
 #if ANDROID
         builder.Services.AddSingleton<ITransport>(_ => new AndroidBluetoothTransport(global::Android.App.Application.Context));
+        builder.Services.AddSingleton<IBleShortP2PPeripheralScanner>(_ =>
+            new AndroidBluetoothLeShortP2PScanner(global::Android.App.Application.Context));
 #elif WINDOWS
         builder.Services.AddSingleton<ITransport>(_ => new WindowsBluetoothTransport());
+        builder.Services.AddSingleton<IBleShortP2PPeripheralScanner>(_ => new WindowsBluetoothLeShortP2PScanner());
 #endif
         builder.Services.AddSingleton(sp => new UserP2pRuntime(
             sp.GetRequiredService<P2pRoutingSettingsStore>(),
@@ -79,7 +84,9 @@ public static class MauiProgram
             sp.GetService<ITransport>(),
             additionalDiscoveryTransports: null,
             sp.GetService<IRouteTableSnapshotSource>(),
-            sp.GetService<IDiscoveryPingStore>()));
+            sp.GetService<IDiscoveryPingStore>(),
+            sp.GetService<IBleShortP2PPeripheralScanner>(),
+            sp.GetService<IBleDiscoveredPeerStore>()));
         builder.Services.AddTransient<LoginPage>();
         builder.Services.AddTransient<RegisterPage>();
         builder.Services.AddTransient<ChatsPage>();

@@ -9,6 +9,7 @@ using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Transceivers;
 using ShortP2P.Discovery;
+using ShortP2P.Discovery.Ble;
 using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
 using ShortP2P.Discovery.Transceivers;
@@ -78,7 +79,9 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         ITransport? bluetooth = null,
         IEnumerable<ITransport>? additionalDiscoveryTransports = null,
         IRouteTableSnapshotSource? routeTableSnapshotSource = null,
-        IDiscoveryPingStore? discoveryPingStore = null)
+        IDiscoveryPingStore? discoveryPingStore = null,
+        IBleShortP2PPeripheralScanner? blePeripheralScanner = null,
+        IBleDiscoveredPeerStore? bleDiscoveredPeerStore = null)
     {
         _store = store;
         _auth = auth;
@@ -89,7 +92,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         _cryptoSessionCache = cryptoSessionCache;
         _bluetooth = bluetooth;
         LocalScan = new LocalNetworkScanner(Settings, udpTransportFactory, bluetooth, additionalDiscoveryTransports,
-            routeTableSnapshotSource, discoveryPingStore);
+            routeTableSnapshotSource, discoveryPingStore, blePeripheralScanner, bleDiscoveredPeerStore);
     }
 
     public ChatP2pSession GetSession(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo,

@@ -127,7 +127,7 @@ public sealed class AndroidBluetoothTransport : ITransport
             {
                 var settings = new AdvertiseSettings.Builder()!
                     .SetAdvertiseMode(AdvertiseMode.Balanced)!
-                    .SetTxPowerLevel(AdvertiseTxPower.Medium)!
+                    .SetTxPowerLevel((AdvertiseTx)(int)AdvertiseTxPower.Medium)!
                     .SetConnectable(true)!
                     .Build();
                 var data = new AdvertiseData.Builder()!
@@ -240,7 +240,7 @@ public sealed class AndroidBluetoothTransport : ITransport
 
     private static bool DeviceToTransportAddress(BluetoothDevice device, out TransportAddress addr)
     {
-        var s = device.Address?.Replace('-', ':', StringComparison.Ordinal);
+        var s = device.Address?.Replace("-", ":", StringComparison.Ordinal);
         if (string.IsNullOrEmpty(s) || !BluetoothTransportAddress.TryParseMac(s, out var mac))
         {
             addr = new TransportAddress(TransportKind.Bluetooth, new byte[BluetoothTransportAddress.MacLength]);
