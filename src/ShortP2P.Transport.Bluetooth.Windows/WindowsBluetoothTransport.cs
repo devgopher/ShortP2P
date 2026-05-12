@@ -350,17 +350,6 @@ public sealed class WindowsBluetoothTransport : ITransport
             yield return reversed;
     }
 
-    private static string[] GetDeviceAddresses()
-    {
-        BluetoothRadio.PrimaryRadio.Mode = RadioMode.Connectable;
-        BluetoothClient client = new BluetoothClient();
-        BluetoothDeviceInfo[] devices = client.DiscoverDevices();
-        foreach (BluetoothDeviceInfo device in devices)
-        {
-            Console.WriteLine(device.DeviceAddress);
-        }
-    }
-    
     private static async Task<BluetoothLEDevice?> TryOpenBluetoothLeDeviceOneAddressAsync(ulong bluetoothAddress,
         CancellationToken ct)
     {
