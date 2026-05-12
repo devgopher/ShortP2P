@@ -1,10 +1,16 @@
 using System.Buffers.Binary;
 using System.Text;
+using ShortP2P.Discovery;
+using ShortP2P.Discovery.Transceivers;
+using ShortP2P.Transport;
+using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Client.Routing;
 
 /// <summary>
-///     Кодек discovery/presence ping на порту <see cref="UdpPort" />: network id + nickname (UTF-8) + порт data-UDP.
+///     Единый модуль presence / discovery ping (кадр 0x31, порт <see cref="UdpPort" />): сериализация
+///     <see cref="Build" /> / <see cref="TryParse" /> и приёмопередатчик <see cref="Transceiver" /> поверх
+///     <see cref="ITransport" /> (UDP, BLE и т.д.).
 ///     Формат: [0]=frame, [1..16]=Guid, [17..18]=длина ника, [19..]=UTF-8 ник, uint16 BE dataUdpPort,
 ///     [+1]=<see cref="LinkTechnologyPreset" /> (опционально), [+2]=uint16 BE <see cref="PresencePeerCapabilities" /> (опционально, на будущее).
 ///     Совместимость: 17 байт только Guid; 19+nick — ник без порта; без байта скорости — <see cref="LinkTechnologyPreset.Unlimited" />;
@@ -118,5 +124,87 @@ public static class PresencePingCodec
             (PresencePeerCapabilities)(raw & (ushort)PresencePeerCapabilities.AllDefined);
         advertisedCapabilities |= PresencePeerCapabilities.Chat;
         return true;
+    }
+
+    /// <summary>
+    ///     Тот же presence-пинг (0x31): отправка через <see cref="ITransport" />, разбор входящих через
+    ///     <see cref="HandleIncoming" />.
+    /// </summary>
+    public sealed class Transceiver(ITransport transport, int udpPort = UdpPort) : IBroadcastTransceiver<PingMessage>
+    {
+        private readonly ITransport _transport = transport ?? throw new ArgumentNullException(nameof(transport));
+        private bool _started;
+
+        public event EventHandler<PingMessage>? GotData;
+
+        public ValueTask StartAsync(CancellationToken cancellationToken = default)
+        {
+            _started = true;
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask StopAsync(CancellationToken cancellationToken = default)
+        {
+            _started = false;
+            return ValueTask.CompletedTask;
+        }
+
+        public async ValueTask SendAsync(PingMessage message, TransportAddress destination,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(message);
+            ArgumentNullException.ThrowIfNull(destination);
+            var packet = BuildPacket(message);
+            await _transport.SendAsync(packet, destination, cancellationToken).ConfigureAwait(false);
+        }
+
+        public async ValueTask SendBroadcastAsync(PingMessage message, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(message);
+            if (_transport.Kind != TransportKind.Udp)
+                return;
+            var packet = BuildPacket(message);
+            foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(udpPort))
+            {
+                try
+                {
+                    await _transport.SendAsync(packet, UdpTransportAddress.FromIPEndPoint(ep), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    // best-effort
+                }
+            }
+        }
+
+        public ValueTask DisposeAsync() => StopAsync();
+
+        private static byte[] BuildPacket(PingMessage message)
+        {
+            if (!message.RawPayload.IsEmpty)
+                return message.RawPayload.ToArray();
+            return Build(message.PeerNetworkId, message.Nickname, message.PeerDataUdpPort,
+                message.AdvertisedLink, message.AdvertisedCapabilities);
+        }
+
+        /// <summary>Передаёт входящий пакет; вызывается внешним циклом чтения транспорта.</summary>
+        public void HandleIncoming(TransportReceiveMessage msg)
+        {
+            if (!_started)
+                return;
+            if (!TryParse(msg.Payload.Span, out var nid, out var nick, out var dataPort,
+                    out var link, out var caps))
+                return;
+            var ping = new PingMessage(nid, nick, dataPort, link, caps, msg.Payload, msg.RemoteAddress);
+            try
+            {
+                GotData?.Invoke(this, ping);
+            }
+            catch
+            {
+                // подписчик не должен ронять вызывающий цикл
+            }
+        }
     }
 }

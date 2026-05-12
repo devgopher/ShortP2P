@@ -60,9 +60,9 @@ public sealed class LocalNetworkScanner(
         additionalDiscoveryTransports);
     private readonly ConcurrentDictionary<string, TransportAddress> _bluetoothTargets = new();
     private readonly ConcurrentDictionary<string, string> _udpPresenceTargets = new(StringComparer.OrdinalIgnoreCase);
-    private PingTransceiver? _presencePingTransceiver;
+    private PresencePingCodec.Transceiver? _presencePingTransceiver;
     private DiscoveryWireTransceiver? _discoveryWireTransceiver;
-    private readonly List<PingTransceiver> _secondaryPingTransceivers = [];
+    private readonly List<PresencePingCodec.Transceiver> _secondaryPingTransceivers = [];
     private Task? _presenceReceiveTask;
     private Task? _discoveryWireReceiveTask;
     private readonly List<Task> _secondaryPresenceReceiveTasks = [];
@@ -135,7 +135,7 @@ public sealed class LocalNetworkScanner(
                 _isBluetoothListening = true;
         }
 
-        _presencePingTransceiver = new PingTransceiver(_presenceUdp);
+        _presencePingTransceiver = new PresencePingCodec.Transceiver(_presenceUdp);
         _presencePingTransceiver.GotData += OnPresencePingReceived;
         await _presencePingTransceiver.StartAsync(token).ConfigureAwait(false);
         _presenceReceiveTask = Task.Run(() => PresenceReceiveLoopAsync(_presenceUdp, _presencePingTransceiver, token), token);
@@ -148,7 +148,7 @@ public sealed class LocalNetworkScanner(
 
         foreach (var transport in _secondaryPresenceTransports)
         {
-            var tx = new PingTransceiver(transport);
+            var tx = new PresencePingCodec.Transceiver(transport);
             tx.GotData += OnPresencePingReceived;
             await tx.StartAsync(token).ConfigureAwait(false);
             _secondaryPingTransceivers.Add(tx);
@@ -423,7 +423,7 @@ public sealed class LocalNetworkScanner(
         DiscoveryPingReceived?.Invoke(this, new DiscoveryPingReceivedEventArgs(peer));
     }
 
-    private static async Task PresenceReceiveLoopAsync(ITransport transport, PingTransceiver transceiver,
+    private static async Task PresenceReceiveLoopAsync(ITransport transport, PresencePingCodec.Transceiver transceiver,
         CancellationToken cancellationToken)
     {
         try
