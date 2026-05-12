@@ -18,7 +18,8 @@ namespace ShortP2P.Discovery;
 ///     Discovery: UDP presence (<see cref="PresencePingCodec.UdpPort" />) на broadcast подсетей и limited broadcast,
 ///     плюс unicast на известные IPv4 (чаты, QR, публичный адрес этого узла); wire gossip/маршруты —
 ///     <see cref="UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort" /> на те же broadcast- и unicast-цели;
-///     при ручном <see cref="ScanAsync" /> — пассивное BLE-сканирование по UUID сервиса ShortP2P и presence-пинги по BLE.
+///     При включённом Bluetooth presence-пинг уходит на все известные BLE MAC (чаты, скан, сопряжённые устройства);
+///     при ручном <see cref="ScanAsync" /> дополнительно — пассивное BLE-сканирование по UUID сервиса ShortP2P.
 ///     Приём на 0.0.0.0 — в том числе датаграммы с интернета при пробросе портов (NAT). Фоновая рассылка —
 ///     <see cref="LinkTechnologyPresetExtensions.GetPresencePingPeriod" />; ручное сканирование —
 ///     <see cref="ScanAsync" />, <see cref="TriggerScanAsync" />. Событие <see cref="DiscoveryPingReceived" /> —
@@ -32,7 +33,8 @@ public sealed class LocalNetworkScanner(
     IRouteTableSnapshotSource? routeTableSnapshotSource = null,
     IDiscoveryPingStore? discoveryPingStore = null,
     IBleShortP2PPeripheralScanner? blePeripheralScanner = null,
-    IBleDiscoveredPeerStore? bleDiscoveredPeerStore = null) : IAsyncDisposable
+    IBleDiscoveredPeerStore? bleDiscoveredPeerStore = null,
+    IBluetoothPresencePingTargetsProvider? bluetoothPresencePingTargetsProvider = null) : IAsyncDisposable
 {
     public bool IsUdpListening => _presenceUdp != null;
     public bool IsBluetoothListening => _isBluetoothListening;
@@ -699,6 +701,25 @@ public sealed class LocalNetworkScanner(
             var bt = _secondaryPresenceTransports.FirstOrDefault(t => t.Kind == TransportKind.Bluetooth);
             if (bt != null && IsTransportEnabled(TransportKind.Bluetooth))
             {
+                try
+                {
+                    if (bluetoothPresencePingTargetsProvider != null)
+                    {
+                        var fromProvider = await bluetoothPresencePingTargetsProvider
+                            .GetBluetoothPingTargetsAsync(cancellationToken).ConfigureAwait(false);
+                        foreach (var addr in fromProvider)
+                            RememberBluetoothPeer(addr);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // БД / Bluetooth: не блокируем UDP-раунд
+                }
+
                 if (_bluetoothTargets.IsEmpty)
                 {
                     try

@@ -32,11 +32,15 @@ public sealed class WindowsBluetoothLeShortP2PScanner : IBleShortP2PPeripheralSc
         var seen = new HashSet<ulong>();
         watcher.Received += (_, e) =>
         {
-            if (!seen.Add(e.BluetoothAddress))
-                return;
-            var mac = BluetoothMacAddress.FromBluetoothAddress(e.BluetoothAddress);
-            onDeviceDiscovered(BluetoothTransportAddress.FromMac(mac));
+            if (e.Advertisement.ServiceUuids.Any())
+            {
+                if (!seen.Add(e.BluetoothAddress))
+                    return;
+                var mac = BluetoothMacAddress.FromBluetoothAddress(e.BluetoothAddress);
+                onDeviceDiscovered(BluetoothTransportAddress.FromMac(mac));
+            }
         };
+            
 
         try
         {

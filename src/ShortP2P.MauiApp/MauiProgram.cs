@@ -12,6 +12,7 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Discovery;
 using ShortP2P.Discovery.Ble;
 using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
@@ -60,6 +61,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<ISessionStorage, MauiSecureStorage>();
         builder.Services.AddSingleton<AuthService>();
         builder.Services.AddSingleton<ChatRepository>();
+        builder.Services.AddSingleton<IBluetoothPresencePingTargetsProvider, BluetoothPresencePingTargetsProvider>();
         builder.Services.AddSingleton<IBleDiscoveredPeerStore, SqliteBleDiscoveredPeerStore>();
         builder.Services.AddSingleton<P2pRoutingSettingsStore>();
         builder.Services.AddSingleton<IUdpTransportFactory, UdpTransportFactory>();
@@ -86,7 +88,8 @@ public static class MauiProgram
             sp.GetService<IRouteTableSnapshotSource>(),
             sp.GetService<IDiscoveryPingStore>(),
             sp.GetService<IBleShortP2PPeripheralScanner>(),
-            sp.GetService<IBleDiscoveredPeerStore>()));
+            sp.GetService<IBleDiscoveredPeerStore>(),
+            sp.GetRequiredService<IBluetoothPresencePingTargetsProvider>()));
         builder.Services.AddTransient<LoginPage>();
         builder.Services.AddTransient<RegisterPage>();
         builder.Services.AddTransient<ChatsPage>();

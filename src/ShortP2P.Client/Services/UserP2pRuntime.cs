@@ -81,7 +81,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         IRouteTableSnapshotSource? routeTableSnapshotSource = null,
         IDiscoveryPingStore? discoveryPingStore = null,
         IBleShortP2PPeripheralScanner? blePeripheralScanner = null,
-        IBleDiscoveredPeerStore? bleDiscoveredPeerStore = null)
+        IBleDiscoveredPeerStore? bleDiscoveredPeerStore = null,
+        IBluetoothPresencePingTargetsProvider? bluetoothPresencePingTargetsProvider = null)
     {
         _store = store;
         _auth = auth;
@@ -92,7 +93,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         _cryptoSessionCache = cryptoSessionCache;
         _bluetooth = bluetooth;
         LocalScan = new LocalNetworkScanner(Settings, udpTransportFactory, bluetooth, additionalDiscoveryTransports,
-            routeTableSnapshotSource, discoveryPingStore, blePeripheralScanner, bleDiscoveredPeerStore);
+            routeTableSnapshotSource, discoveryPingStore, blePeripheralScanner, bleDiscoveredPeerStore,
+            bluetoothPresencePingTargetsProvider);
     }
 
     public ChatP2pSession GetSession(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo,
