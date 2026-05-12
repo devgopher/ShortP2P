@@ -137,7 +137,7 @@ public sealed class WindowsBluetoothTransport : ITransport
     {
         var advertising = new GattServiceProviderAdvertisingParameters
         {
-            IsDiscoverable = discoverable,
+            IsDiscoverable = true,
             IsConnectable = true,
         };
 

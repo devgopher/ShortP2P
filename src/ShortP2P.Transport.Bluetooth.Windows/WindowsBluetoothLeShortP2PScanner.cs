@@ -20,10 +20,14 @@ public sealed class WindowsBluetoothLeShortP2PScanner : IBleShortP2PPeripheralSc
         var watcher = new BluetoothLEAdvertisementWatcher
         {
             ScanningMode = BluetoothLEScanningMode.Active,
+            SignalStrengthFilter =
+            {
+                SamplingInterval = TimeSpan.FromMilliseconds(500)
+            },
         };
         var filter = new BluetoothLEAdvertisementFilter();
         filter.Advertisement.ServiceUuids.Add(BleShortP2PGattProtocol.ServiceUuid);
-        watcher.AdvertisementFilter = filter;
+       // watcher.AdvertisementFilter = filter;
 
         var seen = new HashSet<ulong>();
         watcher.Received += (_, e) =>

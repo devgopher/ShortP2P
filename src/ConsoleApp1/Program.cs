@@ -57,7 +57,7 @@ internal class Program
         
         Console.WriteLine("Watcher started. Нажмите Enter для остановки...");
         Console.ReadLine();
-ач
+
 
         deviceWatcher.Stop();
     }
