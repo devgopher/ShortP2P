@@ -17,12 +17,11 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 ///     и входящие записи через локальный GATT-сервер.
 /// </summary>
 [SupportedOSPlatform("windows10.0.17763.0")]
-public sealed class WindowsBluetoothTransport : ITransport
+public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions options) : ITransport
 {
     private const int DefaultChannelCapacity = 256;
     private const uint BluetoothUnavailableHResult = 0x800710DF;
 
-    private readonly WindowsBluetoothTransportOptions _options;
     private readonly Channel<TransportReceiveMessage> _inbound =
         Channel.CreateBounded<TransportReceiveMessage>(new BoundedChannelOptions(DefaultChannelCapacity)
         {
@@ -43,11 +42,6 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     public WindowsBluetoothTransport() : this(default)
     {
-    }
-
-    public WindowsBluetoothTransport(WindowsBluetoothTransportOptions options)
-    {
-        _options = options;
     }
 
     public TransportKind Kind => TransportKind.Bluetooth;
@@ -133,7 +127,7 @@ public sealed class WindowsBluetoothTransport : ITransport
             return;
         _bleRxCharacteristic = charResult.Characteristic;
         _bleRxCharacteristic.WriteRequested += OnBleWriteRequested;
-        StartBleGattProviderAdvertising(_bleServiceProvider, _options.GattDiscoverable);
+        StartBleGattProviderAdvertising(_bleServiceProvider, options.GattDiscoverable);
         StartBleShortP2PAdvertisementWatcher();
     }
 
@@ -237,19 +231,18 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     private static async Task<TransportAddress> ResolveBleRemoteAddressAsync(GattSession? session)
     {
-        if (session != null)
+        if (session == null)
+            return new TransportAddress(TransportKind.Bluetooth, new byte[BluetoothMacAddress.MacLength]);
+        try
         {
-            try
-            {
-                var dev = await BluetoothLEDevice.FromIdAsync(session.DeviceId.Id);
-                if (dev != null)
-                    return new TransportAddress(TransportKind.Bluetooth,
-                        BluetoothMacAddress.FromBluetoothAddress(dev.BluetoothAddress));
-            }
-            catch
-            {
-                // ignore
-            }
+            var dev = await BluetoothLEDevice.FromIdAsync(session.DeviceId.Id);
+            if (dev != null)
+                return new TransportAddress(TransportKind.Bluetooth,
+                    BluetoothMacAddress.FromBluetoothAddress(dev.BluetoothAddress));
+        }
+        catch
+        {
+            // ignore
         }
 
         return new TransportAddress(TransportKind.Bluetooth, new byte[BluetoothMacAddress.MacLength]);

@@ -850,7 +850,7 @@ public sealed class LocalNetworkScanner(
                 try
                 {
                     await Task.Delay(period, cancellationToken).ConfigureAwait(false);
-                }
+                }  
                 catch (OperationCanceledException)
                 {
                     break;

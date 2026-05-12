@@ -204,7 +204,7 @@ Plaintext для `P2PSession` — либо **устаревший** сырой U
 | Тема | Файлы / типы |
 |------|----------------|
 | Invite | `ShortP2P.Client/Routing/ChatInviteCodec.cs` |
-| Presence | `ShortP2P.Client/Routing/PresencePingCodec.cs`, `LinkTechnologyPreset`, `PresencePeerCapabilities` |
+| Presence | `ShortP2P.Client/Routing/PresencePingCodec.cs` (кадр + `Transceiver`), `LinkTechnologyPreset`, `PresencePeerCapabilities` |
 | Data кадры чата | `ShortP2P.Client/Services/ChatP2pSession.cs` |
 | RSA / AES | `ShortP2P.Crypto/P2PHandshake.cs`, `P2PSession.cs`, `P2PCrypto.cs` |
 | LAN find / relay | `ShortP2P.Client/Routing/LanRoutingCodec.cs` |
