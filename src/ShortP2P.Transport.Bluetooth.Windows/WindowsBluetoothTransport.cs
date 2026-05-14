@@ -142,7 +142,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         {
             var watcher = new BluetoothLEAdvertisementWatcher
             {
-                ScanningMode = BluetoothLEScanningMode.Passive,
+                ScanningMode = BluetoothLEScanningMode.Active
             };
             var filter = new BluetoothLEAdvertisementFilter();
             filter.Advertisement.ServiceUuids.Add(BleShortP2PGattProtocol.ServiceUuid);
@@ -221,7 +221,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
             var addr = await ResolveBleRemoteAddressAsync(args.Session).ConfigureAwait(false);
             await _inbound.Writer.WriteAsync(new TransportReceiveMessage(data, addr)).ConfigureAwait(false);
-            req.Respond();
+            //req.Respond();
         }
         catch
         {
@@ -494,7 +494,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
         try
         {
-            _runCts?.Cancel();
+            await _runCts?.CancelAsync();
         }
         catch (ObjectDisposedException)
         {
