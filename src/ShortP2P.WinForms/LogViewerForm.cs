@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace ShortP2P.WinForms;
@@ -7,6 +8,11 @@ public sealed class LogViewerForm : Form
 {
     private const int RefreshIntervalMs = 5000;
     private const long MaxTailBytes = 768 * 1024;
+    private const uint WmVscroll = 0x0115;
+    private static readonly IntPtr SbBottom = (IntPtr)7;
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     private readonly TextBox _appLog = CreateLogTextBox();
     private readonly TextBox _userLog = CreateLogTextBox();
@@ -60,6 +66,19 @@ public sealed class LogViewerForm : Form
         var logsDir = Path.Combine(AppContext.BaseDirectory, "logs");
         _appLog.Text = ReadLogFile(Path.Combine(logsDir, $"{date}.log"));
         _userLog.Text = ReadLogFile(Path.Combine(logsDir, $"winFormsClient_{date}.log"));
+        ScrollLogToLatest(_appLog);
+        ScrollLogToLatest(_userLog);
+    }
+
+    /// <summary>Moves caret and viewport to the end (works even when the text box is not focused).</summary>
+    private static void ScrollLogToLatest(TextBox box)
+    {
+        if (box.TextLength == 0)
+            return;
+        box.SelectionStart = box.TextLength;
+        box.SelectionLength = 0;
+        if (box.IsHandleCreated)
+            _ = SendMessage(box.Handle, WmVscroll, SbBottom, IntPtr.Zero);
     }
 
     private static string ReadLogFile(string path)

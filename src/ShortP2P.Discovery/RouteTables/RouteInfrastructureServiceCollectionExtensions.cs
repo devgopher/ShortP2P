@@ -71,7 +71,7 @@ public static class RouteInfrastructureServiceCollectionExtensions
 
         if (enableDiscovery)
         {
-            services.AddHostedService<RoutePeerRoutesExpiryCleanupHostedService>();
+            //services.AddHostedService<RoutePeerRoutesExpiryCleanupHostedService>();
             services.AddHostedService<DiscoveryRoutesUpdateHostedService>();
         }
 
