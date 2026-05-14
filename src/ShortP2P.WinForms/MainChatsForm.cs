@@ -35,6 +35,7 @@ public sealed class MainChatsForm : Form
     private readonly Label _bluetoothTransportIndicator = new() { AutoSize = true };
     private int? _focusedChatId;
     private bool _knownChatsInitialized;
+    private LogViewerForm? _logViewer;
 
     public MainChatsForm(AuthService auth, ChatRepository chats, UserP2pRuntime p2P,
         P2pRoutingSettingsStore routingStore, IServiceProvider services, ILogger<MainChatsForm> logger,
@@ -53,7 +54,7 @@ public sealed class MainChatsForm : Form
         _appSettings = appSettings;
         Text = "ShortP2P — Chats";
         StartPosition = FormStartPosition.CenterScreen;
-        Width = 560;
+        Width = 680;
         Height = 480;
 
         var root = new TableLayoutPanel
@@ -87,6 +88,7 @@ public sealed class MainChatsForm : Form
         var btnSettings = new Button { Text = "Настройки", AutoSize = true };
         var btnLanScan = new Button { Text = "LAN scan", AutoSize = true };
         var btnDelete = new Button { Text = "Delete chat", AutoSize = true };
+        var btnSeeLogs = new Button { Text = "See logs", AutoSize = true };
         toolbar.Controls.Add(btnAdd);
         toolbar.Controls.Add(btnDelete);
         toolbar.Controls.Add(btnMyQr);
@@ -95,6 +97,7 @@ public sealed class MainChatsForm : Form
         toolbar.Controls.Add(btnLanScan);
         toolbar.Controls.Add(btnRouting);
         toolbar.Controls.Add(btnSettings);
+        toolbar.Controls.Add(btnSeeLogs);
         toolbar.Controls.Add(btnLogout);
 
         btnAdd.Click += async (_, _) => await OnAddChatAsync().ConfigureAwait(true);
@@ -105,6 +108,7 @@ public sealed class MainChatsForm : Form
         btnLanScan.Click += OnLanScan;
         btnRouting.Click += OnRoutingSettings;
         btnSettings.Click += OnAppSettings;
+        btnSeeLogs.Click += OnSeeLogs;
         btnLogout.Click += OnLogout;
 
         var transportIndicators = new FlowLayoutPanel
@@ -472,6 +476,20 @@ public sealed class MainChatsForm : Form
         {
             _userActions.LogInformation("Chats: copy keys failed ({Message})", ex.Message);
             MessageBox.Show(this, ex.Message, "Clipboard", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void OnSeeLogs(object? sender, EventArgs e)
+    {
+        if (_logViewer is null || _logViewer.IsDisposed)
+        {
+            _logViewer = new LogViewerForm();
+            _logViewer.FormClosed += (_, _) => _logViewer = null;
+            _logViewer.Show(this);
+        }
+        else
+        {
+            _logViewer.Activate();
         }
     }
 

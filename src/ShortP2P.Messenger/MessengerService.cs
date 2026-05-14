@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using ShortP2P.Crypto;
@@ -163,7 +164,7 @@ public sealed class MessengerService(
         }
 
         var encryptedChunks = new byte[totalChunks][];
-        Console.WriteLine($"sending to {FormatDestinationForLog(destination)}");
+        Console.WriteLine($"{DateTime.UtcNow.ToString(CultureInfo.InvariantCulture)} sending to {FormatDestinationForLog(destination)}");
 
         for (var i = 0; i < totalChunks; i++)
         {
