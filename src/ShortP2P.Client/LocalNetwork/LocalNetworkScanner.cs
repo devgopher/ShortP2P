@@ -393,8 +393,8 @@ public sealed class LocalNetworkScanner(
 
     private void OnPresencePingReceived(object? sender, PingMessage msg)
     {
-        if (Volatile.Read(ref _presencePingTransmitDepth) != 0)
-            return;
+        // if (Volatile.Read(ref _presencePingTransmitDepth) != 0)
+        //     return;
         if (!IsTransportEnabled(msg.RemoteAddress.Kind))
             return;
 
