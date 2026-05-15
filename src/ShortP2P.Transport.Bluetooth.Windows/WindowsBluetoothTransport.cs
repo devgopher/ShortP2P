@@ -206,9 +206,9 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
     private async void OnBleWriteRequested(GattLocalCharacteristic sender, GattWriteRequestedEventArgs args)
     {
-        using var deferral = args.GetDeferral();
         try
         {
+            using var deferral = args.GetDeferral();
             var req = await args.GetRequestAsync();
             if (req == null)
                 return;
@@ -217,10 +217,13 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             reader.ReadBytes(data);
             if (data.Length == 0)
                 return;
-
+            if (req.Option == GattWriteOption.WriteWithResponse)
+            {
+                req.Respond();
+            }
+           
             var addr = await ResolveBleRemoteAddressAsync(args.Session).ConfigureAwait(false);
             await _inbound.Writer.WriteAsync(new TransportReceiveMessage(data, addr)).ConfigureAwait(false);
-            req.Respond();
         }
         catch
         {
