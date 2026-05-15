@@ -220,7 +220,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
             var addr = await ResolveBleRemoteAddressAsync(args.Session).ConfigureAwait(false);
             await _inbound.Writer.WriteAsync(new TransportReceiveMessage(data, addr)).ConfigureAwait(false);
-            //req.Respond();
+            req.Respond();
         }
         catch
         {
