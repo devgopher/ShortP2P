@@ -1,10 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<!-- SDK 10 treats net8.0-* MAUI TFMs as out-of-support workloads; allow local builds until the app is retargeted. -->
-		<CheckEolWorkloads>false</CheckEolWorkloads>
-		<!-- .NET 8 MAUI: add net8.0-android;net8.0-ios;net8.0-maccatalyst to TargetFrameworks after `dotnet workload restore` -->
-		<TargetFrameworks>net8.0-windows10.0.19041.0;net8.0-android</TargetFrameworks>
+		<!-- .NET 10 MAUI: add net10.0-ios;net10.0-maccatalyst to TargetFrameworks after `dotnet workload restore` -->
+		<TargetFrameworks>net10.0-windows10.0.19041.0;net10.0-android</TargetFrameworks>
 
 		<OutputType>Exe</OutputType>
 		<RootNamespace>ShortP2P.MauiApp</RootNamespace>
@@ -31,7 +29,7 @@
 	  TargetPlatformVersion must be >= SupportedOSPlatformVersion (NETSDK1135).
 	-->
 	<PropertyGroup Condition="$(TargetFramework.Contains('-android'))">
-		<TargetPlatformVersion>34.0</TargetPlatformVersion>
+		<TargetPlatformVersion>36.0</TargetPlatformVersion>
 		<SupportedOSPlatformVersion>29.0</SupportedOSPlatformVersion>
 		<AndroidMinSdkVersion>29</AndroidMinSdkVersion>
 	</PropertyGroup>
@@ -55,8 +53,8 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Microsoft.Maui.Controls" Version="8.0.100" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.1" />
+		<PackageReference Include="Microsoft.Maui.Controls" Version="10.0.30" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="$(MicrosoftExtensionsVersion)" />
 		<PackageReference Include="NLog" Version="5.3.4" />
 		<PackageReference Include="NLog.Extensions.Logging" Version="5.3.11" />
 	</ItemGroup>
@@ -68,10 +66,10 @@
 	  (e.g. "Windows App Runtime 1.5" x64 installer for unpackaged apps.)
 
 	  Optional: ship runtime with the app (larger output) when publishing unpackaged:
-	  dotnet publish -f net8.0-windows10.0.19041.0 -c Release -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:RuntimeIdentifier=win10-x64
+	  dotnet publish -f net10.0-windows10.0.19041.0 -c Release -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:RuntimeIdentifier=win10-x64
 	-->
 	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
-		<PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240802000" />
+		<PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.250909003" />
 		<ProjectReference Include="..\ShortP2P.Transport.Bluetooth.Windows\ShortP2P.Transport.Bluetooth.Windows.csproj" />
 	</ItemGroup>
 

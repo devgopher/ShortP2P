@@ -1,8 +1,7 @@
+using System;
 using System.Collections.Concurrent;
-using System.IO;
 using System.Runtime.Versioning;
 using System.Threading.Channels;
-using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Advertisement;
@@ -440,12 +439,12 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         foreach (var addr in AlternateBluetoothAddresses(bluetoothAddress))
         {
             var dev = await TryOpenBluetoothLeDeviceOneAddressAsync(addr, ct).ConfigureAwait(false);
-            if (dev != null)
-                return dev;
+            if (dev != null) return dev;
         }
 
         return null;
     }
+
 
     private static IEnumerable<ulong> AlternateBluetoothAddresses(ulong bluetoothAddress)
     {

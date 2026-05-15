@@ -5,6 +5,11 @@
 	  - JavaSdkDirectory:    -p:JavaSdkDirectory → JAVA_HOME (must be a JDK with bin\jar, e.g. 17; not a JRE 8)
 	-->
 	<PropertyGroup>
+		<NetCoreTargetFramework>net10.0</NetCoreTargetFramework>
+		<WindowsDesktopTargetFramework>net10.0-windows10.0.17763.0</WindowsDesktopTargetFramework>
+		<MicrosoftExtensionsVersion>10.0.0</MicrosoftExtensionsVersion>
+		<MicrosoftEntityFrameworkCoreVersion>10.0.0</MicrosoftEntityFrameworkCoreVersion>
+
 		<AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' and '$(ANDROID_SDK_ROOT)' != '' and Exists('$(ANDROID_SDK_ROOT)')">$(ANDROID_SDK_ROOT)</AndroidSdkDirectory>
 		<AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' and '$(ANDROID_HOME)' != '' and Exists('$(ANDROID_HOME)')">$(ANDROID_HOME)</AndroidSdkDirectory>
 		<AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' and Exists('$(LOCALAPPDATA)\Android\Sdk')">$(LOCALAPPDATA)\Android\Sdk</AndroidSdkDirectory>

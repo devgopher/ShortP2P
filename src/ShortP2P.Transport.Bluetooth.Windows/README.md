@@ -1,6 +1,6 @@
 # ShortP2P.Transport.Bluetooth.Windows
 
-Реализация Bluetooth-транспорта для **Windows** через WinRT: **BLE (GATT)** — исходящие записи в RX-характеристику пира и приём через локальный GATT-сервер. Целевой TFM — `net8.0-windows*` (минимальная версия Windows задаётся в `.csproj`).
+Реализация Bluetooth-транспорта для **Windows** через WinRT: **BLE (GATT)** — исходящие записи в RX-характеристику пира и приём через локальный GATT-сервер. Целевой TFM — `net10.0-windows*` (минимальная версия Windows задаётся в `.csproj`).
 
 Зеркальная реализация для **Android (MAUI)** — проект [`ShortP2P.Transport.Bluetooth.Android`](../ShortP2P.Transport.Bluetooth.Android/ShortP2P.Transport.Bluetooth.Android.csproj); общие UUID и описание ролей — [`BleShortP2PGattProtocol`](../ShortP2P.Transport/BleShortP2PGattProtocol.cs) в `ShortP2P.Transport`. На Android приём GATT Write на сервере опирается на API **31+** (ниже — транспорт не стартует, приложение не падает).
 
