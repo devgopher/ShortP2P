@@ -3,37 +3,29 @@ using System.Buffers.Binary;
 namespace ShortP2P.Transport;
 
 /// <summary>
-///     Общий BLE GATT-протокол ShortP2P (custom service, без OTS). UUID совпадают с
-///     <c>WindowsBluetoothTransport</c> и <c>AndroidBluetoothTransport</c>.
+///     Общий BLE GATT-протокол ShortP2P (custom service, без OTS). UUID совпадают на Windows и Android.
 /// </summary>
 /// <remarks>
-///     <para><b>Роли BLE и имена в продукте</b></para>
+///     <para><b>Дуплекс: две характеристики на GATT Server (peripheral)</b></para>
 ///     <list type="bullet">
 ///         <item>
-///             <b>Peripheral (GATT Server)</b> — узел, который публикует сервис ShortP2P и локальную
-///             характеристику «RX»: удалённый пир подключается как <b>Central</b> и <b>пишет</b> в эту
-///             характеристику, чтобы передать вам полезную нагрузку. Локально приём = обработка Write.
+///             <see cref="PeerRxCharacteristicUuid" /> — <b>приём</b> на сервере: Central пишет (Write /
+///             Write Without Response). Локальный <c>ITransport.Inbound</c>.
 ///         </item>
 ///         <item>
-///             <b>Central (GATT Client)</b> — узел, который подключается к пиру, находит сервис/характеристику
-///             и выполняет <b>Write (без ответа, по возможности)</b> для исходящих данных.
+///             <see cref="PeerTxCharacteristicUuid" /> — <b>передача</b> с сервера: Notify/Indicate на
+///             подписанный Central. Удалённый Central подписывается (CCCD) и получает данные в
+///             <c>ValueChanged</c> / <c>OnCharacteristicChanged</c>.
 ///         </item>
 ///     </list>
 ///     <para>
-///         Текущая реализация в приложении <b>симметрична</b>: у каждого пира поднят GATT Server
-///         (peripheral) и одновременно используется роль Central для записи в «RX» пира.
-///         Для сценария «только клиент без сканирования» на Windows можно отключить discoverable-рекламу
-///         (см. параметры <c>WindowsBluetoothTransport</c> в проекте Bluetooth.Windows), оставляя сервис
-///         connectable; либо отдельный асимметричный профиль с двумя характеристиками
-///         (запись к серверу + notify/indicate от сервера) — см. README транспорта.
+///         <b>Исходящий Send (локальный Central):</b> запись в <see cref="PeerRxCharacteristicUuid" /> пира.
+///         <b>Входящий приём:</b> Write на локальный RX и/или Notify с <see cref="PeerTxCharacteristicUuid" /> пира
+///         (после подписки при подключении).
 ///     </para>
-///     <para><b>Крупные объёмы (без OTS)</b></para>
 ///     <para>
-///         Приоритет: фрагментация на уровне мессенджера/сессии (уже есть chunking шифротекста) +
-///         последовательные GATT Write. Опционально на уровне приложения — кадры с CRC (см.
-///         <see cref="TryParseApplicationChunk" /> / <see cref="BuildApplicationChunk" />); уведомления
-///         с сервера и custom L2CAP CoC / Classic RFCOMM оставлены на будущее (другой объём работ и API
-///         по платформам).
+///         Симметричный чат: у каждого узла поднят Server (RX+TX) и клиент к пиру (write в RX пира,
+///         subscribe на TX пира).
 ///     </para>
 /// </remarks>
 public static class BleShortP2PGattProtocol
@@ -41,21 +33,17 @@ public static class BleShortP2PGattProtocol
     /// <summary>Custom ShortP2P service (128-bit UUID).</summary>
     public static readonly Guid ServiceUuid = Guid.Parse("9FE8E58B-AF85-4D91-B245-2B40EA0439C7");
 
-    /// <summary>
-    ///     Характеристика, в которую Central пишет данные для приёма на стороне peripheral.
-    ///     (В коде WinRT названа BleRx — «RX с точки зрения удалённого отправителя».)
-    /// </summary>
+    /// <summary>Приём на peripheral: Central → Write → сервер.</summary>
     public static readonly Guid PeerRxCharacteristicUuid = Guid.Parse("8DFE6F10-6CB7-4E73-A918-DC47AC34D9E9");
 
-    /// <summary>Magic «SP2C» для опционального прикладного чанка поверх GATT (не обязателен для текущего чата).</summary>
+    /// <summary>Передача с peripheral: сервер → Notify → Central (нужна подписка CCCD).</summary>
+    public static readonly Guid PeerTxCharacteristicUuid = Guid.Parse("7CF03A12-8B5E-4D91-B245-2B40EA0439C8");
+
+    /// <summary>Magic «SP2C» для опционального прикладного чанка поверх GATT.</summary>
     public const uint ApplicationChunkMagic = 0x53503243;
 
     public const int ApplicationChunkHeaderLength = 16;
 
-    /// <summary>
-    ///     Опциональный заголовок прикладного чанка: magic, полный размер потока, индекс чанка, число чанков, CRC32 полного потока.
-    ///     Полезная нагрузка идёт следом; последний чанк может быть короче.
-    /// </summary>
     public static byte[] BuildApplicationChunk(uint fullStreamCrc32, int chunkIndex, int totalChunks,
         ReadOnlySpan<byte> payloadSlice)
     {

@@ -117,6 +117,55 @@ public sealed class ChatP2pSession : IAsyncDisposable
     private bool TryGetCryptoSession([NotNullWhen(true)] out P2PSession? session) =>
         _cryptoSessionCache.TryGetSession(chat.Id, out session);
     private void ClearCryptoSession() => _cryptoSessionCache.TryRemove(chat.Id, out _);
+
+    /// <summary>Follower (больший NetworkId): сессия и messenger готовы к обмену cipher.</summary>
+    private bool IsFollowerCryptoReady()
+    {
+        lock (_sync)
+            return IsFollowerCryptoReadyCore();
+    }
+
+    private bool IsFollowerCryptoReadyCore() =>
+        !IsCryptoSessionLeader() && TryGetCryptoSession(out _) && _messenger != null;
+
+    /// <summary>Успешное завершение ожидания handshake у follower (0x01 от лидера).</summary>
+    private void SignalFollowerHandshakeSuccess(TaskCompletionSource<bool>? waiter = null)
+    {
+        CompleteFollowerHandshakeWait(success: true, waiter: waiter);
+    }
+
+    /// <summary>Ошибка ожидания (таймаут, сеть, сбой отправки 0x04).</summary>
+    private void SignalFollowerHandshakeFailure(Exception ex, TaskCompletionSource<bool>? waiter = null)
+    {
+        CompleteFollowerHandshakeWait(success: false, failure: ex, waiter: waiter);
+    }
+
+    /// <summary>Отмена ожидания (стоп чата, сброс крипты).</summary>
+    private void CancelFollowerHandshakeWait()
+    {
+        CompleteFollowerHandshakeWait(success: false, failure: null, waiter: null, canceled: true);
+    }
+
+    private void CompleteFollowerHandshakeWait(bool success, Exception? failure = null,
+        TaskCompletionSource<bool>? waiter = null, bool canceled = false)
+    {
+        lock (_sync)
+        {
+            var tcs = waiter ?? _followerHandshakeTcs;
+            if (tcs is not { Task.IsCompleted: false })
+                return;
+
+            if (success)
+                tcs.TrySetResult(true);
+            else if (canceled)
+                tcs.TrySetCanceled();
+            else if (failure != null)
+                tcs.TrySetException(failure);
+
+            if (ReferenceEquals(_followerHandshakeTcs, tcs))
+                _followerHandshakeTcs = null;
+        }
+    }
     private async ValueTask<P2PSession> WaitForCryptoSessionAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
@@ -1141,8 +1190,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
         {
             _cryptoProbeOkAwaiter?.TrySetCanceled();
             _cryptoProbeOkAwaiter = null;
-            _followerHandshakeTcs?.TrySetCanceled();
-            _followerHandshakeTcs = null;
+            CancelFollowerHandshakeWait();
             _handshakeWeInitiated = false;
             _cryptoProbeRoundTripOk = false;
             _messenger = null;
@@ -1233,7 +1281,8 @@ public sealed class ChatP2pSession : IAsyncDisposable
         await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await EnsureLeaderCryptoSessionCoreAsync(cancellationToken).ConfigureAwait(false);
+            await EnsureLeaderCryptoSessionCoreAsync(cancellationToken, forceSendHandshake: true)
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -1463,12 +1512,17 @@ public sealed class ChatP2pSession : IAsyncDisposable
     }
 
     /// <summary>Вызывается только под захватом <see cref="_sessionSetup" /> (лидер).</summary>
-    private async Task EnsureLeaderCryptoSessionCoreAsync(CancellationToken cancellationToken)
+    /// <param name="forceSendHandshake">Ответ на 0x04 от follower — всегда шлём 0x01, даже если сессия в кэше.</param>
+    private async Task EnsureLeaderCryptoSessionCoreAsync(CancellationToken cancellationToken,
+        bool forceSendHandshake = false)
     {
-        lock (_sync)
+        if (!forceSendHandshake)
         {
-            if (TryGetCryptoSession(out _) && _messenger != null)
-                return;
+            lock (_sync)
+            {
+                if (TryGetCryptoSession(out _) && _messenger != null)
+                    return;
+            }
         }
 
         var hs = P2PCrypto.CreateHandshakeInitiation(_peerPublicKey!);
@@ -1477,22 +1531,33 @@ public sealed class ChatP2pSession : IAsyncDisposable
         Buffer.BlockCopy(hs.HandshakePacket, 0, packet, 1, hs.HandshakePacket.Length);
         await SendRouteRawAsync(packet, cancellationToken).ConfigureAwait(false);
 
-        MessengerService ms;
+        MessengerService? ms = null;
         lock (_sync)
         {
-            if (TryGetCryptoSession(out _) && _messenger != null)
+            if (!forceSendHandshake && TryGetCryptoSession(out _) && _messenger != null)
                 return;
+
+            if (forceSendHandshake)
+                ClearCryptoSession();
+
             _ = _cryptoSessionCache.GetSession(chat.Id, () => hs.Session);
-            _messenger =
-                new MessengerService(SendCipherAsync, WaitForCryptoSessionAsync, CreateMessengerOptions(),
-                    OnDecryptFailureAsync);
-            _messenger.GotData += OnMessengerGotData;
+            if (_messenger == null)
+            {
+                _messenger =
+                    new MessengerService(SendCipherAsync, WaitForCryptoSessionAsync, CreateMessengerOptions(),
+                        OnDecryptFailureAsync);
+                _messenger.GotData += OnMessengerGotData;
+                ms = _messenger;
+            }
+
             _handshakeWeInitiated = true;
-            ms = _messenger;
         }
 
-        await ms.StartAsync(cancellationToken).ConfigureAwait(false);
-        Console.WriteLine("messenger started (leader)");
+        if (ms != null)
+        {
+            await ms.StartAsync(cancellationToken).ConfigureAwait(false);
+            Console.WriteLine("messenger started (leader)");
+        }
     }
 
     private async Task EnsureSessionAsInitiatorAsync(CancellationToken cancellationToken)
@@ -1514,17 +1579,14 @@ public sealed class ChatP2pSession : IAsyncDisposable
             return;
         }
 
-        lock (_sync)
-        {
-            if (TryGetCryptoSession(out _) && _messenger != null)
-                return;
-        }
+        if (IsFollowerCryptoReady())
+            return;
 
         TaskCompletionSource<bool> waitHandshake;
         var shouldSendSessionRequest = false;
         lock (_sync)
         {
-            if (TryGetCryptoSession(out _) && _messenger != null)
+            if (IsFollowerCryptoReadyCore())
                 return;
 
             if (_followerHandshakeTcs is { Task.IsCompleted: false })
@@ -1540,6 +1602,12 @@ public sealed class ChatP2pSession : IAsyncDisposable
             }
         }
 
+        if (IsFollowerCryptoReady())
+        {
+            SignalFollowerHandshakeSuccess(waitHandshake);
+            return;
+        }
+
         if (shouldSendSessionRequest)
         {
             try
@@ -1548,20 +1616,25 @@ public sealed class ChatP2pSession : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                lock (_sync)
-                {
-                    if (ReferenceEquals(_followerHandshakeTcs, waitHandshake))
-                        _followerHandshakeTcs = null;
-                }
-
-                waitHandshake.TrySetException(ex);
+                SignalFollowerHandshakeFailure(ex, waitHandshake);
                 throw;
             }
+        }
+
+        if (IsFollowerCryptoReady())
+        {
+            SignalFollowerHandshakeSuccess(waitHandshake);
+            return;
         }
 
         try
         {
             await waitHandshake.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException ex)
+        {
+            SignalFollowerHandshakeFailure(ex, waitHandshake);
+            throw;
         }
         finally
         {
@@ -1604,13 +1677,9 @@ public sealed class ChatP2pSession : IAsyncDisposable
             if (IsCryptoSessionLeader())
                 return;
 
-            MessengerService? created;
-            TaskCompletionSource<bool>? followerSignal;
+            MessengerService? created = null;
             lock (_sync)
             {
-                if (TryGetCryptoSession(out _) && _messenger != null)
-                    return;
-
                 // Follower must rebuild crypto session from latest leader handshake.
                 // Otherwise stale cached session may survive retries and break decrypt.
                 ClearCryptoSession();
@@ -1618,14 +1687,15 @@ public sealed class ChatP2pSession : IAsyncDisposable
                 _ = _cryptoSessionCache.GetSession(chat.Id,
                     () => P2PCrypto.CreateSession(localPrivate, handshakePacket));
 
-                _messenger ??=
-                    new MessengerService(SendCipherAsync, WaitForCryptoSessionAsync, CreateMessengerOptions(),
-                        OnDecryptFailureAsync);
-                _messenger.GotData += OnMessengerGotData;
                 _handshakeWeInitiated = false;
-                followerSignal = _followerHandshakeTcs;
-                _followerHandshakeTcs = null;
-                created = _messenger;
+                if (_messenger == null)
+                {
+                    _messenger =
+                        new MessengerService(SendCipherAsync, WaitForCryptoSessionAsync, CreateMessengerOptions(),
+                            OnDecryptFailureAsync);
+                    _messenger.GotData += OnMessengerGotData;
+                    created = _messenger;
+                }
             }
 
             if (created != null)
@@ -1634,7 +1704,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
                 Console.WriteLine("messenger started (follower)");
             }
 
-            followerSignal?.TrySetResult(true);
+            SignalFollowerHandshakeSuccess();
         }
         finally
         {
@@ -1662,8 +1732,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
         {
             _cryptoProbeOkAwaiter?.TrySetCanceled();
             _cryptoProbeOkAwaiter = null;
-            _followerHandshakeTcs?.TrySetCanceled();
-            _followerHandshakeTcs = null;
+            CancelFollowerHandshakeWait();
             _handshakeWeInitiated = false;
             _cryptoProbeRoundTripOk = false;
         }

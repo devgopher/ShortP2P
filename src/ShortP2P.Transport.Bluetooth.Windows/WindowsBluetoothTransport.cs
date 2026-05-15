@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Concurrent;
+using System.IO;
 using System.Runtime.Versioning;
 using System.Threading.Channels;
+using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Advertisement;
@@ -29,7 +31,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             SingleWriter = false
         });
 
-    private readonly ConcurrentDictionary<ulong, GattCharacteristic> _bleOutboundRx = new();
+    private readonly ConcurrentDictionary<ulong, GattCharacteristic> _bleOutboundPeerRx = new();
+    private readonly ConcurrentDictionary<ulong, GattCharacteristic> _bleOutboundPeerTx = new();
     private readonly ConcurrentDictionary<ulong, BluetoothLEDevice> _blePeerDevices = new();
     private readonly ConcurrentDictionary<ulong, BluetoothLEDevice> _bleAdvertisementDeviceCache = new();
     private readonly ConcurrentDictionary<ulong, SemaphoreSlim> _sendLocks = new();
@@ -37,6 +40,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private CancellationTokenSource? _runCts;
     private GattServiceProvider? _bleServiceProvider;
     private GattLocalCharacteristic? _bleRxCharacteristic;
+    private GattLocalCharacteristic? _bleTxCharacteristic;
     private BluetoothLEAdvertisementWatcher? _bleShortP2PAdvertisementWatcher;
 
     public WindowsBluetoothTransport() : this(default)
@@ -62,7 +66,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
                  cur.Message.Contains("Bluetooth LE PairAsync", StringComparison.OrdinalIgnoreCase) ||
                  cur.Message.Contains("automatic pairing is not available", StringComparison.OrdinalIgnoreCase) ||
                  cur.Message.Contains("BLE service not found", StringComparison.OrdinalIgnoreCase) ||
-                 cur.Message.Contains("BLE RX characteristic not found", StringComparison.OrdinalIgnoreCase)))
+                 cur.Message.Contains("BLE RX characteristic not found", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("BLE TX characteristic not found", StringComparison.OrdinalIgnoreCase)))
                 return true;
         }
 
@@ -110,22 +115,34 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             return;
         _bleServiceProvider = create.ServiceProvider;
 
-        var charParameters = new GattLocalCharacteristicParameters
+        var rxParameters = new GattLocalCharacteristicParameters
         {
             CharacteristicProperties = GattCharacteristicProperties.Write
                                        | GattCharacteristicProperties.WriteWithoutResponse
-                                       | GattCharacteristicProperties.Notify
                                        | GattCharacteristicProperties.Read,
             WriteProtectionLevel = GattProtectionLevel.Plain,
-            UserDescription = "ShortP2P BLE TX/RX"
+            UserDescription = "ShortP2P BLE RX"
         };
-        var charResult = await _bleServiceProvider.Service
-            .CreateCharacteristicAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid, charParameters)
+        var rxResult = await _bleServiceProvider.Service
+            .CreateCharacteristicAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid, rxParameters)
             .AsTask(ct).ConfigureAwait(false);
-        if (charResult.Error != BluetoothError.Success || charResult.Characteristic == null)
+        if (rxResult.Error != BluetoothError.Success || rxResult.Characteristic == null)
             return;
-        _bleRxCharacteristic = charResult.Characteristic;
-        _bleRxCharacteristic.WriteRequested += OnBleWriteRequested;
+        _bleRxCharacteristic = rxResult.Characteristic;
+        _bleRxCharacteristic.WriteRequested += OnBleRxWriteRequested;
+
+        var txParameters = new GattLocalCharacteristicParameters
+        {
+            CharacteristicProperties = GattCharacteristicProperties.Notify | GattCharacteristicProperties.Read,
+            WriteProtectionLevel = GattProtectionLevel.Plain,
+            UserDescription = "ShortP2P BLE TX"
+        };
+        var txResult = await _bleServiceProvider.Service
+            .CreateCharacteristicAsync(BleShortP2PGattProtocol.PeerTxCharacteristicUuid, txParameters)
+            .AsTask(ct).ConfigureAwait(false);
+        if (txResult.Error != BluetoothError.Success || txResult.Characteristic == null)
+            return;
+        _bleTxCharacteristic = txResult.Characteristic;
         StartBleGattProviderAdvertising(_bleServiceProvider, options.GattDiscoverable);
         StartBleShortP2PAdvertisementWatcher();
     }
@@ -204,7 +221,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         provider.StartAdvertising(advertising);
     }
 
-    private async void OnBleWriteRequested(GattLocalCharacteristic sender, GattWriteRequestedEventArgs args)
+    private async void OnBleRxWriteRequested(GattLocalCharacteristic sender, GattWriteRequestedEventArgs args)
     {
         try
         {
@@ -358,7 +375,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
     private async Task<GattCharacteristic> GetOrConnectBleRxCharacteristicAsync(ulong bluetoothAddress, CancellationToken ct)
     {
-        if (_bleOutboundRx.TryGetValue(bluetoothAddress, out var cached))
+        if (_bleOutboundPeerRx.TryGetValue(bluetoothAddress, out var cached))
             return cached;
 
         if (!_blePeerDevices.TryGetValue(bluetoothAddress, out var device))
@@ -371,9 +388,10 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
             try
             {
-                var rx = await DiscoverBleRxWithOptionalPairingAsync(device, ct).ConfigureAwait(false);
+                var (rx, _) = await DiscoverBlePeerCharacteristicsWithOptionalPairingAsync(device, ct)
+                    .ConfigureAwait(false);
                 _blePeerDevices[bluetoothAddress] = device;
-                _bleOutboundRx[bluetoothAddress] = rx;
+                _bleOutboundPeerRx[bluetoothAddress] = rx;
                 return rx;
             }
             catch
@@ -391,45 +409,101 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             }
         }
 
-        var rxExisting = await DiscoverBleRxWithOptionalPairingAsync(device, ct).ConfigureAwait(false);
-        _bleOutboundRx[bluetoothAddress] = rxExisting;
+        var (rxExisting, _) = await DiscoverBlePeerCharacteristicsWithOptionalPairingAsync(device, ct)
+            .ConfigureAwait(false);
+        _bleOutboundPeerRx[bluetoothAddress] = rxExisting;
         return rxExisting;
     }
 
-    private async Task<GattCharacteristic> DiscoverBleRxWithOptionalPairingAsync(BluetoothLEDevice device,
-        CancellationToken ct)
+    private async Task<(GattCharacteristic rx, GattCharacteristic? tx)> DiscoverBlePeerCharacteristicsWithOptionalPairingAsync(
+        BluetoothLEDevice device, CancellationToken ct)
     {
-        var first = await TryDiscoverBleRxAsync(device, ct).ConfigureAwait(false);
+        var first = await TryDiscoverBlePeerCharacteristicsAsync(device, ct).ConfigureAwait(false);
         if (first.rx != null)
-            return first.rx;
+        {
+            if (first.tx != null)
+                await EnsurePeerTxNotifySubscribedAsync(device.BluetoothAddress, first.tx, ct).ConfigureAwait(false);
+            return (first.rx, first.tx);
+        }
 
         if (!device.DeviceInformation.Pairing.IsPaired &&
             (first.status == GattCommunicationStatus.AccessDenied ||
              first.status == GattCommunicationStatus.ProtocolError))
         {
             await EnsureBlePairedAsync(device, ct).ConfigureAwait(false);
-            var second = await TryDiscoverBleRxAsync(device, ct).ConfigureAwait(false);
+            var second = await TryDiscoverBlePeerCharacteristicsAsync(device, ct).ConfigureAwait(false);
             if (second.rx != null)
-                return second.rx;
+            {
+                if (second.tx != null)
+                    await EnsurePeerTxNotifySubscribedAsync(device.BluetoothAddress, second.tx, ct)
+                        .ConfigureAwait(false);
+                return (second.rx, second.tx);
+            }
         }
 
-        throw new InvalidOperationException("BLE service not found on remote device.");
+        throw new InvalidOperationException("BLE service or RX characteristic not found on remote device.");
     }
 
-    private static async Task<(GattCharacteristic? rx, GattCommunicationStatus status)> TryDiscoverBleRxAsync(
-        BluetoothLEDevice device, CancellationToken ct)
+    private static async Task<(GattCharacteristic? rx, GattCharacteristic? tx, GattCommunicationStatus status)>
+        TryDiscoverBlePeerCharacteristicsAsync(BluetoothLEDevice device, CancellationToken ct)
     {
         var serviceResult = await device.GetGattServicesForUuidAsync(BleShortP2PGattProtocol.ServiceUuid).AsTask(ct)
             .ConfigureAwait(false);
         if (serviceResult.Status != GattCommunicationStatus.Success || serviceResult.Services.Count == 0)
-            return (null, serviceResult.Status);
+            return (null, null, serviceResult.Status);
 
         var service = serviceResult.Services[0];
-        var charResult = await service.GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid)
+        var rxResult = await service.GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid)
             .AsTask(ct)
             .ConfigureAwait(false);
-        var rx = charResult.Characteristics.FirstOrDefault();
-        return rx != null ? (rx, GattCommunicationStatus.Success) : (null, GattCommunicationStatus.ProtocolError);
+        var rx = rxResult.Characteristics.FirstOrDefault();
+        if (rx == null)
+            return (null, null, GattCommunicationStatus.ProtocolError);
+
+        GattCharacteristic? tx = null;
+        var txResult = await service.GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerTxCharacteristicUuid)
+            .AsTask(ct)
+            .ConfigureAwait(false);
+        tx = txResult.Characteristics.FirstOrDefault();
+
+        return (rx, tx, GattCommunicationStatus.Success);
+    }
+
+    private async Task EnsurePeerTxNotifySubscribedAsync(ulong bluetoothAddress, GattCharacteristic peerTx,
+        CancellationToken ct)
+    {
+        if (_bleOutboundPeerTx.ContainsKey(bluetoothAddress))
+            return;
+
+        peerTx.ValueChanged -= OnPeerTxValueChanged;
+        peerTx.ValueChanged += OnPeerTxValueChanged;
+
+        var cccd = await peerTx.WriteClientCharacteristicConfigurationDescriptorAsync(
+            GattClientCharacteristicConfigurationDescriptorValue.Notify).AsTask(ct).ConfigureAwait(false);
+        if (cccd != GattCommunicationStatus.Success)
+            throw new InvalidOperationException("BLE TX notify subscription failed.");
+
+        _bleOutboundPeerTx[bluetoothAddress] = peerTx;
+    }
+
+    private async void OnPeerTxValueChanged(GattCharacteristic sender, GattValueChangedEventArgs args)
+    {
+        try
+        {
+            var reader = DataReader.FromBuffer(args.CharacteristicValue);
+            var data = new byte[reader.UnconsumedBufferLength];
+            reader.ReadBytes(data);
+            if (data.Length == 0)
+                return;
+
+            var addr = new TransportAddress(TransportKind.Bluetooth,
+                BluetoothMacAddress.FromBluetoothAddress(sender.Service.Device.BluetoothAddress));
+            await _inbound.Writer.WriteAsync(new TransportReceiveMessage(data, addr)).ConfigureAwait(false);
+        }
+        catch
+        {
+            // ignore malformed notifications
+        }
     }
 
     /// <summary>
@@ -489,23 +563,41 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
-        if (_bleServiceProvider == null && _bleRxCharacteristic == null && _blePeerDevices.Count == 0 &&
-            _bleOutboundRx.Count == 0 && _runCts == null && _bleShortP2PAdvertisementWatcher == null &&
+        if (_bleServiceProvider == null && _bleRxCharacteristic == null && _bleTxCharacteristic == null &&
+            _blePeerDevices.Count == 0 &&
+            _bleOutboundPeerRx.Count == 0 && _bleOutboundPeerTx.Count == 0 && _runCts == null &&
+            _bleShortP2PAdvertisementWatcher == null &&
             _bleAdvertisementDeviceCache.IsEmpty)
             return;
 
-        try
+        if (_runCts != null)
         {
-            await _runCts?.CancelAsync();
-        }
-        catch (ObjectDisposedException)
-        {
-            // ignore
+            try
+            {
+                await _runCts.CancelAsync();
+            }
+            catch (ObjectDisposedException)
+            {
+                // ignore
+            }
         }
 
         StopBleShortP2PAdvertisementWatcher();
 
-        _bleOutboundRx.Clear();
+        foreach (var kv in _bleOutboundPeerTx)
+        {
+            try
+            {
+                kv.Value.ValueChanged -= OnPeerTxValueChanged;
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        _bleOutboundPeerRx.Clear();
+        _bleOutboundPeerTx.Clear();
 
         foreach (var kv in _blePeerDevices)
             kv.Value.Dispose();
@@ -528,9 +620,11 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
         if (_bleRxCharacteristic != null)
         {
-            _bleRxCharacteristic.WriteRequested -= OnBleWriteRequested;
+            _bleRxCharacteristic.WriteRequested -= OnBleRxWriteRequested;
             _bleRxCharacteristic = null;
         }
+
+        _bleTxCharacteristic = null;
 
         if (_bleServiceProvider != null)
         {
