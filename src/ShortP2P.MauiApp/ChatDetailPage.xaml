@@ -4,6 +4,7 @@
              x:Class="ShortP2P.MauiApp.ChatDetailPage"
              Title="Chat">
     <ContentPage.ToolbarItems>
+        <ToolbarItem Text="Удалить" Order="Primary" Priority="0" Clicked="OnClearChatClicked" />
         <ToolbarItem Text="Image" Order="Primary" Priority="2" Clicked="OnAttachImageClicked" />
         <ToolbarItem Text="Document" Order="Primary" Priority="1" Clicked="OnAttachDocumentClicked" />
     </ContentPage.ToolbarItems>

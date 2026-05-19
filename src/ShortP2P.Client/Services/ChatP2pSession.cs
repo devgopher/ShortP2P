@@ -58,6 +58,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
     private readonly object _sync = new();
     private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _outboundCts;
     private int _decryptRecoveryGate;
     private DateTimeOffset _lastDecryptRecoveryUtc = DateTimeOffset.MinValue;
     private MessengerService? _messenger;
@@ -280,6 +281,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
         RebuildRouteFromChat();
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        ResetOutboundCts();
 
         SubscribeToTransceivers();
 
@@ -699,18 +701,76 @@ public sealed class ChatP2pSession : IAsyncDisposable
         _presenceHooked = true;
     }
 
-    private void UnhookPresenceAndClearPending()
+    private void ClearPendingOutgoing()
     {
         lock (_pendingSync)
         {
             _pendingOutgoing.Clear();
         }
+    }
+
+    private void UnhookPresenceAndClearPending()
+    {
+        ClearPendingOutgoing();
 
         if (!_presenceHooked || localNetworkScanner == null)
             return;
         localNetworkScanner.ClientsChanged -= OnLanClientsChangedForPendingFlush;
         localNetworkScanner.DiscoveryPingReceived -= OnDiscoveryPingForPendingFlush;
         _presenceHooked = false;
+    }
+
+    private void ResetOutboundCts()
+    {
+        _outboundCts?.Dispose();
+        _outboundCts = _cts is { IsCancellationRequested: false }
+            ? CancellationTokenSource.CreateLinkedTokenSource(_cts.Token)
+            : null;
+    }
+
+    private async ValueTask CancelOutboundDeliveryAsync()
+    {
+        if (_outboundCts == null)
+            return;
+        try
+        {
+            await _outboundCts.CancelAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            _outboundCts.Cancel();
+        }
+
+        ResetOutboundCts();
+    }
+
+    private static CancellationTokenSource? CreateOutboundLinkedCts(CancellationToken cancellationToken,
+        CancellationTokenSource? outboundCts)
+    {
+        if (outboundCts == null)
+            return null;
+        return CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, outboundCts.Token);
+    }
+
+    /// <summary>Удаляет все сообщения чата из БД и отменяет недоставленные исходящие отправки.</summary>
+    public async ValueTask<bool> ClearMessagesAsync(CancellationToken cancellationToken = default)
+    {
+        await CancelOutboundDeliveryAsync().ConfigureAwait(false);
+        ClearPendingOutgoing();
+
+        await _flushPendingSem.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ClearPendingOutgoing();
+            var ok = await repo.ClearMessagesAsync(chat.Id, user.Id, cancellationToken).ConfigureAwait(false);
+            if (ok)
+                RaiseMessagesChanged();
+            return ok;
+        }
+        finally
+        {
+            _flushPendingSem.Release();
+        }
     }
 
     private bool HasPendingOutgoing()
@@ -857,6 +917,9 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
     private async Task DeliverOutgoingWireAsync(int messageId, byte[] wire, CancellationToken cancellationToken)
     {
+        using var linkedCts = CreateOutboundLinkedCts(cancellationToken, _outboundCts);
+        var deliveryToken = linkedCts?.Token ?? cancellationToken;
+
         var ackTimeout = (routingSettings?.LinkTechnology ?? LinkTechnologyPreset.Unlimited).GetMessageAckTimeout();
         await _guaranteedDelivery.ExecuteAsync(
             async ct =>
@@ -878,7 +941,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
             null,
             false,
             routingSettings,
-            cancellationToken).ConfigureAwait(false);
+            deliveryToken).ConfigureAwait(false);
 
         await repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Delivered).ConfigureAwait(false);
         RaiseMessagesChanged();
@@ -886,6 +949,9 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
     private async Task SendWireAsync(byte[] wire, CancellationToken cancellationToken)
     {
+        using var linkedCts = CreateOutboundLinkedCts(cancellationToken, _outboundCts);
+        var deliveryToken = linkedCts?.Token ?? cancellationToken;
+
         var ackTimeout = (routingSettings?.LinkTechnology ?? LinkTechnologyPreset.Unlimited).GetMessageAckTimeout();
         await _guaranteedDelivery.ExecuteAsync(
             async ct =>
@@ -907,7 +973,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
             null,
             false,
             routingSettings,
-            cancellationToken).ConfigureAwait(false);
+            deliveryToken).ConfigureAwait(false);
     }
 
     public async ValueTask RetryFailedMessageAsync(int messageId, CancellationToken cancellationToken = default)
@@ -923,7 +989,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
             var wire = BuildOutgoingWire(row);
             await DeliverOutgoingWireAsync(messageId, wire, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             throw;
         }
@@ -952,7 +1018,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
             var wire = ChatWireCodec.EncodeText(text);
             await DeliverOutgoingWireAsync(messageId, wire, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             throw;
         }
@@ -1065,6 +1131,10 @@ public sealed class ChatP2pSession : IAsyncDisposable
         {
             await DeliverOutgoingWireAsync(messageId, ChatWireCodec.EncodeTransferOffer(offer), cancellationToken)
                 .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {
@@ -1728,6 +1798,8 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
         _cts?.Dispose();
         _cts = null;
+        _outboundCts?.Dispose();
+        _outboundCts = null;
         lock (_sync)
         {
             _cryptoProbeOkAwaiter?.TrySetCanceled();

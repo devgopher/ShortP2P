@@ -38,6 +38,7 @@ public sealed class ChatForm : Form
         ForeColor = SystemColors.GrayText,
         Padding = new Padding(0, 0, 0, 2),
     };
+    private readonly Button _clearChat = new() { Text = "Удалить", AutoSize = true };
     private readonly Label _deliveryIssueLabel = new()
     {
         Dock = DockStyle.Fill,
@@ -165,10 +166,13 @@ public sealed class ChatForm : Form
             Dock = DockStyle.Top,
             AutoSize = true,
             Padding = new Padding(8, 6, 8, 2),
-            ColumnCount = 1,
+            ColumnCount = 2,
             RowCount = 1,
         };
+        top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         top.Controls.Add(_peerInfoLabel, 0, 0);
+        top.Controls.Add(_clearChat, 1, 0);
 
         var deliveryIssuePanel = new Panel
         {
@@ -200,6 +204,8 @@ public sealed class ChatForm : Form
         _buttonTooltips.SetToolTip(_attachCamera, "Записать видеосообщение с камеры");
         _buttonTooltips.SetToolTip(_attachDocument, "Отправить документ");
         _buttonTooltips.SetToolTip(_send, "Отправить сообщение");
+        _buttonTooltips.SetToolTip(_clearChat,
+            "Удалить все сообщения с этого ПК и отменить недоставленные отправки.");
         _buttonTooltips.SetToolTip(_techHandshake, "Временно: сброс крипто-сессии и повторный RSA handshake");
         _buttonTooltips.SetToolTip(_techPing, "Временно: presence ping на порт discovery (17501)");
 
@@ -223,6 +229,7 @@ public sealed class ChatForm : Form
         Controls.Add(deliveryIssuePanel);
         Controls.Add(bottom);
 
+        _clearChat.Click += async (_, _) => await OnClearChatAsync().ConfigureAwait(true);
         _attachVoice.Click += (_, _) => OnAttachVoice();
         _attachImage.Click += async (_, _) => await OnAttachImageAsync().ConfigureAwait(true);
         _attachVideo.Click += async (_, _) => await OnAttachVideoAsync().ConfigureAwait(true);
@@ -1318,6 +1325,43 @@ public sealed class ChatForm : Form
         _userActions.LogInformation("Chat {Peer}: open long message viewer", _chat.PeerNickname);
         using var dlg = new MessageViewForm("Сообщение", line.DisplayText);
         dlg.ShowDialog(this);
+    }
+
+    private async Task OnClearChatAsync()
+    {
+        if (_p2PSession == null)
+            return;
+
+        var confirm = MessageBox.Show(this,
+            "Все сообщения будут удалены с этого ПК. Недоставленные отправки будут отменены.",
+            "Удалить переписку",
+            MessageBoxButtons.OKCancel,
+            MessageBoxIcon.Warning);
+        if (confirm != DialogResult.OK)
+            return;
+
+        ClearDeliveryIssue();
+        try
+        {
+            var ok = await _p2PSession.ClearMessagesAsync().ConfigureAwait(true);
+            if (!ok)
+            {
+                MessageBox.Show(this, "Не удалось удалить переписку.", "Ошибка", MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+
+            _userActions.LogInformation("Chat {Peer}: history cleared (chat id {ChatId})", _chat.PeerNickname, _chat.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Clear chat failed for chat {ChatId}", _chat.Id);
+            MessageBox.Show(this, ex.Message, "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            await ReloadMessagesAsync().ConfigureAwait(true);
+        }
     }
 
     private async Task RetryFailedMessageAsync(int messageId)

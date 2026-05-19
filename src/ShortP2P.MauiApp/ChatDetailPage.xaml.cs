@@ -843,6 +843,40 @@ public partial class ChatDetailPage : ContentPage
         DeliveryIssueLabel.IsVisible = false;
     }
 
+    private async void OnClearChatClicked(object? sender, EventArgs e)
+    {
+        if (_p2pSession == null)
+            return;
+
+        var confirm = await DisplayAlert(
+            "Удалить переписку",
+            "Все сообщения будут удалены с этого устройства. Недоставленные отправки будут отменены.",
+            "Удалить",
+            "Отмена").ConfigureAwait(true);
+        if (!confirm)
+            return;
+
+        ClearDeliveryIssue();
+        try
+        {
+            var ok = await _p2pSession.ClearMessagesAsync().ConfigureAwait(true);
+            if (!ok)
+            {
+                await DisplayAlert("Ошибка", "Не удалось удалить переписку.", "OK").ConfigureAwait(true);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Clear chat failed for chat {ChatId}", ChatId);
+            await DisplayAlert("Ошибка", ex.Message, "OK").ConfigureAwait(true);
+        }
+        finally
+        {
+            await ReloadMessagesAsync().ConfigureAwait(true);
+        }
+    }
+
     private async Task RetryFailedMessageAsync(int messageId)
     {
         if (_p2pSession == null)
