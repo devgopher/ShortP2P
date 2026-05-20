@@ -1,4 +1,5 @@
-﻿using Windows.Devices.Bluetooth.Advertisement;
+﻿using ShortP2P.Transport;
+using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Devices.Enumeration;
 
 namespace QuickBlueToothLE;
@@ -15,10 +16,12 @@ internal class Program
         void OnAdvertisementReceived(BluetoothLEAdvertisementWatcher sender,
             BluetoothLEAdvertisementReceivedEventArgs args)
         {
-            // Bluetooth address в формате шестнадцатеричного
-            string address = args.BluetoothAddress.ToString("X");
+            var mac = new byte[BluetoothTransportAddress.MacLength];
+            for (var i = 0; i < mac.Length; i++)
+                mac[i] = (byte)(args.BluetoothAddress >> (8 * i));
+            var address = BluetoothTransportAddress.ToMacString(mac);
             short rssi = args.RawSignalStrengthInDBm;
-            Console.WriteLine($"Device: 0x{address}, RSSI: {rssi} dBm, Timestamp: {args.Timestamp}");
+            Console.WriteLine($"Device: {address}, RSSI: {rssi} dBm, Timestamp: {args.Timestamp}");
 
             // Пример чтения данных из рекламного пакета (local name, manufacturer data)
             var localName = args.Advertisement.LocalName;

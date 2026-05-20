@@ -7,4 +7,8 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
+    <ItemGroup>
+        <ProjectReference Include="..\ShortP2P.Transport\ShortP2P.Transport.csproj" />
+    </ItemGroup>
+
 </Project>
