@@ -14,7 +14,7 @@ internal sealed class BluetoothTransportRegistration
     {
         try
         {
-            Instance = new WindowsBluetoothTransport();
+            Instance = new WindowsBluetoothTransport(new WindowsBluetoothTransportOptions(true));
         }
         catch
         {

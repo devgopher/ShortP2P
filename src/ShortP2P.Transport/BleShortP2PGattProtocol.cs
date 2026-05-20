@@ -35,7 +35,7 @@ public static class BleShortP2PGattProtocol
 
     /// <summary>Приём на peripheral: Central → Write → сервер.</summary>
     public static readonly Guid PeerRxCharacteristicUuid = Guid.Parse("8DFE6F10-6CB7-4E73-A918-DC47AC34D9E9");
-
+    
     /// <summary>Передача с peripheral: сервер → Notify → Central (нужна подписка CCCD).</summary>
     public static readonly Guid PeerTxCharacteristicUuid = Guid.Parse("7CF03A12-8B5E-4D91-B245-2B40EA0439C8");
 
