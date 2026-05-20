@@ -263,6 +263,9 @@ public sealed class ChatP2pSession : IAsyncDisposable
                     if (ep.Address.Equals(ip))
                         return true;
                 }
+            } if (from.Kind == TransportKind.Bluetooth)
+            { 
+                return true;
             }
 
             if (!string.IsNullOrEmpty(chat.RelayRouteBlob))
