@@ -8,7 +8,7 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 /// <summary>
 ///     WinRT: наблюдатель BLE-рекламы с фильтром по сервису ShortP2P.
 /// </summary>
-[SupportedOSPlatform("windows10.0.17763.0")]
+[SupportedOSPlatform("windows10.0.18362.0")]
 public sealed class WindowsBluetoothLeShortP2PScanner : IBleShortP2PPeripheralScanner
 {
     public async Task ScanAsync(TimeSpan duration, Action<TransportAddress> onDeviceDiscovered,

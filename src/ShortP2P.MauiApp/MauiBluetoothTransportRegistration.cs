@@ -14,6 +14,7 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
 {
     private readonly object _sync = new();
     private ITransport? _instance;
+    private Guid? _localNetworkId;
 
     public ITransport? Current
     {
@@ -34,6 +35,12 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
         {
             _instance = null;
         }
+    }
+
+    public void SetLocalNetworkId(Guid? networkId)
+    {
+        lock (_sync)
+            _localNetworkId = networkId;
     }
 
     public void ApplySettings(P2pRoutingSettings settings)
@@ -72,7 +79,8 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
 
             _instance = new WindowsBluetoothTransport(new WindowsBluetoothTransportOptions(
                 GattDiscoverable: true,
-                LocalAdapterBluetoothAddress: localAddr));
+                LocalAdapterBluetoothAddress: localAddr,
+                LocalNetworkId: _localNetworkId));
 #elif ANDROID
             _instance = new AndroidBluetoothTransport(global::Android.App.Application.Context);
 #endif

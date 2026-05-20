@@ -10,6 +10,8 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 /// <param name="LocalAdapterBluetoothAddress">
 ///     MAC выбранного радио (ulong WinRT). <see langword="null" /> — адаптер по умолчанию.
 /// </param>
+/// <param name="LocalNetworkId">NetworkId в GATT Service Data рекламы (<see cref="GattServiceProvider.StartAdvertising" />).</param>
 public readonly record struct WindowsBluetoothTransportOptions(
     bool GattDiscoverable = true,
-    ulong? LocalAdapterBluetoothAddress = null);
+    ulong? LocalAdapterBluetoothAddress = null,
+    Guid? LocalNetworkId = null);

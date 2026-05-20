@@ -17,7 +17,7 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 ///     Bluetooth Low Energy (GATT) на Windows через WinRT: исходящие записи в RX-характеристику пира
 ///     и входящие записи через локальный GATT-сервер.
 /// </summary>
-[SupportedOSPlatform("windows10.0.17763.0")]
+[SupportedOSPlatform("windows10.0.18362.0")]
 public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions options) : ITransport
 {
     private const int DefaultChannelCapacity = 256;
@@ -153,7 +153,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         _myBluetoothAddr = await LocalAdapterBluetoothMac.TryGetAdapterAddressAsync().ConfigureAwait(false)
                            ?? 0;
         
-        StartBleGattProviderAdvertising(_bleServiceProvider, options.GattDiscoverable);
+        StartBleGattProviderAdvertising(_bleServiceProvider, options.GattDiscoverable, options.LocalNetworkId);
         StartBleShortP2PAdvertisementWatcher();
     }
 
@@ -202,8 +202,10 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
                 if (dev != null)
                 {
                     _bleAdvertisementDeviceCache.TryAdd(macKey, dev);
+                    var peerNetId = BleGattAdvertisementNetworkId.TryParseFromAdvertisement(args.Advertisement);
                     var myMac = _myBluetoothMac ?? "unknown";
-                    Console.WriteLine($"BLE advertisement device: {macKey} {_addr}. My MAC: {myMac} {_myBluetoothAddr}");
+                    Console.WriteLine(
+                        $"BLE advertisement device: {macKey} addr {_addr} peerNetworkId={(peerNetId?.ToString("D") ?? "n/a")}. My MAC: {myMac}");
                 }
             }
         }
@@ -230,13 +232,22 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         }
     }
 
-    private static void StartBleGattProviderAdvertising(GattServiceProvider provider, bool discoverable)
+    private static void StartBleGattProviderAdvertising(GattServiceProvider provider, bool discoverable,
+        Guid? localNetworkId)
     {
         var advertising = new GattServiceProviderAdvertisingParameters
         {
-            IsDiscoverable = true,
+            IsDiscoverable = discoverable,
             IsConnectable = true,
         };
+
+        if (localNetworkId is Guid networkId)
+        {
+            var payload = BleShortP2PGattProtocol.BuildGattServiceDataNetworkId(networkId);
+            var writer = new DataWriter();
+            writer.WriteBytes(payload);
+            advertising.ServiceData = writer.DetachBuffer();
+        }
 
         provider.StartAdvertising(advertising);
     }

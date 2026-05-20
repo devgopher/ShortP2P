@@ -9,6 +9,7 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
 {
     private readonly object _sync = new();
     private ITransport? _instance;
+    private Guid? _localNetworkId;
 
     public IBleShortP2PPeripheralScanner PeripheralScanner { get; } = new WindowsBluetoothLeShortP2PScanner();
 
@@ -33,6 +34,12 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
         {
             _instance = null;
         }
+    }
+
+    public void SetLocalNetworkId(Guid? networkId)
+    {
+        lock (_sync)
+            _localNetworkId = networkId;
     }
 
     public void ApplySettings(P2pRoutingSettings settings)
@@ -70,7 +77,8 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
 
             _instance = new WindowsBluetoothTransport(new WindowsBluetoothTransportOptions(
                 GattDiscoverable: true,
-                LocalAdapterBluetoothAddress: localAddr));
+                LocalAdapterBluetoothAddress: localAddr,
+                LocalNetworkId: _localNetworkId));
         }
     }
 

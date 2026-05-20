@@ -534,6 +534,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         Settings.SuggestBluetoothPairing = persisted.SuggestBluetoothPairing;
         Settings.TrafficSavingEnabled = persisted.TrafficSavingEnabled;
         Settings.AdvertisedPeerCapabilities = persisted.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
+        _bluetooth?.SetLocalNetworkId(CompressedNetworkId.FromShortString(user.NetworkIdShort).Value);
         _bluetooth?.ApplySettings(Settings);
 
         // Инвайты (отдельный UDP) должны работать даже если presence/LAN bind на Android не удался.

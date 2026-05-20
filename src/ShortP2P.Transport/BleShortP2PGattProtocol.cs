@@ -44,6 +44,29 @@ public static class BleShortP2PGattProtocol
 
     public const int ApplicationChunkHeaderLength = 16;
 
+    /// <summary>Длина NetworkId в GATT Service Data (Guid wire, 16 байт).</summary>
+    public const int GattServiceDataNetworkIdLength = 16;
+
+    /// <summary>Payload для <see cref="GattServiceProviderAdvertisingParameters.ServiceData" /> (UUID сервиса в AD отдельно).</summary>
+    public static byte[] BuildGattServiceDataNetworkId(Guid networkId)
+    {
+        if (networkId == Guid.Empty)
+            throw new ArgumentException("NetworkId must not be empty.", nameof(networkId));
+        var buf = new byte[GattServiceDataNetworkIdLength];
+        if (!networkId.TryWriteBytes(buf))
+            throw new InvalidOperationException("Failed to serialize NetworkId.");
+        return buf;
+    }
+
+    public static bool TryParseGattServiceDataNetworkId(ReadOnlySpan<byte> serviceData, out Guid networkId)
+    {
+        networkId = Guid.Empty;
+        if (serviceData.Length < GattServiceDataNetworkIdLength)
+            return false;
+        networkId = new Guid(serviceData.Slice(0, GattServiceDataNetworkIdLength));
+        return networkId != Guid.Empty;
+    }
+
     public static byte[] BuildApplicationChunk(uint fullStreamCrc32, int chunkIndex, int totalChunks,
         ReadOnlySpan<byte> payloadSlice)
     {

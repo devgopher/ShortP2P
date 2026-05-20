@@ -8,5 +8,7 @@ public interface IBluetoothTransportProvider
 {
     ITransport? Current { get; }
 
+    void SetLocalNetworkId(Guid? networkId);
+
     void ApplySettings(P2pRoutingSettings settings);
 }

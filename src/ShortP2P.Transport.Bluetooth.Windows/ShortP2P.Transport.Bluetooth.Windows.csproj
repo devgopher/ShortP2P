@@ -1,12 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>$(WindowsDesktopTargetFramework)</TargetFramework>
+        <!-- ServiceData on GattServiceProviderAdvertisingParameters requires Windows 10 1903+. -->
+        <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <RootNamespace>ShortP2P.Transport.Bluetooth.Windows</RootNamespace>
         <Description>Bluetooth Low Energy (GATT) transport for Windows via WinRT.</Description>
-        <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+        <SupportedOSPlatformVersion>10.0.18362.0</SupportedOSPlatformVersion>
+        <TargetPlatformMinVersion>10.0.18362.0</TargetPlatformMinVersion>
     </PropertyGroup>
 
     <ItemGroup>
