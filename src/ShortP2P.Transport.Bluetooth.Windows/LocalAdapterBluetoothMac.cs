@@ -8,6 +8,21 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 [SupportedOSPlatform("windows10.0.17763.0")]
 public static class LocalAdapterBluetoothMac
 {
+    public static async Task<ulong?> TryGetAdapterAddressAsync()
+    {
+        try
+        {
+            var adapter = await BluetoothAdapter.GetDefaultAsync();
+            if (adapter == null)
+                return null;
+            return adapter.BluetoothAddress;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+    
     public static async Task<string?> TryGetAdapterMacStringAsync()
     {
         try

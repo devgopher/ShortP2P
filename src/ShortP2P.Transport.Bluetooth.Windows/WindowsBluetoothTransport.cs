@@ -42,7 +42,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private GattLocalCharacteristic? _bleRxCharacteristic;
     private GattLocalCharacteristic? _bleTxCharacteristic;
     private BluetoothLEAdvertisementWatcher? _bleShortP2PAdvertisementWatcher;
-    private volatile string? _myBleAddressDisplay;
+    private volatile string? _myBluetoothAddress;
 
     public WindowsBluetoothTransport() : this(default)
     {
@@ -144,8 +144,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         if (txResult.Error != BluetoothError.Success || txResult.Characteristic == null)
             return;
         _bleTxCharacteristic = txResult.Characteristic;
-        _myBleAddressDisplay = await LocalAdapterBluetoothMac.TryGetAdapterMacStringAsync().ConfigureAwait(false)
-                                ?? "unknown";
+        _myBluetoothAddress = (await LocalAdapterBluetoothMac.TryGetAdapterAddressAsync())?.ToString() ?? "none";
         StartBleGattProviderAdvertising(_bleServiceProvider, options.GattDiscoverable);
         StartBleShortP2PAdvertisementWatcher();
     }
@@ -192,11 +191,11 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
                 if (dev != null)
                 {
-                    _bleAdvertisementDeviceCache.TryAdd(addr, dev);
+                    _bleAdvertisementDeviceCache.TryAdd(_addr, dev);
                     var peerMac = BluetoothTransportAddress.ToMacString(
-                        BluetoothMacAddress.FromBluetoothAddress(addr));
-                    var myBle = _myBleAddressDisplay ?? "unknown";
-                    Console.WriteLine($"BLE advertisement device: {peerMac}. My BLE address: {myBle}");
+                        BluetoothMacAddress.FromBluetoothAddress(_addr));
+                    var myBle = _myBluetoothAddress ?? "unknown";
+                    Console.WriteLine($"BLE advertisement device: {_addr}. My BLE address: {myBle}");
                 }
             }
         }
