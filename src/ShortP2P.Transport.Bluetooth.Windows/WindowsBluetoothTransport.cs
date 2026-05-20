@@ -46,10 +46,6 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private BluetoothLEAdvertisementWatcher? _bleShortP2PAdvertisementWatcher;
     private volatile string? _myBluetoothMac;
 
-    public WindowsBluetoothTransport() : this(default)
-    {
-    }
-
     public TransportKind Kind => TransportKind.Bluetooth;
 
     public ChannelReader<TransportReceiveMessage> Inbound => _inbound.Reader;
@@ -202,7 +198,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
                 {
                     _bleAdvertisementDeviceCache.TryAdd(macKey, dev);
                     var myMac = _myBluetoothMac ?? "unknown";
-                    Console.WriteLine($"BLE advertisement device: {macKey}. My MAC: {myMac}");
+                    Console.WriteLine($"BLE advertisement device: {macKey} {_addr}. My MAC: {myMac}");
                 }
             }
         }
