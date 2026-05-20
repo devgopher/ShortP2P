@@ -2,10 +2,11 @@ using System.Drawing;
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
+using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Qr;
 using ShortP2P.Crypto;
 using ShortP2P.Client.Services;
-using ShortP2P.Transport.Bluetooth.Windows;
+using ShortP2P.Transport;
 
 namespace ShortP2P.WinForms;
 
@@ -14,7 +15,8 @@ public sealed class MyQrForm : Form
     private readonly byte[]? _qrPng;
     private readonly string _qrPayloadJson = string.Empty;
 
-    public MyQrForm(AuthService auth, ILogger<MyQrForm> log, ILogger<UserAction> userActions)
+    public MyQrForm(AuthService auth, UserP2pRuntime runtime, IBluetoothRadioCatalog bluetoothCatalog,
+        ILogger<MyQrForm> log, ILogger<UserAction> userActions)
     {
         Text = "My QR code";
         StartPosition = FormStartPosition.CenterParent;
@@ -46,7 +48,8 @@ public sealed class MyQrForm : Form
         string? btMac = null;
         try
         {
-            btMac = LocalAdapterBluetoothMac.TryGetAdapterMacStringAsync().GetAwaiter().GetResult();
+            btMac = BluetoothRoutingMac.GetEffectiveMacAsync(runtime.Settings, bluetoothCatalog)
+                .AsTask().GetAwaiter().GetResult();
         }
         catch
         {

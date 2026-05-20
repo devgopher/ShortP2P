@@ -12,6 +12,8 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
     private const string KLinkTechnology = "p2p_link_technology";
     private const string KEnableUdpTransport = "p2p_transport_udp_enabled";
     private const string KEnableBluetoothTransport = "p2p_transport_bluetooth_enabled";
+    private const string KBluetoothAdapterDeviceId = "p2p_bluetooth_adapter_device_id";
+    private const string KBluetoothAdapterMac = "p2p_bluetooth_adapter_mac";
     private const string KBluetoothPairingPrompt = "p2p_bluetooth_pairing_prompt";
     private const string KTrafficSavingEnabled = "p2p_traffic_saving_enabled";
     private const string KAdvertisedCaps = "p2p_advertised_caps";
@@ -36,6 +38,10 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
             s.EnableUdpTransport = udp;
         if (bool.TryParse(await _storage.GetAsync(KEnableBluetoothTransport).ConfigureAwait(false), out var bt))
             s.EnableBluetoothTransport = bt;
+        s.SelectedBluetoothAdapterDeviceId =
+            NullIfWhiteSpace(await _storage.GetAsync(KBluetoothAdapterDeviceId).ConfigureAwait(false));
+        s.SelectedBluetoothAdapterMac =
+            NullIfWhiteSpace(await _storage.GetAsync(KBluetoothAdapterMac).ConfigureAwait(false));
         if (bool.TryParse(await _storage.GetAsync(KBluetoothPairingPrompt).ConfigureAwait(false), out var bp))
             s.SuggestBluetoothPairing = bp;
         if (bool.TryParse(await _storage.GetAsync(KTrafficSavingEnabled).ConfigureAwait(false), out var ts))
@@ -50,6 +56,8 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
         return s;
     }
 
+    private static string? NullIfWhiteSpace(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
     public async Task SaveAsync(P2pRoutingSettings settings)
     {
         await _storage.SetAsync(KMaxHops, settings.MaxSearchHops.ToString()).ConfigureAwait(false);
@@ -61,6 +69,10 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
         await _storage.SetAsync(KLinkTechnology, ((int)settings.LinkTechnology).ToString()).ConfigureAwait(false);
         await _storage.SetAsync(KEnableUdpTransport, settings.EnableUdpTransport.ToString()).ConfigureAwait(false);
         await _storage.SetAsync(KEnableBluetoothTransport, settings.EnableBluetoothTransport.ToString())
+            .ConfigureAwait(false);
+        await _storage.SetAsync(KBluetoothAdapterDeviceId, settings.SelectedBluetoothAdapterDeviceId ?? string.Empty)
+            .ConfigureAwait(false);
+        await _storage.SetAsync(KBluetoothAdapterMac, settings.SelectedBluetoothAdapterMac ?? string.Empty)
             .ConfigureAwait(false);
         await _storage.SetAsync(KBluetoothPairingPrompt, settings.SuggestBluetoothPairing.ToString())
             .ConfigureAwait(false);

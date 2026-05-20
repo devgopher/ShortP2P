@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
+using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Transport;
 using System.Diagnostics;
 
 namespace ShortP2P.WinForms;
@@ -9,6 +11,8 @@ internal sealed class RoutingSettingsForm : Form
 {
     private readonly P2pRoutingSettingsStore _store;
     private readonly UserP2pRuntime _runtime;
+    private readonly IBluetoothRadioCatalog _bluetoothCatalog;
+    private readonly IBluetoothTransportProvider _bluetoothTransport;
     private readonly ILogger<RoutingSettingsForm> _logger;
     private readonly ILogger<UserAction> _userActions;
     private readonly NumericUpDown _maxHops = new() { Minimum = 1, Maximum = 3, Width = 80 };
@@ -16,6 +20,12 @@ internal sealed class RoutingSettingsForm : Form
     private readonly NumericUpDown _delayMs = new() { Minimum = 0, Maximum = 120_000, Width = 100 };
     private readonly NumericUpDown _searchTimeoutMs = new() { Minimum = 500, Maximum = 120_000, Width = 100 };
     private readonly ComboBox _linkTechnology = new()
+    {
+        DropDownStyle = ComboBoxStyle.DropDownList,
+        Width = 360,
+        Anchor = AnchorStyles.Left,
+    };
+    private readonly ComboBox _bluetoothAdapter = new()
     {
         DropDownStyle = ComboBoxStyle.DropDownList,
         Width = 360,
@@ -36,14 +46,18 @@ internal sealed class RoutingSettingsForm : Form
         Text = "Discovery: отдавать маршрутную таблицу по UDP (PeerSearch)",
         Anchor = AnchorStyles.Left,
     };
+    private readonly List<BluetoothRadioInfo> _adapterRadios = [];
     private bool _trafficSavingEnabled;
 
     public RoutingSettingsForm(P2pRoutingSettingsStore store, UserP2pRuntime runtime,
+        IBluetoothRadioCatalog bluetoothCatalog, IBluetoothTransportProvider bluetoothTransport,
         ILogger<RoutingSettingsForm> logger,
         ILogger<UserAction> userActions)
     {
         _store = store;
         _runtime = runtime;
+        _bluetoothCatalog = bluetoothCatalog;
+        _bluetoothTransport = bluetoothTransport;
         _logger = logger;
         _userActions = userActions;
         foreach (var p in LinkTechnologyPresetExtensions.AllPresets)
@@ -51,7 +65,7 @@ internal sealed class RoutingSettingsForm : Form
         Text = "P2P routing";
         StartPosition = FormStartPosition.CenterParent;
         Width = 520;
-        Height = 360;
+        Height = 420;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -60,7 +74,7 @@ internal sealed class RoutingSettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 9,
+            RowCount = 10,
             Padding = new Padding(12),
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
@@ -87,7 +101,8 @@ internal sealed class RoutingSettingsForm : Form
         transportPanel.Controls.Add(_enableUdpTransport);
         transportPanel.Controls.Add(_enableBluetoothTransport);
         Row(6, "Транспорт", transportPanel);
-        Row(7, "Bluetooth", _suggestBluetoothPairing);
+        Row(7, "Bluetooth-адаптер", _bluetoothAdapter);
+        Row(8, "Bluetooth", _suggestBluetoothPairing);
 
         var bluetoothTools = new FlowLayoutPanel
         {
@@ -102,7 +117,7 @@ internal sealed class RoutingSettingsForm : Form
         };
         openBluetoothSettings.Click += (_, _) => OpenBluetoothSettings();
         bluetoothTools.Controls.Add(openBluetoothSettings);
-        Row(8, "Быстрое действие", bluetoothTools);
+        Row(9, "Быстрое действие", bluetoothTools);
 
         var buttons = new FlowLayoutPanel
         {
@@ -160,6 +175,62 @@ internal sealed class RoutingSettingsForm : Form
         _suggestBluetoothPairing.Checked = s.SuggestBluetoothPairing;
         _trafficSavingEnabled = s.TrafficSavingEnabled;
         _advertisePeerSearch.Checked = s.AdvertisedPeerCapabilities.HasFlag(PresencePeerCapabilities.PeerSearch);
+        await LoadBluetoothAdaptersAsync(s).ConfigureAwait(true);
+    }
+
+    private async Task LoadBluetoothAdaptersAsync(P2pRoutingSettings settings)
+    {
+        _bluetoothAdapter.Items.Clear();
+        _adapterRadios.Clear();
+        try
+        {
+            var radios = await _bluetoothCatalog.ListRadiosAsync().ConfigureAwait(true);
+            _adapterRadios.AddRange(radios);
+            foreach (var r in radios)
+            {
+                var suffix = r.IsDefault ? " — по умолчанию" : string.Empty;
+                _bluetoothAdapter.Items.Add($"{r.DisplayName} ({r.MacString}){suffix}");
+            }
+
+            var idx = 0;
+            if (!string.IsNullOrWhiteSpace(settings.SelectedBluetoothAdapterDeviceId))
+            {
+                var i = _adapterRadios.FindIndex(r =>
+                    r.DeviceId == settings.SelectedBluetoothAdapterDeviceId);
+                if (i >= 0)
+                    idx = i;
+            }
+            else
+            {
+                var def = _adapterRadios.FindIndex(r => r.IsDefault);
+                if (def >= 0)
+                    idx = def;
+            }
+
+            if (_bluetoothAdapter.Items.Count > 0)
+                _bluetoothAdapter.SelectedIndex = idx;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not list Bluetooth adapters");
+            _bluetoothAdapter.Items.Add("(адаптеры недоступны)");
+            _bluetoothAdapter.SelectedIndex = 0;
+        }
+    }
+
+    private void ApplySelectedAdapter(P2pRoutingSettings s)
+    {
+        var sel = _bluetoothAdapter.SelectedIndex;
+        if (_adapterRadios.Count == 0 || sel < 0 || sel >= _adapterRadios.Count)
+        {
+            s.SelectedBluetoothAdapterDeviceId = null;
+            s.SelectedBluetoothAdapterMac = null;
+            return;
+        }
+
+        var r = _adapterRadios[sel];
+        s.SelectedBluetoothAdapterDeviceId = r.DeviceId;
+        s.SelectedBluetoothAdapterMac = r.MacString;
     }
 
     private async Task SaveAsync()
@@ -185,11 +256,12 @@ internal sealed class RoutingSettingsForm : Form
             TrafficSavingEnabled = _trafficSavingEnabled,
             AdvertisedPeerCapabilities = cap,
         };
+        ApplySelectedAdapter(s);
         await _store.SaveAsync(s).ConfigureAwait(true);
         _userActions.LogInformation(
-            "P2P routing: saved (max hops {MaxHops}, attempts {Attempts}, delay ms {DelayMs}, find timeout ms {TimeoutMs}, link {Link})",
+            "P2P routing: saved (max hops {MaxHops}, attempts {Attempts}, delay ms {DelayMs}, find timeout ms {TimeoutMs}, link {Link}, bt adapter {BtAdapter})",
             s.MaxSearchHops, s.SendFailureSearchAttempts, s.SendFailureRetryDelay.TotalMilliseconds,
-            s.SearchWaitTimeout.TotalMilliseconds, s.LinkTechnology);
+            s.SearchWaitTimeout.TotalMilliseconds, s.LinkTechnology, s.SelectedBluetoothAdapterMac ?? "(default)");
         _runtime.Settings.MaxSearchHops = s.MaxSearchHops;
         _runtime.Settings.SendFailureSearchAttempts = s.SendFailureSearchAttempts;
         _runtime.Settings.SendFailureRetryDelay = s.SendFailureRetryDelay;
@@ -197,8 +269,11 @@ internal sealed class RoutingSettingsForm : Form
         _runtime.Settings.LinkTechnology = s.LinkTechnology;
         _runtime.Settings.EnableUdpTransport = s.EnableUdpTransport;
         _runtime.Settings.EnableBluetoothTransport = s.EnableBluetoothTransport;
+        _runtime.Settings.SelectedBluetoothAdapterDeviceId = s.SelectedBluetoothAdapterDeviceId;
+        _runtime.Settings.SelectedBluetoothAdapterMac = s.SelectedBluetoothAdapterMac;
         _runtime.Settings.SuggestBluetoothPairing = s.SuggestBluetoothPairing;
         _runtime.Settings.TrafficSavingEnabled = s.TrafficSavingEnabled;
         _runtime.Settings.AdvertisedPeerCapabilities = s.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
+        _bluetoothTransport.ApplySettings(s);
     }
 }

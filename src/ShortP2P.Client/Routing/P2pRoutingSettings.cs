@@ -24,6 +24,15 @@ public sealed class P2pRoutingSettings
     /// <summary>Разрешить Bluetooth-транспорт (передача и приём).</summary>
     public bool EnableBluetoothTransport { get; set; } = true;
 
+    /// <summary>
+    ///     WinRT <c>DeviceInformation.Id</c> выбранного радио (пусто — системный адаптер по умолчанию).
+    ///     Должен совпадать с адаптером, через который поднят GATT (см. Routing → перезапуск после смены).
+    /// </summary>
+    public string? SelectedBluetoothAdapterDeviceId { get; set; }
+
+    /// <summary>Канонический MAC выбранного адаптера (AA:BB:CC:DD:EE:FF) для QR и контактов.</summary>
+    public string? SelectedBluetoothAdapterMac { get; set; }
+
     /// <summary>Показывать предложение открыть системное сопряжение Bluetooth при недоступном BT-пире.</summary>
     public bool SuggestBluetoothPairing { get; set; }
 

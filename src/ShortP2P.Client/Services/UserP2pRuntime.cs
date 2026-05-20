@@ -5,6 +5,7 @@ using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
+using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Transceivers;
@@ -26,7 +27,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private readonly ChatRepository _chats;
     private readonly ChatMediaOptions _chatMedia;
     private readonly IUdpTransportFactory _udpTransportFactory;
-    private readonly ITransport? _bluetooth;
+    private readonly IBluetoothTransportProvider? _bluetooth;
     private readonly P2pCryptoSessionCache _cryptoSessionCache;
 
     private readonly ChatSessionCache _sessionCache;
@@ -63,7 +64,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     public UdpTransport? DataUdp => _dataUdp;
 
     public P2pRoutingSettings Settings { get; } = new();
-    public ITransport? BluetoothTransport => _bluetooth;
+    public ITransport? BluetoothTransport => _bluetooth?.Current;
 
     /// <summary>
     ///     Сканирование LAN: presence UDP 17501; wire discovery (gossip / маршруты)
@@ -76,7 +77,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     public UserP2pRuntime(P2pRoutingSettingsStore store, AuthService auth, ChatRepository chats,
         ChatMediaOptions chatMedia, IUdpTransportFactory udpTransportFactory, ChatSessionCache sessionCache,
         P2pCryptoSessionCache cryptoSessionCache,
-        ITransport? bluetooth = null,
+        IBluetoothTransportProvider? bluetooth = null,
         IEnumerable<ITransport>? additionalDiscoveryTransports = null,
         IRouteTableSnapshotSource? routeTableSnapshotSource = null,
         IDiscoveryPingStore? discoveryPingStore = null,
@@ -92,9 +93,9 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         _sessionCache = sessionCache;
         _cryptoSessionCache = cryptoSessionCache;
         _bluetooth = bluetooth;
-        LocalScan = new LocalNetworkScanner(Settings, udpTransportFactory, bluetooth, additionalDiscoveryTransports,
-            routeTableSnapshotSource, discoveryPingStore, blePeripheralScanner, bleDiscoveredPeerStore,
-            bluetoothPresencePingTargetsProvider);
+        LocalScan = new LocalNetworkScanner(Settings, udpTransportFactory, () => _bluetooth?.Current,
+            additionalDiscoveryTransports, routeTableSnapshotSource, discoveryPingStore, blePeripheralScanner,
+            bleDiscoveredPeerStore, bluetoothPresencePingTargetsProvider);
     }
 
     public ChatP2pSession GetSession(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo,
@@ -215,12 +216,13 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             await _dataUdp.StartAsync(cancellationToken).ConfigureAwait(false);
 
             var inbound = new List<ITransport> { _dataUdp };
-            if (_bluetooth != null)
+            var bluetooth = BluetoothTransport;
+            if (bluetooth != null)
             {
                 try
                 {
-                    await _bluetooth.StartAsync(cancellationToken).ConfigureAwait(false);
-                    inbound.Add(_bluetooth);
+                    await bluetooth.StartAsync(cancellationToken).ConfigureAwait(false);
+                    inbound.Add(bluetooth);
                 }
                 catch
                 {
@@ -253,7 +255,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         return destination.Kind switch
         {
             TransportKind.Udp when Settings.EnableUdpTransport => _dataUdp,
-            TransportKind.Bluetooth when Settings.EnableBluetoothTransport => _bluetooth,
+            TransportKind.Bluetooth when Settings.EnableBluetoothTransport => BluetoothTransport,
             _ => null
         };
     }
@@ -527,9 +529,12 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         Settings.LinkTechnology = persisted.LinkTechnology;
         Settings.EnableUdpTransport = persisted.EnableUdpTransport;
         Settings.EnableBluetoothTransport = persisted.EnableBluetoothTransport;
+        Settings.SelectedBluetoothAdapterDeviceId = persisted.SelectedBluetoothAdapterDeviceId;
+        Settings.SelectedBluetoothAdapterMac = persisted.SelectedBluetoothAdapterMac;
         Settings.SuggestBluetoothPairing = persisted.SuggestBluetoothPairing;
         Settings.TrafficSavingEnabled = persisted.TrafficSavingEnabled;
         Settings.AdvertisedPeerCapabilities = persisted.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
+        _bluetooth?.ApplySettings(Settings);
 
         // Инвайты (отдельный UDP) должны работать даже если presence/LAN bind на Android не удался.
         await EnsureInviteListenerRunningAsync(user, cancellationToken).ConfigureAwait(false);

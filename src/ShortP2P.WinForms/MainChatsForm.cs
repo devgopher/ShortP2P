@@ -8,7 +8,9 @@ using ShortP2P.Crypto;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client;
+using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Services;
+using ShortP2P.Transport;
 using ShortP2P.Transport.Bluetooth.Windows;
 
 namespace ShortP2P.WinForms;
@@ -31,6 +33,7 @@ public sealed class MainChatsForm : Form
     private readonly ILogger<UserAction> _userActions;
     private readonly ChatMediaOptions _chatMedia;
     private readonly AppSettingsStore _appSettings;
+    private readonly IBluetoothRadioCatalog _bluetoothCatalog;
     private readonly Label _udpTransportIndicator = new() { AutoSize = true };
     private readonly Label _bluetoothTransportIndicator = new() { AutoSize = true };
     private int? _focusedChatId;
@@ -38,7 +41,8 @@ public sealed class MainChatsForm : Form
     private LogViewerForm? _logViewer;
 
     public MainChatsForm(AuthService auth, ChatRepository chats, UserP2pRuntime p2P,
-        P2pRoutingSettingsStore routingStore, IServiceProvider services, ILogger<MainChatsForm> logger,
+        P2pRoutingSettingsStore routingStore, IBluetoothRadioCatalog bluetoothCatalog,
+        IServiceProvider services, ILogger<MainChatsForm> logger,
         ILogger<ChatForm> chatLog, ILogger<LocalNetworkScanForm> lanScanLog, ILogger<UserAction> userActions,
         ChatMediaOptions chatMedia, AppSettingsStore appSettings)
     {
@@ -52,6 +56,7 @@ public sealed class MainChatsForm : Form
         _userActions = userActions;
         _chatMedia = chatMedia;
         _appSettings = appSettings;
+        _bluetoothCatalog = bluetoothCatalog;
         Text = "ShortP2P — Chats";
         StartPosition = FormStartPosition.CenterScreen;
         Width = 680;
@@ -365,7 +370,8 @@ public sealed class MainChatsForm : Form
         string? bt = null;
         try
         {
-            bt = await LocalAdapterBluetoothMac.TryGetAdapterMacStringAsync().ConfigureAwait(true);
+            bt = await BluetoothRoutingMac.GetEffectiveMacAsync(_p2P.Settings, _bluetoothCatalog)
+                .ConfigureAwait(true);
         }
         catch
         {

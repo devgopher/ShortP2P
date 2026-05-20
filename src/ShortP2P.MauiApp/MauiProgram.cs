@@ -10,6 +10,7 @@ using ShortP2P.Auth;
 using ShortP2P.Client;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
+using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
 using ShortP2P.Discovery;
@@ -68,13 +69,16 @@ public static class MauiProgram
         builder.Services.AddSingleton<ChatSessionCache>();
         builder.Services.AddSingleton<P2pCryptoSessionCache>();
 #if ANDROID
-        builder.Services.AddSingleton<ITransport>(_ => new AndroidBluetoothTransport(global::Android.App.Application.Context));
+        builder.Services.AddSingleton<IBluetoothRadioCatalog, AndroidBluetoothRadioCatalog>();
         builder.Services.AddSingleton<IBleShortP2PPeripheralScanner>(_ =>
             new AndroidBluetoothLeShortP2PScanner(global::Android.App.Application.Context));
 #elif WINDOWS
-        builder.Services.AddSingleton<ITransport>(_ => new WindowsBluetoothTransport());
+        builder.Services.AddSingleton<IBluetoothRadioCatalog, WindowsBluetoothRadioCatalog>();
         builder.Services.AddSingleton<IBleShortP2PPeripheralScanner>(_ => new WindowsBluetoothLeShortP2PScanner());
 #endif
+        builder.Services.AddSingleton<MauiBluetoothTransportRegistration>();
+        builder.Services.AddSingleton<IBluetoothTransportProvider>(sp =>
+            sp.GetRequiredService<MauiBluetoothTransportRegistration>());
         builder.Services.AddSingleton(sp => new UserP2pRuntime(
             sp.GetRequiredService<P2pRoutingSettingsStore>(),
             sp.GetRequiredService<AuthService>(),
@@ -83,7 +87,7 @@ public static class MauiProgram
             sp.GetRequiredService<IUdpTransportFactory>(),
             sp.GetRequiredService<ChatSessionCache>(),
             sp.GetRequiredService<P2pCryptoSessionCache>(),
-            sp.GetService<ITransport>(),
+            sp.GetService<IBluetoothTransportProvider>(),
             additionalDiscoveryTransports: null,
             sp.GetService<IRouteTableSnapshotSource>(),
             sp.GetService<IDiscoveryPingStore>(),
@@ -106,6 +110,10 @@ public static class MauiProgram
         var app = builder.Build();
         Services = app.Services;
         Services.ApplyRouteDatabaseMigrationsAsync().GetAwaiter().GetResult();
+#if ANDROID || WINDOWS
+        var routing = Services.GetRequiredService<P2pRoutingSettingsStore>().LoadAsync().GetAwaiter().GetResult();
+        Services.GetRequiredService<MauiBluetoothTransportRegistration>().ApplySettings(routing);
+#endif
         IncomingMessageSound.EnsureHooked(Services.GetRequiredService<ChatRepository>(),
             Services.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(IncomingMessageSound)));
         Services.GetRequiredService<ILogger<MauiHost>>().LogInformation("GUI application started");

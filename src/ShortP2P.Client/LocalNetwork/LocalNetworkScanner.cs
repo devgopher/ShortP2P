@@ -28,7 +28,7 @@ namespace ShortP2P.Discovery;
 public sealed class LocalNetworkScanner(
     P2pRoutingSettings routingSettings,
     IUdpTransportFactory udpTransportFactory,
-    ITransport? bluetoothTransport = null,
+    Func<ITransport?>? getBluetoothTransport = null,
     IEnumerable<ITransport>? additionalDiscoveryTransports = null,
     IRouteTableSnapshotSource? routeTableSnapshotSource = null,
     IDiscoveryPingStore? discoveryPingStore = null,
@@ -56,8 +56,9 @@ public sealed class LocalNetworkScanner(
     private CancellationTokenSource? _cts;
     private UdpTransport? _presenceUdp;
     private UdpTransport? _discoveryWireUdp;
-    private readonly List<ITransport> _secondaryPresenceTransports = BuildSecondaryPresenceTransports(bluetoothTransport,
-        additionalDiscoveryTransports);
+    private readonly Func<ITransport?>? _getBluetoothTransport = getBluetoothTransport;
+    private readonly IEnumerable<ITransport>? _additionalDiscoveryTransports = additionalDiscoveryTransports;
+    private List<ITransport> _secondaryPresenceTransports = [];
     private readonly ConcurrentDictionary<string, TransportAddress> _bluetoothTargets = new();
     private readonly ConcurrentDictionary<string, string> _udpPresenceTargets = new(StringComparer.OrdinalIgnoreCase);
     private PresencePingCodec.Transceiver? _presencePingTransceiver;
@@ -120,6 +121,8 @@ public sealed class LocalNetworkScanner(
             return;
         _localPeer = localPeer;
         _nextPublicIpv4PresenceLookupUtc = DateTimeOffset.MinValue;
+        _secondaryPresenceTransports = BuildSecondaryPresenceTransports(_getBluetoothTransport?.Invoke(),
+            _additionalDiscoveryTransports);
         EnsurePublicIpv4InPresenceTargets();
         _presenceUdp = udpTransportFactory.Acquire(IPAddress.Any, PresencePingCodec.UdpPort, enableBroadcast: true);
         _discoveryWireUdp = udpTransportFactory.Acquire(IPAddress.Any,

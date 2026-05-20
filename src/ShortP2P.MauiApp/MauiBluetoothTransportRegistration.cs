@@ -1,16 +1,19 @@
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Routing;
 using ShortP2P.Transport.Abstractions;
+#if ANDROID
+using ShortP2P.Transport.Bluetooth.Android;
+#endif
+#if WINDOWS
 using ShortP2P.Transport.Bluetooth.Windows;
+#endif
 
-namespace ShortP2P.WinForms;
+namespace ShortP2P.MauiApp;
 
-internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBluetoothTransportProvider
+internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBluetoothTransportProvider
 {
     private readonly object _sync = new();
     private ITransport? _instance;
-
-    public IBleShortP2PPeripheralScanner PeripheralScanner { get; } = new WindowsBluetoothLeShortP2PScanner();
 
     public ITransport? Current
     {
@@ -21,9 +24,7 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
         }
     }
 
-    public ITransport? Instance => Current;
-
-    public BluetoothTransportRegistration()
+    public MauiBluetoothTransportRegistration()
     {
         try
         {
@@ -56,6 +57,7 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
             if (!settings.EnableBluetoothTransport)
                 return;
 
+#if WINDOWS
             ulong? localAddr = null;
             try
             {
@@ -71,6 +73,9 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
             _instance = new WindowsBluetoothTransport(new WindowsBluetoothTransportOptions(
                 GattDiscoverable: true,
                 LocalAdapterBluetoothAddress: localAddr));
+#elif ANDROID
+            _instance = new AndroidBluetoothTransport(global::Android.App.Application.Context);
+#endif
         }
     }
 

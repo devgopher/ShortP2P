@@ -14,8 +14,10 @@ using ShortP2P.Discovery.Ble;
 using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
 using NLog;
+using ShortP2P.Client.Bluetooth;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
+using ShortP2P.Transport.Bluetooth.Windows;
 
 namespace ShortP2P.WinForms;
 
@@ -46,6 +48,9 @@ internal static class Program
         services.AddSingleton<P2pRoutingSettingsStore>();
         services.AddSingleton<AppSettingsStore>();
         services.AddSingleton<BluetoothTransportRegistration>();
+        services.AddSingleton<IBluetoothTransportProvider>(sp =>
+            sp.GetRequiredService<BluetoothTransportRegistration>());
+        services.AddSingleton<IBluetoothRadioCatalog, WindowsBluetoothRadioCatalog>();
         services.AddSingleton<IBleShortP2PPeripheralScanner>(sp =>
             sp.GetRequiredService<BluetoothTransportRegistration>().PeripheralScanner);
         services.AddSingleton<IUdpTransportFactory, UdpTransportFactory>();
@@ -59,7 +64,7 @@ internal static class Program
             sp.GetRequiredService<IUdpTransportFactory>(),
             sp.GetRequiredService<ChatSessionCache>(),
             sp.GetRequiredService<P2pCryptoSessionCache>(),
-            sp.GetRequiredService<BluetoothTransportRegistration>().Instance,
+            sp.GetRequiredService<IBluetoothTransportProvider>(),
             additionalDiscoveryTransports: null,
             sp.GetService<IRouteTableSnapshotSource>(),
             sp.GetService<IDiscoveryPingStore>(),
@@ -80,6 +85,8 @@ internal static class Program
         host.StartAsync().GetAwaiter().GetResult();
 
         var provider = host.Services;
+        var routing = provider.GetRequiredService<P2pRoutingSettingsStore>().LoadAsync().GetAwaiter().GetResult();
+        provider.GetRequiredService<BluetoothTransportRegistration>().ApplySettings(routing);
         var hostLogger = provider.GetRequiredService<ILogger<WinFormsHost>>();
         var userActionLogger = provider.GetRequiredService<ILogger<UserAction>>();
         RegisterGlobalExceptionLogging(hostLogger);

@@ -7,4 +7,9 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 ///     Если <see langword="true" />, устройство видно в BLE-скане. Если <see langword="false" />, WinRT
 ///     вызывает StartAdvertising с <c>IsConnectable = true</c> и <c>IsDiscoverable = false</c>.
 /// </param>
-public readonly record struct WindowsBluetoothTransportOptions(bool GattDiscoverable = true);
+/// <param name="LocalAdapterBluetoothAddress">
+///     MAC выбранного радио (ulong WinRT). <see langword="null" /> — адаптер по умолчанию.
+/// </param>
+public readonly record struct WindowsBluetoothTransportOptions(
+    bool GattDiscoverable = true,
+    ulong? LocalAdapterBluetoothAddress = null);

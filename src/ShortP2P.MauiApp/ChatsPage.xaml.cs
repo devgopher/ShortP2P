@@ -6,8 +6,10 @@ using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client;
+using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
+using ShortP2P.Transport;
 using ShortP2P.Crypto;
 
 namespace ShortP2P.MauiApp;
@@ -17,16 +19,19 @@ public partial class ChatsPage : ContentPage
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
     private readonly UserP2pRuntime _p2p;
+    private readonly IBluetoothRadioCatalog _bluetoothCatalog;
     private readonly ILogger<ChatsPage> _logger;
     private readonly ObservableCollection<ChatListRowVm> _chatRows = [];
     private IDispatcherTimer? _presenceRefreshTimer;
 
-    public ChatsPage(AuthService auth, ChatRepository chats, UserP2pRuntime p2p, ILogger<ChatsPage> logger)
+    public ChatsPage(AuthService auth, ChatRepository chats, UserP2pRuntime p2p,
+        IBluetoothRadioCatalog bluetoothCatalog, ILogger<ChatsPage> logger)
     {
         InitializeComponent();
         _auth = auth;
         _chats = chats;
         _p2p = p2p;
+        _bluetoothCatalog = bluetoothCatalog;
         _logger = logger;
         ChatsCollection.ItemsSource = _chatRows;
     }
@@ -165,7 +170,8 @@ public partial class ChatsPage : ContentPage
         string? bt = null;
         try
         {
-            bt = await PlatformLocalBluetoothMac.TryGetAsync().ConfigureAwait(true);
+            bt = await BluetoothRoutingMac.GetEffectiveMacAsync(_p2p.Settings, _bluetoothCatalog)
+                .ConfigureAwait(true);
         }
         catch
         {

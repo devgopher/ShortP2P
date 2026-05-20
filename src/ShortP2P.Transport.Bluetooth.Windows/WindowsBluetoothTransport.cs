@@ -146,7 +146,12 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         if (txResult.Error != BluetoothError.Success || txResult.Characteristic == null)
             return;
         _bleTxCharacteristic = txResult.Characteristic;
-        _myBluetoothMac = await LocalAdapterBluetoothMac.TryGetAdapterMacStringAsync().ConfigureAwait(false) ?? "none";
+        if (options.LocalAdapterBluetoothAddress is { } preferred && preferred != 0)
+            _myBluetoothMac = BluetoothTransportAddress.ToMacString(
+                BluetoothMacAddress.FromBluetoothAddress(preferred));
+        else
+            _myBluetoothMac = await LocalAdapterBluetoothMac.TryGetAdapterMacStringAsync().ConfigureAwait(false)
+                               ?? "none";
         StartBleGattProviderAdvertising(_bleServiceProvider, options.GattDiscoverable);
         StartBleShortP2PAdvertisementWatcher();
     }
