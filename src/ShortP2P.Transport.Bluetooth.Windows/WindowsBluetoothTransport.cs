@@ -179,13 +179,21 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         var addr = args.BluetoothAddress;
         if (addr == 0)
             return;
-        if (_blePeerDevices.ContainsKey(addr) || _bleAdvertisementDeviceCache.ContainsKey(addr))
+        if (_blePeerDevices.ContainsKey(addr))
             return;
         try
         {
-            var dev = await BluetoothLEDevice.FromBluetoothAddressAsync(addr).AsTask().ConfigureAwait(false);
-            if (dev != null)
-                _bleAdvertisementDeviceCache.TryAdd(addr, dev);
+            foreach (var _addr in AlternateBluetoothAddresses(addr))
+            {
+                var dev = await BluetoothLEDevice.FromBluetoothAddressAsync(_addr).AsTask().ConfigureAwait(false);
+
+                if (dev != null)
+                {
+                    _bleAdvertisementDeviceCache.TryAdd(addr, dev);
+                    
+                    Console.WriteLine($"BLE advertisement device: {addr}");
+                }
+            }
         }
         catch
         {
@@ -279,8 +287,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
                 nameof(destination));
 
         var btAddr = BluetoothMacAddress.ToBluetoothAddress(data);
-        var sendLock = _sendLocks.GetOrAdd(btAddr, _ => new SemaphoreSlim(1, 1));
-        await sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // var sendLock = _sendLocks.GetOrAdd(btAddr, _ => new SemaphoreSlim(1, 1));
+        // await sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await SendViaBleAsync(btAddr, payload, cancellationToken).ConfigureAwait(false);
@@ -291,7 +299,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         }
         finally
         {
-            sendLock.Release();
+            //sendLock.Release();
         }
     }
 
@@ -516,7 +524,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         foreach (var addr in AlternateBluetoothAddresses(bluetoothAddress))
         {
             var dev = await TryOpenBluetoothLeDeviceOneAddressAsync(addr, ct).ConfigureAwait(false);
-            if (dev != null) return dev;
+            if (dev != null)
+                return dev;
         }
 
         return null;
@@ -537,28 +546,40 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private async Task<BluetoothLEDevice?> TryOpenBluetoothLeDeviceOneAddressAsync(ulong bluetoothAddress,
         CancellationToken ct)
     {
+        return _bleAdvertisementDeviceCache[bluetoothAddress];
         if (_bleAdvertisementDeviceCache.TryRemove(bluetoothAddress, out var warmed) && warmed is not null)
             return warmed;
 
-        var dev = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress).AsTask(ct).ConfigureAwait(false);
-        if (dev != null)
-            return dev;
+        // var dev = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress).AsTask(ct).ConfigureAwait(false);
+        // if (dev != null)
+        // {
+        //     _bleAdvertisementDeviceCache.TryAdd(bluetoothAddress, dev);
+        //     return dev;
+        // }
+        //
+        // dev = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress, BluetoothAddressType.Public)
+        //     .AsTask(ct).ConfigureAwait(false);
+        // if (dev != null)
+        // {
+        //     _bleAdvertisementDeviceCache.TryAdd(bluetoothAddress, dev);
+        //     return dev;
+        // }
+        //
+        // dev = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress, BluetoothAddressType.Random)
+        //     .AsTask(ct).ConfigureAwait(false);
+        // if (dev != null)
+        // {
+        //     _bleAdvertisementDeviceCache.TryAdd(bluetoothAddress, dev);
+        //     return dev;
+        // }
+        //
+        // var selector = BluetoothLEDevice.GetDeviceSelectorFromBluetoothAddress(bluetoothAddress);
+        // var infos = await DeviceInformation.FindAllAsync(selector).AsTask(ct).ConfigureAwait(false);
+        // if (infos.Count == 0)
+        //     return null;
+        // return await BluetoothLEDevice.FromIdAsync(infos[0].Id).AsTask(ct).ConfigureAwait(false);
 
-        dev = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress, BluetoothAddressType.Public)
-            .AsTask(ct).ConfigureAwait(false);
-        if (dev != null)
-            return dev;
-
-        dev = await BluetoothLEDevice.FromBluetoothAddressAsync(bluetoothAddress, BluetoothAddressType.Random)
-            .AsTask(ct).ConfigureAwait(false);
-        if (dev != null)
-            return dev;
-
-        var selector = BluetoothLEDevice.GetDeviceSelectorFromBluetoothAddress(bluetoothAddress);
-        var infos = await DeviceInformation.FindAllAsync(selector).AsTask(ct).ConfigureAwait(false);
-        if (infos.Count == 0)
-            return null;
-        return await BluetoothLEDevice.FromIdAsync(infos[0].Id).AsTask(ct).ConfigureAwait(false);
+        return null;
     }
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
