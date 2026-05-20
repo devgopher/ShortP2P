@@ -45,7 +45,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private GattLocalCharacteristic? _bleTxCharacteristic;
     private BluetoothLEAdvertisementWatcher? _bleShortP2PAdvertisementWatcher;
     private volatile string? _myBluetoothMac;
-
+    private ulong _myBluetoothAddr;
+    
     public TransportKind Kind => TransportKind.Bluetooth;
 
     public ChannelReader<TransportReceiveMessage> Inbound => _inbound.Reader;
@@ -148,6 +149,10 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         else
             _myBluetoothMac = await LocalAdapterBluetoothMac.TryGetAdapterMacStringAsync().ConfigureAwait(false)
                                ?? "none";
+
+        _myBluetoothAddr = await LocalAdapterBluetoothMac.TryGetAdapterAddressAsync().ConfigureAwait(false)
+                           ?? 0;
+        
         StartBleGattProviderAdvertising(_bleServiceProvider, options.GattDiscoverable);
         StartBleShortP2PAdvertisementWatcher();
     }
@@ -198,7 +203,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
                 {
                     _bleAdvertisementDeviceCache.TryAdd(macKey, dev);
                     var myMac = _myBluetoothMac ?? "unknown";
-                    Console.WriteLine($"BLE advertisement device: {macKey} {_addr}. My MAC: {myMac}");
+                    Console.WriteLine($"BLE advertisement device: {macKey} {_addr}. My MAC: {myMac} {_myBluetoothAddr}");
                 }
             }
         }
