@@ -42,6 +42,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private GattLocalCharacteristic? _bleRxCharacteristic;
     private GattLocalCharacteristic? _bleTxCharacteristic;
     private BluetoothLEAdvertisementWatcher? _bleShortP2PAdvertisementWatcher;
+    private volatile string? _myBleAddressDisplay;
 
     public WindowsBluetoothTransport() : this(default)
     {
@@ -143,6 +144,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         if (txResult.Error != BluetoothError.Success || txResult.Characteristic == null)
             return;
         _bleTxCharacteristic = txResult.Characteristic;
+        _myBleAddressDisplay = await LocalAdapterBluetoothMac.TryGetAdapterMacStringAsync().ConfigureAwait(false)
+                                ?? "unknown";
         StartBleGattProviderAdvertising(_bleServiceProvider, options.GattDiscoverable);
         StartBleShortP2PAdvertisementWatcher();
     }
@@ -190,8 +193,10 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
                 if (dev != null)
                 {
                     _bleAdvertisementDeviceCache.TryAdd(addr, dev);
-                    
-                    Console.WriteLine($"BLE advertisement device: {addr}");
+                    var peerMac = BluetoothTransportAddress.ToMacString(
+                        BluetoothMacAddress.FromBluetoothAddress(addr));
+                    var myBle = _myBleAddressDisplay ?? "unknown";
+                    Console.WriteLine($"BLE advertisement device: {peerMac}. My BLE address: {myBle}");
                 }
             }
         }
