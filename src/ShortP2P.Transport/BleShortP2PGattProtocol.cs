@@ -47,6 +47,60 @@ public static class BleShortP2PGattProtocol
     /// <summary>Длина NetworkId в GATT Service Data (Guid wire, 16 байт).</summary>
     public const int GattServiceDataNetworkIdLength = 16;
 
+    /// <summary>
+    ///     Company ID для Manufacturer Data (производная от префикса <see cref="ServiceUuid" />).
+    ///     Укладывается в legacy scan response вместе с 16-байтным NetworkId.
+    /// </summary>
+    public const ushort ManufacturerCompanyId = 0xE58B;
+
+    private static ReadOnlySpan<byte> ManufacturerMagic => "SP2N"u8;
+
+    public const int ManufacturerNetworkIdPayloadLength = 4 + GattServiceDataNetworkIdLength;
+
+    /// <summary>Manufacturer Data: magic «SP2N» + NetworkId (16 байт wire Guid).</summary>
+    public static byte[] BuildManufacturerNetworkIdPayload(Guid networkId)
+    {
+        if (networkId == Guid.Empty)
+            throw new ArgumentException("NetworkId must not be empty.", nameof(networkId));
+        var buf = new byte[ManufacturerNetworkIdPayloadLength];
+        ManufacturerMagic.CopyTo(buf);
+        if (!networkId.TryWriteBytes(buf.AsSpan(4)))
+            throw new InvalidOperationException("Failed to serialize NetworkId.");
+        return buf;
+    }
+
+    public static bool TryParseManufacturerNetworkId(ushort companyId, ReadOnlySpan<byte> data, out Guid networkId)
+    {
+        networkId = Guid.Empty;
+        if (companyId != ManufacturerCompanyId || data.Length < ManufacturerNetworkIdPayloadLength)
+            return false;
+        if (!data.Slice(0, 4).SequenceEqual(ManufacturerMagic))
+            return false;
+        networkId = new Guid(data.Slice(4, GattServiceDataNetworkIdLength));
+        return networkId != Guid.Empty;
+    }
+
+    /// <summary>
+    ///     Service Data AD 0x21: либо UUID(16)+NetworkId(16), либо только NetworkId(16), если UUID уже в
+    ///     <c>ServiceUuids</c> рекламы.
+    /// </summary>
+    public static bool TryParseAdvertisementServiceDataSection(ReadOnlySpan<byte> sectionPayload,
+        ReadOnlySpan<byte> serviceUuidBytes, bool serviceUuidAdvertised, out Guid networkId)
+    {
+        networkId = Guid.Empty;
+        if (sectionPayload.Length == GattServiceDataNetworkIdLength)
+        {
+            if (!serviceUuidAdvertised)
+                return false;
+            return TryParseGattServiceDataNetworkId(sectionPayload, out networkId);
+        }
+
+        if (sectionPayload.Length < 16 + GattServiceDataNetworkIdLength
+            || !sectionPayload.Slice(0, 16).SequenceEqual(serviceUuidBytes))
+            return false;
+        return TryParseGattServiceDataNetworkId(sectionPayload.Slice(16), out networkId);
+    }
+
     /// <summary>Payload для <see cref="GattServiceProviderAdvertisingParameters.ServiceData" /> (UUID сервиса в AD отдельно).</summary>
     public static byte[] BuildGattServiceDataNetworkId(Guid networkId)
     {

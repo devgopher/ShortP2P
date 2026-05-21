@@ -17,7 +17,7 @@ public sealed class AndroidBluetoothLeShortP2PScanner(Context context) : IBleSho
 
     private readonly Context _context = context.ApplicationContext ?? context;
 
-    public async Task ScanAsync(TimeSpan duration, Action<TransportAddress> onDeviceDiscovered,
+    public async Task ScanAsync(TimeSpan duration, Action<TransportAddress, Guid?> onDeviceDiscovered,
         CancellationToken cancellationToken = default)
     {
         if (duration <= TimeSpan.Zero)
@@ -65,7 +65,7 @@ public sealed class AndroidBluetoothLeShortP2PScanner(Context context) : IBleSho
         }
     }
 
-    private sealed class LeScanCallbackImpl(Action<TransportAddress> onDevice) : ScanCallback
+    private sealed class LeScanCallbackImpl(Action<TransportAddress, Guid?> onDevice) : ScanCallback
     {
         private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
 
@@ -78,7 +78,7 @@ public sealed class AndroidBluetoothLeShortP2PScanner(Context context) : IBleSho
             var key = Convert.ToBase64String(addr.Data);
             if (!_seen.Add(key))
                 return;
-            onDevice(addr);
+            onDevice(addr, null);
         }
 
         private static bool TryDeviceToAddress(BluetoothDevice device, out TransportAddress addr)

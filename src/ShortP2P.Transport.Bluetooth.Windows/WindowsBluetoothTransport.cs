@@ -44,6 +44,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private GattLocalCharacteristic? _bleRxCharacteristic;
     private GattLocalCharacteristic? _bleTxCharacteristic;
     private BluetoothLEAdvertisementWatcher? _bleShortP2PAdvertisementWatcher;
+    private BluetoothLEAdvertisementPublisher? _networkIdManufacturerPublisher;
     private volatile string? _myBluetoothMac;
     private ulong _myBluetoothAddr;
     
@@ -154,6 +155,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
                            ?? 0;
         
         StartBleGattProviderAdvertising(_bleServiceProvider, options.GattDiscoverable, options.LocalNetworkId);
+        StartNetworkIdManufacturerAdvertising(options.LocalNetworkId);
         StartBleShortP2PAdvertisementWatcher();
     }
 
@@ -202,10 +204,6 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
                 if (dev != null)
                 {
                     _bleAdvertisementDeviceCache.TryAdd(macKey, dev);
-                    var peerNetId = BleGattAdvertisementNetworkId.TryParseFromAdvertisement(args.Advertisement);
-                    var myMac = _myBluetoothMac ?? "unknown";
-                    Console.WriteLine(
-                        $"BLE advertisement device: {macKey} addr {_addr} peerNetworkId={(peerNetId?.ToString("D") ?? "n/a")}. My MAC: {myMac}");
                 }
             }
         }
@@ -241,6 +239,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             IsConnectable = true,
         };
 
+        // ServiceData (16 байт) + 128-bit UUID не помещаются в legacy ADV/scan response (~31 байт);
+        // Windows часто возвращает StartedWithoutAllAdvertisementData. NetworkId — через Manufacturer Data.
         if (localNetworkId is Guid networkId)
         {
             var payload = BleShortP2PGattProtocol.BuildGattServiceDataNetworkId(networkId);
@@ -250,6 +250,48 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         }
 
         provider.StartAdvertising(advertising);
+    }
+
+    /// <summary>
+    ///     Manufacturer Data в scan response (≈24 байта) — надёжный канал NetworkId на Win11 при GATT-рекламе.
+    /// </summary>
+    private void StartNetworkIdManufacturerAdvertising(Guid? localNetworkId)
+    {
+        StopNetworkIdManufacturerAdvertising();
+        if (localNetworkId is not Guid networkId)
+            return;
+
+        try
+        {
+            var payload = BleShortP2PGattProtocol.BuildManufacturerNetworkIdPayload(networkId);
+            var writer = new DataWriter();
+            writer.WriteBytes(payload);
+            var advertisement = new BluetoothLEAdvertisement();
+            advertisement.ManufacturerData.Add(new BluetoothLEManufacturerData(
+                BleShortP2PGattProtocol.ManufacturerCompanyId, writer.DetachBuffer()));
+            _networkIdManufacturerPublisher = new BluetoothLEAdvertisementPublisher(advertisement);
+            _networkIdManufacturerPublisher.Start();
+        }
+        catch
+        {
+            StopNetworkIdManufacturerAdvertising();
+        }
+    }
+
+    private void StopNetworkIdManufacturerAdvertising()
+    {
+        var publisher = _networkIdManufacturerPublisher;
+        _networkIdManufacturerPublisher = null;
+        if (publisher == null)
+            return;
+        try
+        {
+            publisher.Stop();
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     private async void OnBleRxWriteRequested(GattLocalCharacteristic sender, GattWriteRequestedEventArgs args)
@@ -616,6 +658,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             _blePeerDevices.Count == 0 &&
             _bleOutboundPeerRx.Count == 0 && _bleOutboundPeerTx.Count == 0 && _runCts == null &&
             _bleShortP2PAdvertisementWatcher == null &&
+            _networkIdManufacturerPublisher == null &&
             _bleAdvertisementDeviceCache.IsEmpty)
             return;
 
@@ -632,6 +675,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         }
 
         StopBleShortP2PAdvertisementWatcher();
+        StopNetworkIdManufacturerAdvertising();
 
         foreach (var kv in _bleOutboundPeerTx)
         {

@@ -11,7 +11,7 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 [SupportedOSPlatform("windows10.0.18362.0")]
 public sealed class WindowsBluetoothLeShortP2PScanner : IBleShortP2PPeripheralScanner
 {
-    public async Task ScanAsync(TimeSpan duration, Action<TransportAddress> onDeviceDiscovered,
+    public async Task ScanAsync(TimeSpan duration, Action<TransportAddress, Guid?> onDeviceDiscovered,
         CancellationToken cancellationToken = default)
     {
         if (duration <= TimeSpan.Zero)
@@ -32,15 +32,14 @@ public sealed class WindowsBluetoothLeShortP2PScanner : IBleShortP2PPeripheralSc
         var seen = new HashSet<ulong>();
         watcher.Received += (_, e) =>
         {
-            if (e.Advertisement.ServiceUuids.Any())
-            {
-                if (!seen.Add(e.BluetoothAddress))
-                    return;
-                var mac = BluetoothMacAddress.FromBluetoothAddress(e.BluetoothAddress);
-                onDeviceDiscovered(BluetoothTransportAddress.FromMac(mac));
-            }
+            if (!e.Advertisement.ServiceUuids.Contains(BleShortP2PGattProtocol.ServiceUuid))
+                return;
+            if (!seen.Add(e.BluetoothAddress))
+                return;
+            var mac = BluetoothMacAddress.FromBluetoothAddress(e.BluetoothAddress);
+            var networkId = BleGattAdvertisementNetworkId.TryParseFromAdvertisement(e.Advertisement);
+            onDeviceDiscovered(BluetoothTransportAddress.FromMac(mac), networkId);
         };
-            
 
         try
         {
