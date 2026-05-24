@@ -74,7 +74,9 @@ public static class MauiProgram
             new AndroidBluetoothLeShortP2PScanner(global::Android.App.Application.Context));
 #elif WINDOWS
         builder.Services.AddSingleton<IBluetoothRadioCatalog, WindowsBluetoothRadioCatalog>();
-        builder.Services.AddSingleton<IBleShortP2PPeripheralScanner>(_ => new WindowsBluetoothLeShortP2PScanner());
+        builder.Services.AddSingleton<IBleShortP2PPeripheralScanner>(sp =>
+            new WindowsBluetoothLeShortP2PScanner(
+                sp.GetRequiredService<ILoggerFactory>().CreateLogger<WindowsBluetoothLeShortP2PScanner>()));
 #endif
         builder.Services.AddSingleton<MauiBluetoothTransportRegistration>();
         builder.Services.AddSingleton<IBluetoothTransportProvider>(sp =>

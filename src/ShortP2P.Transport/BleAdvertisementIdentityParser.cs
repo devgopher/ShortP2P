@@ -31,6 +31,9 @@ public static class BleAdvertisementIdentityParser
     public static BleAdScanResult ParseServiceDataSection(ReadOnlySpan<byte> sectionPayload,
         ReadOnlySpan<byte> serviceUuidBytes, bool serviceUuidAdvertised)
     {
+        if (TryParseServiceDataNetworkIdHint(sectionPayload, serviceUuidBytes, out var hint))
+            return new BleAdScanResult { NetworkIdHint = hint };
+
         if (!BleShortP2PGattProtocol.TryParseAdvertisementServiceDataSection(sectionPayload, serviceUuidBytes,
                 serviceUuidAdvertised, out var legacyFull))
             return default;
@@ -44,14 +47,30 @@ public static class BleAdvertisementIdentityParser
         };
     }
 
+    private static bool TryParseServiceDataNetworkIdHint(ReadOnlySpan<byte> sectionPayload,
+        ReadOnlySpan<byte> serviceUuidBytes, out byte[] hint)
+    {
+        hint = [];
+        if (BleShortP2PGattProtocol.TryParseGattServiceDataNetworkIdHint(sectionPayload, out hint))
+            return true;
+
+        if (sectionPayload.Length < 16 + BleShortP2PGattProtocol.ManufacturerNetworkIdHintPayloadLength)
+            return false;
+        if (!sectionPayload.Slice(0, 16).SequenceEqual(serviceUuidBytes))
+            return false;
+        return BleShortP2PGattProtocol.TryParseGattServiceDataNetworkIdHint(sectionPayload.Slice(16), out hint);
+    }
+
     public static BleAdScanResult Merge(BleAdScanResult current, BleAdScanResult next)
     {
         if (!next.HasIdentity)
             return current;
         if (!current.HasIdentity)
             return next;
-        if (current.LegacyFullNetworkId == null && next.LegacyFullNetworkId is { } full)
-            return new BleAdScanResult { NetworkIdHint = next.NetworkIdHint, LegacyFullNetworkId = full };
-        return current;
+
+        var hint = next.HasHint ? next.NetworkIdHint
+            : current.HasHint ? current.NetworkIdHint : ReadOnlyMemory<byte>.Empty;
+        var legacy = current.LegacyFullNetworkId ?? next.LegacyFullNetworkId;
+        return new BleAdScanResult { NetworkIdHint = hint, LegacyFullNetworkId = legacy };
     }
 }

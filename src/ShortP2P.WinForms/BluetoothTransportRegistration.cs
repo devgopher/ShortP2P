@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Routing;
 using ShortP2P.Transport.Abstractions;
@@ -7,11 +8,12 @@ namespace ShortP2P.WinForms;
 
 internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBluetoothTransportProvider
 {
+    private readonly ILogger<WindowsBluetoothTransport> _transportLogger;
     private readonly object _sync = new();
     private ITransport? _instance;
     private Guid? _localNetworkId;
 
-    public IBleShortP2PPeripheralScanner PeripheralScanner { get; } = new WindowsBluetoothLeShortP2PScanner();
+    public IBleShortP2PPeripheralScanner PeripheralScanner { get; }
 
     public ITransport? Current
     {
@@ -24,8 +26,11 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
 
     public ITransport? Instance => Current;
 
-    public BluetoothTransportRegistration()
+    public BluetoothTransportRegistration(ILoggerFactory loggerFactory)
     {
+        _transportLogger = loggerFactory.CreateLogger<WindowsBluetoothTransport>();
+        PeripheralScanner = new WindowsBluetoothLeShortP2PScanner(
+            loggerFactory.CreateLogger<WindowsBluetoothLeShortP2PScanner>());
         try
         {
             ApplySettings(new P2pRoutingSettings());
@@ -78,7 +83,8 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
             _instance = new WindowsBluetoothTransport(new WindowsBluetoothTransportOptions(
                 GattDiscoverable: true,
                 LocalAdapterBluetoothAddress: localAddr,
-                LocalNetworkId: _localNetworkId));
+                LocalNetworkId: _localNetworkId,
+                Logger: _transportLogger));
         }
     }
 

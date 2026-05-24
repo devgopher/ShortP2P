@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Routing;
 using ShortP2P.Transport.Abstractions;
@@ -12,6 +13,9 @@ namespace ShortP2P.MauiApp;
 
 internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBluetoothTransportProvider
 {
+#if WINDOWS
+    private readonly ILogger<WindowsBluetoothTransport> _transportLogger;
+#endif
     private readonly object _sync = new();
     private ITransport? _instance;
     private Guid? _localNetworkId;
@@ -25,8 +29,11 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
         }
     }
 
-    public MauiBluetoothTransportRegistration()
+    public MauiBluetoothTransportRegistration(ILoggerFactory loggerFactory)
     {
+#if WINDOWS
+        _transportLogger = loggerFactory.CreateLogger<WindowsBluetoothTransport>();
+#endif
         try
         {
             ApplySettings(new P2pRoutingSettings());
@@ -80,7 +87,8 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
             _instance = new WindowsBluetoothTransport(new WindowsBluetoothTransportOptions(
                 GattDiscoverable: true,
                 LocalAdapterBluetoothAddress: localAddr,
-                LocalNetworkId: _localNetworkId));
+                LocalNetworkId: _localNetworkId,
+                Logger: _transportLogger));
 #elif ANDROID
             _instance = new AndroidBluetoothTransport(global::Android.App.Application.Context,
                 new AndroidBluetoothTransportOptions(GattDiscoverable: true, LocalNetworkId: _localNetworkId));

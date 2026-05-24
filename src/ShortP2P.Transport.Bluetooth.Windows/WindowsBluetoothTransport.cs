@@ -2,15 +2,15 @@ using System;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.Versioning;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Devices.Enumeration;
+using Windows.Foundation;
 using Windows.Storage.Streams;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
@@ -24,6 +24,10 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 {
     private const int DefaultChannelCapacity = 256;
     private const uint BluetoothUnavailableHResult = 0x800710DF;
+
+    private readonly WindowsBluetoothTransportOptions _options = options;
+    private readonly ILogger? _logger = options.Logger;
+    private readonly BleAdvertisementMergeCache _bleAdvertisementMergeCache = new(options.Logger);
 
     private readonly Channel<TransportReceiveMessage> _inbound =
         Channel.CreateBounded<TransportReceiveMessage>(new BoundedChannelOptions(DefaultChannelCapacity)
@@ -40,6 +44,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private readonly ConcurrentDictionary<string, BluetoothLEDevice> _blePeerDevices = new(MacKeyComparer);
     private readonly ConcurrentDictionary<string, BluetoothLEDevice> _bleAdvertisementDeviceCache = new(MacKeyComparer);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _sendLocks = new(MacKeyComparer);
+    private TypedEventHandler<BluetoothLEAdvertisementPublisher, BluetoothLEAdvertisementPublisherStatusChangedEventArgs>?
+        _manufacturerPublisherStatusHandler;
 
     private CancellationTokenSource? _runCts;
     private GattServiceProvider? _bleServiceProvider;
@@ -156,8 +162,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         _myBluetoothAddr = await LocalAdapterBluetoothMac.TryGetAdapterAddressAsync().ConfigureAwait(false)
                            ?? 0;
         
-        StartBleGattProviderAdvertising(_bleServiceProvider, options.GattDiscoverable);
-        //StartNetworkIdManufacturerAdvertising(options.LocalNetworkId);
+        StartBleGattProviderAdvertising(_bleServiceProvider, _options.GattDiscoverable, _options.LocalNetworkId, _logger);
+        StartNetworkIdManufacturerAdvertising(_options.LocalNetworkId);
         StartBleShortP2PAdvertisementWatcher();
     }
 
@@ -174,16 +180,14 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             {
                 ScanningMode = BluetoothLEScanningMode.Active
             };
-            var filter = new BluetoothLEAdvertisementFilter();
-            filter.Advertisement.ServiceUuids.Add(BleShortP2PGattProtocol.ServiceUuid);
-            watcher.AdvertisementFilter = filter;
             watcher.Received += OnBleShortP2PAdvertisementReceived;
             watcher.Start();
             _bleShortP2PAdvertisementWatcher = watcher;
+            _logger?.LogInformation("BLE advertisement watcher started (active scan, no service filter)");
         }
-        catch
+        catch (Exception ex)
         {
-            // нет Bluetooth / политика — только прямое открытие по MAC
+            _logger?.LogWarning(ex, "BLE advertisement watcher failed to start");
         }
     }
 
@@ -192,6 +196,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     {
         var addr = args.BluetoothAddress;
         if (addr == 0)
+            return;
+        if (!BleWindowsAdvertisementHelper.IsShortP2P(args.Advertisement))
             return;
         var mac = BluetoothMacAddress.FromBluetoothAddress(addr);
         var macKey = MacCacheKey(mac);
@@ -205,9 +211,10 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
                 if (dev != null)
                 {
-                    var scanResult = BleGattAdvertisementNetworkId.TryParseFromAdvertisement(args.Advertisement);
+                    var scanResult = _bleAdvertisementMergeCache.Observe(addr, args.Advertisement);
+                    BleWindowsAdvertisementLog.LogAdvertisementReceived(_logger, addr, macKey, args, scanResult);
                     if (_bleAdvertisementDeviceCache.TryAdd(macKey, dev))
-                        Console.WriteLine($"BLE advertisement device: {macKey} {_addr}.  {_myBluetoothAddr} {JsonSerializer.Serialize(args)}");
+                        _logger?.LogInformation("BLE device cached from advertisement: {Mac}", macKey);
                 }
             }
         }
@@ -234,13 +241,24 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         }
     }
 
-    private static void StartBleGattProviderAdvertising(GattServiceProvider provider, bool discoverable)
+    private static void StartBleGattProviderAdvertising(GattServiceProvider provider, bool discoverable,
+        Guid? localNetworkId, ILogger? logger)
     {
         var advertising = new GattServiceProviderAdvertisingParameters
         {
             IsDiscoverable = discoverable,
             IsConnectable = true,
         };
+        if (localNetworkId is { } networkId)
+        {
+            var payload = BleShortP2PGattProtocol.BuildGattServiceDataNetworkIdHint(networkId);
+            var writer = new DataWriter();
+            writer.WriteBytes(payload);
+            advertising.ServiceData = writer.DetachBuffer();
+            BleWindowsAdvertisementLog.LogGattAdvertisingStarted(logger, discoverable, networkId, payload.Length);
+        }
+        else
+            BleWindowsAdvertisementLog.LogGattAdvertisingStarted(logger, discoverable, null, null);
 
         provider.StartAdvertising(advertising);
     }
@@ -262,11 +280,17 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             var advertisement = new BluetoothLEAdvertisement();
             advertisement.ManufacturerData.Add(new BluetoothLEManufacturerData(
                 BleShortP2PGattProtocol.ManufacturerCompanyId, writer.DetachBuffer()));
+            advertisement.ServiceUuids.Add(BleShortP2PGattProtocol.ServiceUuid);
             _networkIdManufacturerPublisher = new BluetoothLEAdvertisementPublisher(advertisement);
+            _manufacturerPublisherStatusHandler = (_, e) =>
+                BleWindowsAdvertisementLog.LogPublisherStatus(_logger, e.Status);
+            _networkIdManufacturerPublisher.StatusChanged += _manufacturerPublisherStatusHandler;
             _networkIdManufacturerPublisher.Start();
+            BleWindowsAdvertisementLog.LogManufacturerPublisherStarted(_logger, networkId, payload.Length);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger?.LogWarning(ex, "BLE manufacturer publisher failed to start");
             StopNetworkIdManufacturerAdvertising();
         }
     }
@@ -279,10 +303,15 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             return;
         try
         {
+            if (_manufacturerPublisherStatusHandler != null)
+                publisher.StatusChanged -= _manufacturerPublisherStatusHandler;
+            _manufacturerPublisherStatusHandler = null;
             publisher.Stop();
+            _logger?.LogInformation("BLE manufacturer publisher stopped");
         }
-        catch
+        catch (Exception ex)
         {
+            _logger?.LogWarning(ex, "BLE manufacturer publisher stop failed");
             // ignore
         }
     }

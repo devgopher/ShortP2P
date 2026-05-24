@@ -130,6 +130,20 @@ public static class BleShortP2PGattProtocol
         return networkId != Guid.Empty;
     }
 
+    public static bool TryParseGattServiceDataNetworkIdHint(ReadOnlySpan<byte> serviceData, out byte[] hint)
+    {
+        hint = [];
+        if (serviceData.Length < ManufacturerNetworkIdHintPayloadLength
+            || serviceData[0] != ManufacturerPayloadTypeNetworkIdHint)
+            return false;
+        hint = serviceData.Slice(1, ManufacturerNetworkIdHintLength).ToArray();
+        return true;
+    }
+
+    /// <summary>Payload для GATT ServiceData (9 байт, UUID сервиса в AD отдельно).</summary>
+    public static byte[] BuildGattServiceDataNetworkIdHint(Guid networkId)
+        => BuildManufacturerNetworkIdHintPayload(networkId);
+
     /// <summary>
     ///     Service Data AD 0x21: либо UUID(16)+NetworkId(16), либо только NetworkId(16), если UUID уже в
     ///     <c>ServiceUuids</c> рекламы.
