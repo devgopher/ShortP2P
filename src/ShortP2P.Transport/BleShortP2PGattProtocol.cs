@@ -57,7 +57,57 @@ public static class BleShortP2PGattProtocol
 
     public const int ManufacturerNetworkIdPayloadLength = 4 + GattServiceDataNetworkIdLength;
 
-    /// <summary>Manufacturer Data: magic «SP2N» + NetworkId (16 байт wire Guid).</summary>
+    /// <summary>Manufacturer v2: тип payload — 8-байтный hint (первые байты open wire-Guid).</summary>
+    public const byte ManufacturerPayloadTypeNetworkIdHint = 0x01;
+
+    public const int ManufacturerNetworkIdHintLength = 8;
+
+    public const int ManufacturerNetworkIdHintPayloadLength = 1 + ManufacturerNetworkIdHintLength;
+
+    /// <summary>Manufacturer v2: [type=0x01][hint 8 байт]. Полный NetworkId — по GATT после connect.</summary>
+    public static byte[] BuildManufacturerNetworkIdHintPayload(Guid networkId)
+    {
+        if (networkId == Guid.Empty)
+            throw new ArgumentException("NetworkId must not be empty.", nameof(networkId));
+        var buf = new byte[ManufacturerNetworkIdHintPayloadLength];
+        buf[0] = ManufacturerPayloadTypeNetworkIdHint;
+        if (!TryWriteNetworkIdHint(networkId, buf.AsSpan(1)))
+            throw new InvalidOperationException("Failed to serialize NetworkId hint.");
+        return buf;
+    }
+
+    public static bool TryWriteNetworkIdHint(Guid networkId, Span<byte> destination)
+    {
+        if (destination.Length < ManufacturerNetworkIdHintLength || networkId == Guid.Empty)
+            return false;
+        Span<byte> wire = stackalloc byte[GattServiceDataNetworkIdLength];
+        if (!networkId.TryWriteBytes(wire))
+            return false;
+        wire.Slice(0, ManufacturerNetworkIdHintLength).CopyTo(destination);
+        return true;
+    }
+
+    public static bool NetworkIdHintMatches(Guid networkId, ReadOnlySpan<byte> hint)
+    {
+        if (hint.Length != ManufacturerNetworkIdHintLength)
+            return false;
+        Span<byte> expected = stackalloc byte[ManufacturerNetworkIdHintLength];
+        return TryWriteNetworkIdHint(networkId, expected) && expected.SequenceEqual(hint);
+    }
+
+    public static bool TryParseManufacturerNetworkIdHint(ushort companyId, ReadOnlySpan<byte> data,
+        out byte[] hint)
+    {
+        hint = [];
+        if (companyId != ManufacturerCompanyId || data.Length < ManufacturerNetworkIdHintPayloadLength)
+            return false;
+        if (data[0] != ManufacturerPayloadTypeNetworkIdHint)
+            return false;
+        hint = data.Slice(1, ManufacturerNetworkIdHintLength).ToArray();
+        return true;
+    }
+
+    /// <summary>Manufacturer Data v1 (legacy): magic «SP2N» + NetworkId (16 байт wire Guid).</summary>
     public static byte[] BuildManufacturerNetworkIdPayload(Guid networkId)
     {
         if (networkId == Guid.Empty)

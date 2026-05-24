@@ -17,7 +17,7 @@ public sealed class AndroidBluetoothLeShortP2PScanner(Context context) : IBleSho
 
     private readonly Context _context = context.ApplicationContext ?? context;
 
-    public async Task ScanAsync(TimeSpan duration, Action<TransportAddress, Guid?> onDeviceDiscovered,
+    public async Task ScanAsync(TimeSpan duration, Action<TransportAddress, BleAdScanResult> onDeviceDiscovered,
         CancellationToken cancellationToken = default)
     {
         if (duration <= TimeSpan.Zero)
@@ -65,7 +65,7 @@ public sealed class AndroidBluetoothLeShortP2PScanner(Context context) : IBleSho
         }
     }
 
-    private sealed class LeScanCallbackImpl(Action<TransportAddress, Guid?> onDevice) : ScanCallback
+    private sealed class LeScanCallbackImpl(Action<TransportAddress, BleAdScanResult> onDevice) : ScanCallback
     {
         private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
 
@@ -78,7 +78,53 @@ public sealed class AndroidBluetoothLeShortP2PScanner(Context context) : IBleSho
             var key = Convert.ToBase64String(addr.Data);
             if (!_seen.Add(key))
                 return;
-            onDevice(addr, null);
+            var scanResult = ParseScanResult(result);
+            onDevice(addr, scanResult);
+        }
+
+        private static BleAdScanResult ParseScanResult(ScanResult result)
+        {
+            var record = result.ScanRecord;
+            if (record == null)
+                return default;
+
+            var parsed = default(BleAdScanResult);
+            var mfg = record.ManufacturerSpecificData;
+            if (mfg != null)
+            {
+                for (var i = 0; i < mfg.Size(); i++)
+                {
+                    var companyId = (ushort)mfg.KeyAt(i);
+                    var bytes = mfg.ValueAt(i);
+                    if (bytes == null)
+                        continue;
+                    parsed = BleAdvertisementIdentityParser.Merge(parsed,
+                        BleAdvertisementIdentityParser.ParseManufacturerData(companyId, bytes));
+                }
+            }
+
+            if (parsed.HasIdentity)
+                return parsed;
+
+            var serviceData = record.ServiceData;
+            if (serviceData == null)
+                return parsed;
+
+            Span<byte> uuidBytes = stackalloc byte[16];
+            if (!BleShortP2PGattProtocol.ServiceUuid.TryWriteBytes(uuidBytes))
+                return parsed;
+
+            var serviceAdvertised = record.ServiceUuids?.Contains(new ParcelUuid(ServiceUuidJava)) == true;
+            var serviceUuidKey = new ParcelUuid(ServiceUuidJava);
+            if (!serviceData.ContainsKey(serviceUuidKey))
+                return parsed;
+
+            var sectionPayload = serviceData.Get(serviceUuidKey);
+            if (sectionPayload == null)
+                return parsed;
+
+            return BleAdvertisementIdentityParser.Merge(parsed,
+                BleAdvertisementIdentityParser.ParseServiceDataSection(sectionPayload, uuidBytes, serviceAdvertised));
         }
 
         private static bool TryDeviceToAddress(BluetoothDevice device, out TransportAddress addr)

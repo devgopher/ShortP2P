@@ -364,10 +364,10 @@ public sealed class LocalNetworkScanner(
                 try
                 {
                     await blePeripheralScanner!.ScanAsync(blePart,
-                        (addr, peerNetworkId) =>
+                        (addr, scanResult) =>
                         {
                             RememberBluetoothPeer(addr);
-                            _ = bleDiscoveredPeerStore?.RecordScanSeenAsync(addr, peerNetworkId, cancellationToken);
+                            _ = bleDiscoveredPeerStore?.RecordScanSeenAsync(addr, scanResult, cancellationToken);
                         }, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

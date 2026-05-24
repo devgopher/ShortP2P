@@ -8,8 +8,8 @@ public interface IBleShortP2PPeripheralScanner
     /// <summary>
     ///     В течение <paramref name="duration" /> вызывает <paramref name="onDeviceDiscovered" /> для каждого
     ///     уникального MAC (Bluetooth <see cref="TransportAddress" />).
-    ///     <paramref name="onDeviceDiscovered" /> получает NetworkId из рекламы, если удалось распарсить.
+    ///     <paramref name="onDeviceDiscovered" /> получает hint / legacy NetworkId из рекламы, если удалось распарсить.
     /// </summary>
-    Task ScanAsync(TimeSpan duration, Action<TransportAddress, Guid?> onDeviceDiscovered,
+    Task ScanAsync(TimeSpan duration, Action<TransportAddress, BleAdScanResult> onDeviceDiscovered,
         CancellationToken cancellationToken = default);
 }

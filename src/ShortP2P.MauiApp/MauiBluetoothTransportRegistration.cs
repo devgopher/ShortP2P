@@ -82,7 +82,8 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
                 LocalAdapterBluetoothAddress: localAddr,
                 LocalNetworkId: _localNetworkId));
 #elif ANDROID
-            _instance = new AndroidBluetoothTransport(global::Android.App.Application.Context);
+            _instance = new AndroidBluetoothTransport(global::Android.App.Application.Context,
+                new AndroidBluetoothTransportOptions(GattDiscoverable: true, LocalNetworkId: _localNetworkId));
 #endif
         }
     }

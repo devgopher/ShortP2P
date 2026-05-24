@@ -2,6 +2,8 @@ using System;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.Versioning;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
@@ -154,7 +156,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         _myBluetoothAddr = await LocalAdapterBluetoothMac.TryGetAdapterAddressAsync().ConfigureAwait(false)
                            ?? 0;
         
-        StartBleGattProviderAdvertising(_bleServiceProvider, options.GattDiscoverable, options.LocalNetworkId);
+        StartBleGattProviderAdvertising(_bleServiceProvider, options.GattDiscoverable);
         StartNetworkIdManufacturerAdvertising(options.LocalNetworkId);
         StartBleShortP2PAdvertisementWatcher();
     }
@@ -203,7 +205,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
                 if (dev != null)
                 {
-                    _bleAdvertisementDeviceCache.TryAdd(macKey, dev);
+                    if (_bleAdvertisementDeviceCache.TryAdd(macKey, dev))
+                        Console.WriteLine($"BLE advertisement device: {macKey} {_addr}.  {_myBluetoothAddr} {JsonSerializer.Serialize(args)}");
                 }
             }
         }
@@ -230,24 +233,13 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         }
     }
 
-    private static void StartBleGattProviderAdvertising(GattServiceProvider provider, bool discoverable,
-        Guid? localNetworkId)
+    private static void StartBleGattProviderAdvertising(GattServiceProvider provider, bool discoverable)
     {
         var advertising = new GattServiceProviderAdvertisingParameters
         {
             IsDiscoverable = discoverable,
             IsConnectable = true,
         };
-
-        // ServiceData (16 байт) + 128-bit UUID не помещаются в legacy ADV/scan response (~31 байт);
-        // Windows часто возвращает StartedWithoutAllAdvertisementData. NetworkId — через Manufacturer Data.
-        if (localNetworkId is Guid networkId)
-        {
-            var payload = BleShortP2PGattProtocol.BuildGattServiceDataNetworkId(networkId);
-            var writer = new DataWriter();
-            writer.WriteBytes(payload);
-            advertising.ServiceData = writer.DetachBuffer();
-        }
 
         provider.StartAdvertising(advertising);
     }
@@ -258,12 +250,12 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private void StartNetworkIdManufacturerAdvertising(Guid? localNetworkId)
     {
         StopNetworkIdManufacturerAdvertising();
-        if (localNetworkId is not Guid networkId)
+        if (localNetworkId is not { } networkId)
             return;
 
         try
         {
-            var payload = BleShortP2PGattProtocol.BuildManufacturerNetworkIdPayload(networkId);
+            var payload = BleShortP2PGattProtocol.BuildManufacturerNetworkIdHintPayload(networkId);
             var writer = new DataWriter();
             writer.WriteBytes(payload);
             var advertisement = new BluetoothLEAdvertisement();

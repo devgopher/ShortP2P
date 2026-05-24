@@ -176,6 +176,16 @@ public sealed class AppDatabase
             // column already exists
         }
 
+        try
+        {
+            await _connection.ExecuteAsync(
+                "ALTER TABLE ble_discovered_peers ADD COLUMN PeerNetworkIdHintHex TEXT NULL");
+        }
+        catch
+        {
+            // column already exists
+        }
+
         return _connection;
     }
 }
