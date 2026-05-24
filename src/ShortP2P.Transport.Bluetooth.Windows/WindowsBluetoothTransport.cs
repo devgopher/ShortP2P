@@ -157,7 +157,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
                            ?? 0;
         
         StartBleGattProviderAdvertising(_bleServiceProvider, options.GattDiscoverable);
-        StartNetworkIdManufacturerAdvertising(options.LocalNetworkId);
+        //StartNetworkIdManufacturerAdvertising(options.LocalNetworkId);
         StartBleShortP2PAdvertisementWatcher();
     }
 
@@ -205,6 +205,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
                 if (dev != null)
                 {
+                    var scanResult = BleGattAdvertisementNetworkId.TryParseFromAdvertisement(args.Advertisement);
                     if (_bleAdvertisementDeviceCache.TryAdd(macKey, dev))
                         Console.WriteLine($"BLE advertisement device: {macKey} {_addr}.  {_myBluetoothAddr} {JsonSerializer.Serialize(args)}");
                 }
