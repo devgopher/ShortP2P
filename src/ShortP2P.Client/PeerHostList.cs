@@ -1,10 +1,11 @@
 using System.Net;
+using ShortP2P.Auth.Data;
 using ShortP2P.Transport;
 
 namespace ShortP2P.Client;
 
 /// <summary>
-///     Парсинг поля <see cref="Data.ChatEntity.PeerHost" />: один или несколько IPv4/IPv6 и/или MAC Bluetooth
+///     Парсинг поля <see cref="Data.ChatEntity.PeerHost" />: IPv4/IPv6, short network id (base64url) и/или MAC Bluetooth
 ///     через запятую, точку с запятой, вертикальную черту или пробел.
 /// </summary>
 public static class PeerHostList
@@ -20,7 +21,7 @@ public static class PeerHostList
             : [];
     }
 
-    /// <summary>Уникальные IP и нормализованные MAC в порядке появления.</summary>
+    /// <summary>Уникальные IP, network id и нормализованные MAC в порядке появления.</summary>
     public static IReadOnlyList<string> ParseEndpointCandidates(string? peerHost)
     {
         if (string.IsNullOrWhiteSpace(peerHost))
@@ -30,24 +31,32 @@ public static class PeerHostList
         var list = new List<string>();
         foreach (var part in peerHost.Split(Separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            if (IPAddress.TryParse(part, out _))
-            {
-                if (seen.Add(part))
-                    list.Add(part);
-                continue;
-            }
-
-            if (!BluetoothTransportAddress.TryParseMac(part, out var mac))
-                continue;
-            var norm = BluetoothTransportAddress.ToMacString(mac);
-            if (seen.Add(norm))
+            if (TryNormalizeEndpointToken(part, out var norm) && seen.Add(norm))
                 list.Add(norm);
         }
 
         return list;
     }
 
-    /// <summary>Первый endpoint (IP или MAC) или <paramref name="fallback" />.</summary>
+    private static bool TryNormalizeEndpointToken(string part, out string normalized)
+    {
+        normalized = part;
+        if (IPAddress.TryParse(part, out _))
+            return true;
+
+        if (CompressedNetworkId.TryParseShortString(part, out var nid))
+        {
+            normalized = nid.ToShortString();
+            return true;
+        }
+
+        if (!BluetoothTransportAddress.TryParseMac(part, out var mac))
+            return false;
+        normalized = BluetoothTransportAddress.ToMacString(mac);
+        return true;
+    }
+
+    /// <summary>Первый endpoint (IP, network id или MAC) или <paramref name="fallback" />.</summary>
     public static string PrimaryHost(string? peerHost, string fallback = "127.0.0.1")
     {
         var c = ParseEndpointCandidates(peerHost);
@@ -67,12 +76,7 @@ public static class PeerHostList
             foreach (var part in raw.Split(Separators,
                          StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                string? token = null;
-                if (IPAddress.TryParse(part, out _))
-                    token = part;
-                else if (BluetoothTransportAddress.TryParseMac(part, out var mac))
-                    token = BluetoothTransportAddress.ToMacString(mac);
-                if (token != null && seen.Add(token))
+                if (TryNormalizeEndpointToken(part, out var token) && seen.Add(token))
                     list.Add(token);
             }
         }

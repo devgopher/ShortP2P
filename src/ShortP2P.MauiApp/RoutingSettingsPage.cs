@@ -61,7 +61,7 @@ public class RoutingSettingsPage : ContentPage
                     _enableUdpTransport,
                     new Label { Text = "Bluetooth transport" },
                     _enableBluetoothTransport,
-                    new Label { Text = "Bluetooth adapter (MAC for QR and contacts)" },
+                    new Label { Text = "Bluetooth adapter (for contacts)" },
                     _bluetoothAdapter,
                     new Label { Text = "Suggest Bluetooth pairing" },
                     _suggestBluetoothPairing,

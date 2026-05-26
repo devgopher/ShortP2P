@@ -1,10 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using QRCoder;
-using ShortP2P.Transport;
+using ShortP2P.Auth.Data;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
-using ShortP2P.Auth.Data;
 using ZXing;
 using ZXing.Common;
 
@@ -12,42 +11,12 @@ namespace ShortP2P.Client.Qr;
 
 public static class PeerQrService
 {
-    /// <summary>Собирает v1 пейлоад: IPv4 в <see cref="PeerQrPayload.H"/> / <see cref="PeerQrPayload.Ha"/>, опционально MAC в <see cref="PeerQrPayload.B"/> / <see cref="PeerQrPayload.Ba"/>.</summary>
-    public static PeerQrPayload BuildPayload(UserEntity user, string rsaPublicKeyJson, string? hostOverride = null,
-        string? bluetoothMacPrimary = null, IReadOnlyList<string>? bluetoothMacAdditional = null)
+    /// <summary>Собирает v1 пейлоад: IPv4 в <see cref="PeerQrPayload.H"/> / <see cref="PeerQrPayload.Ha"/>, network id в <see cref="PeerQrPayload.Id"/>.</summary>
+    public static PeerQrPayload BuildPayload(UserEntity user, string rsaPublicKeyJson, string? hostOverride = null)
     {
         List<string> hosts;
         var single = hostOverride?.Trim();
         hosts = !string.IsNullOrEmpty(single) ? [single] : LocalIPv4Resolver.GetInviteHostCandidatesOrdered(TimeSpan.FromSeconds(2));
-
-        string? b = null;
-        List<string>? ba = null;
-        var macSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(bluetoothMacPrimary) &&
-            BluetoothTransportAddress.TryParseMac(bluetoothMacPrimary, out var mac0))
-        {
-            b = BluetoothTransportAddress.ToMacString(mac0);
-            macSeen.Add(b);
-        }
-
-        if (bluetoothMacAdditional is { Count: > 0 })
-        {
-            foreach (var raw in bluetoothMacAdditional)
-            {
-                if (string.IsNullOrWhiteSpace(raw) || !BluetoothTransportAddress.TryParseMac(raw, out var m))
-                    continue;
-                var canon = BluetoothTransportAddress.ToMacString(m);
-                if (!macSeen.Add(canon))
-                    continue;
-                if (b == null)
-                    b = canon;
-                else
-                {
-                    ba ??= [];
-                    ba.Add(canon);
-                }
-            }
-        }
 
         return new PeerQrPayload
         {
@@ -55,8 +24,6 @@ public static class PeerQrService
             N = user.Nickname.Trim(),
             H = hosts[0],
             Ha = hosts.Count > 1 ? hosts.Skip(1).ToList() : null,
-            B = b,
-            Ba = ba is { Count: > 0 } ? ba : null,
             P = user.DataUdpPort,
             Id = user.NetworkIdShort.Trim(),
             K = rsaPublicKeyJson.Trim(),

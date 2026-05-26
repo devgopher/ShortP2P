@@ -5,6 +5,6 @@ public interface IBluetoothRadioCatalog
 {
     ValueTask<IReadOnlyList<BluetoothRadioInfo>> ListRadiosAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>MAC для QR и «мои транспорты» по сохранённому <paramref name="deviceId"/> (пусто = default).</summary>
+    /// <summary>MAC для «мои транспорты» по сохранённому <paramref name="deviceId"/> (пусто = default).</summary>
     ValueTask<string?> ResolveMacStringAsync(string? deviceId, CancellationToken cancellationToken = default);
 }

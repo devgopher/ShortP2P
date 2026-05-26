@@ -30,7 +30,7 @@ public sealed class P2pRoutingSettings
     /// </summary>
     public string? SelectedBluetoothAdapterDeviceId { get; set; }
 
-    /// <summary>Канонический MAC выбранного адаптера (AA:BB:CC:DD:EE:FF) для QR и контактов.</summary>
+    /// <summary>Канонический MAC выбранного адаптера (AA:BB:CC:DD:EE:FF) для контактов.</summary>
     public string? SelectedBluetoothAdapterMac { get; set; }
 
     /// <summary>Показывать предложение открыть системное сопряжение Bluetooth при недоступном BT-пире.</summary>

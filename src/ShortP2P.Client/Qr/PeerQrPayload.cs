@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json.Serialization;
+using ShortP2P.Auth.Data;
 using ShortP2P.Transport;
 
 namespace ShortP2P.Client.Qr;
@@ -20,11 +21,11 @@ public sealed class PeerQrPayload
     [JsonPropertyName("ha")]
     public List<string>? Ha { get; set; }
 
-    /// <summary>Первый Bluetooth MAC (колонки, AA:BB:…). Старые клиенты поле игнорируют.</summary>
+    /// <summary>Устаревшее: раньше Bluetooth MAC, затем дублировал <see cref="Id"/>. Не пишется в новых QR.</summary>
     [JsonPropertyName("b")]
     public string? B { get; set; }
 
-    /// <summary>Дополнительные MAC. Старые клиенты поле игнорируют.</summary>
+    /// <summary>Устаревшее: доп. MAC или network id из старых QR.</summary>
     [JsonPropertyName("ba")]
     public List<string>? Ba { get; set; }
 
@@ -38,7 +39,7 @@ public sealed class PeerQrPayload
     [JsonPropertyName("k")]
     public string K { get; set; } = "";
 
-    /// <summary>IP и Bluetooth MAC для поля чата (<see cref="Data.ChatEntity.PeerHost"/>): через запятую (сначала IP, затем MAC).</summary>
+    /// <summary>IP, network id и (для старых QR) MAC для <see cref="Data.ChatEntity.PeerHost"/>.</summary>
     public string GetCommaSeparatedHosts()
     {
         var list = new List<string>();
@@ -52,6 +53,15 @@ public sealed class PeerQrPayload
                 return;
             if (!list.Contains(t, StringComparer.OrdinalIgnoreCase))
                 list.Add(t);
+        }
+
+        void addNetworkId(string? s)
+        {
+            if (!CompressedNetworkId.TryParseShortString(s, out var nid))
+                return;
+            var canon = nid.ToShortString();
+            if (!list.Contains(canon, StringComparer.OrdinalIgnoreCase))
+                list.Add(canon);
         }
 
         void addMac(string? s)
@@ -72,11 +82,24 @@ public sealed class PeerQrPayload
                 addIp(x);
         }
 
-        addMac(B);
+        addNetworkId(Id);
+        addNetworkId(B);
         if (Ba != null)
         {
             foreach (var x in Ba)
-                addMac(x);
+                addNetworkId(x);
+        }
+
+        // Старые QR: MAC в b/ba (если b — не network id)
+        if (B != null && !CompressedNetworkId.TryParseShortString(B, out _))
+            addMac(B);
+        if (Ba != null)
+        {
+            foreach (var x in Ba)
+            {
+                if (!CompressedNetworkId.TryParseShortString(x, out _))
+                    addMac(x);
+            }
         }
 
         return string.Join(", ", list);

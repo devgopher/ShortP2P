@@ -206,12 +206,12 @@ public sealed class ChatP2pSession : IAsyncDisposable
                 _peerEndpoints.Add(UdpTransportAddress.FromIPEndPoint(new IPEndPoint(ip, chat.PeerPort)));
             else if (BluetoothTransportAddress.TryParseMac(primary, out var mac))
                 _peerEndpoints.Add(BluetoothTransportAddress.FromMac(mac));
-            else
+            else if (!CompressedNetworkId.TryParseShortString(primary, out _))
                 throw new FormatException(
-                    $"Unsupported peer host format: '{primary}'. Expected IPv4/IPv6 or Bluetooth MAC.");
+                    $"Unsupported peer host format: '{primary}'. Expected IPv4/IPv6, network id, or Bluetooth MAC.");
         }
 
-        _peerAddress = _peerEndpoints[0];
+        _peerAddress = _peerEndpoints.Count > 0 ? _peerEndpoints[0] : null;
         foreach (var ep in _peerEndpoints)
             if (localNetworkScanner != null)
             {

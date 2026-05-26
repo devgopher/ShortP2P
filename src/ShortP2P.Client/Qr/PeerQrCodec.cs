@@ -3,6 +3,7 @@ using System.Linq;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ShortP2P.Auth.Data;
 using ShortP2P.Crypto;
 using ShortP2P.Transport;
 
@@ -59,18 +60,19 @@ public static class PeerQrCodec
         }
 
         TryMergeQrHosts(p, out var mergedHosts);
-        TryMergeQrMacs(p, out var mergedMacs);
+        TryMergeQrBleContacts(p, out var mergedBle);
 
-        if (mergedHosts.Count == 0 && mergedMacs.Count == 0)
+        if (mergedHosts.Count == 0 && mergedBle.Count == 0
+            && !CompressedNetworkId.TryParseShortString(p.Id, out _))
         {
-            error = "QR is missing a valid host IP (h / ha) or Bluetooth MAC (b / ba).";
+            error = "QR is missing a valid host IP (h / ha), network id (id), or legacy contact (b / ba).";
             return false;
         }
 
         p.H = mergedHosts.Count > 0 ? mergedHosts[0] : "";
         p.Ha = mergedHosts.Count > 1 ? mergedHosts.Skip(1).ToList() : null;
-        p.B = mergedMacs.Count > 0 ? mergedMacs[0] : null;
-        p.Ba = mergedMacs.Count > 1 ? mergedMacs.Skip(1).ToList() : null;
+        p.B = mergedBle.Count > 0 ? mergedBle[0] : null;
+        p.Ba = mergedBle.Count > 1 ? mergedBle.Skip(1).ToList() : null;
 
         if (p.P is < 1 or > 65535)
         {
@@ -105,16 +107,16 @@ public static class PeerQrCodec
         }
     }
 
-    private static void TryMergeQrMacs(PeerQrPayload p, out List<string> merged)
+    private static void TryMergeQrBleContacts(PeerQrPayload p, out List<string> merged)
     {
         merged = [];
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        TryAddQrMac(merged, seen, p.B);
+        TryAddQrBleContact(merged, seen, p.B);
         if (p.Ba != null)
         {
             foreach (var x in p.Ba)
-                TryAddQrMac(merged, seen, x);
+                TryAddQrBleContact(merged, seen, x);
         }
     }
 
@@ -130,15 +132,24 @@ public static class PeerQrCodec
         merged.Add(t);
     }
 
-    private static void TryAddQrMac(List<string> merged, HashSet<string> seen, string? s)
+    private static void TryAddQrBleContact(List<string> merged, HashSet<string> seen, string? s)
     {
         if (string.IsNullOrWhiteSpace(s))
             return;
+        if (CompressedNetworkId.TryParseShortString(s, out var nid))
+        {
+            var canon = nid.ToShortString();
+            if (!seen.Add(canon))
+                return;
+            merged.Add(canon);
+            return;
+        }
+
         if (!BluetoothTransportAddress.TryParseMac(s, out var mac))
             return;
-        var canon = BluetoothTransportAddress.ToMacString(mac);
-        if (!seen.Add(canon))
+        var macCanon = BluetoothTransportAddress.ToMacString(mac);
+        if (!seen.Add(macCanon))
             return;
-        merged.Add(canon);
+        merged.Add(macCanon);
     }
 }

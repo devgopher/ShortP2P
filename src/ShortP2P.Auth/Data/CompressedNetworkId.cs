@@ -61,6 +61,22 @@ public readonly struct CompressedNetworkId : IEquatable<CompressedNetworkId>, IC
         return FromWireBytes(bytes);
     }
 
+    public static bool TryParseShortString(string? text, out CompressedNetworkId networkId)
+    {
+        networkId = Empty;
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        try
+        {
+            networkId = FromShortString(text.Trim());
+            return !networkId.IsEmpty;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
     public bool IsEmpty => _part0 == 0 && _part1 == 0;
 
     public int CompareTo(CompressedNetworkId other)
