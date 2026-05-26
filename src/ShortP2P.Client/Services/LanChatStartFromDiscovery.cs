@@ -37,7 +37,7 @@ public static class LanChatStartFromDiscovery
                 return LanChatStartResult.Failed("Bluetooth transport is unavailable.");
         }
 
-        var idShort = CompressedNetworkId.FromGuid(peer.NetworkId).ToShortString();
+        var idShort = peer.NetworkId.ToShortString();
         var existing = await chats.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);
         if (existing != null)
         {

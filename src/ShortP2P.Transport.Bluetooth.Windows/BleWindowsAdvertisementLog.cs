@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.Extensions.Logging;
+using ShortP2P.Auth.Data;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 using Windows.Devices.Bluetooth.Advertisement;
@@ -21,34 +22,30 @@ internal static class BleWindowsAdvertisementLog
             logger.LogInformation("BLE manufacturer publisher status: {Status}", status);
     }
 
-    public static void LogGattAdvertisingStarted(ILogger? logger, bool discoverable, Guid? networkId, int? serviceDataBytes)
+    public static void LogGattAdvertisingStarted(ILogger? logger, bool discoverable, CompressedNetworkId? networkId, int? serviceDataBytes)
     {
         if (logger == null)
             return;
 
-        if (networkId is { } id)
+        if (networkId is { } id && !id.IsEmpty)
         {
-            Span<byte> hint = stackalloc byte[BleAdScanResult.NetworkIdHintLength];
-            BleShortP2PGattProtocol.TryWriteNetworkIdHint(id, hint);
             logger.LogInformation(
-                "BLE GATT advertising started (discoverable={Discoverable}, serviceDataBytes={ServiceDataBytes}, hintHex={HintHex})",
-                discoverable, serviceDataBytes, Convert.ToHexString(hint));
+                "BLE GATT advertising started (discoverable={Discoverable}, serviceDataBytes={ServiceDataBytes}, networkId={NetworkId})",
+                discoverable, serviceDataBytes, id.ToShortString());
         }
         else
-            logger.LogInformation("BLE GATT advertising started (discoverable={Discoverable}, no NetworkId hint)",
+            logger.LogInformation("BLE GATT advertising started (discoverable={Discoverable}, no NetworkId)",
                 discoverable);
     }
 
-    public static void LogManufacturerPublisherStarted(ILogger? logger, Guid networkId, int payloadBytes)
+    public static void LogManufacturerPublisherStarted(ILogger? logger, CompressedNetworkId networkId, int payloadBytes)
     {
         if (logger == null)
             return;
 
-        Span<byte> hint = stackalloc byte[BleAdScanResult.NetworkIdHintLength];
-        BleShortP2PGattProtocol.TryWriteNetworkIdHint(networkId, hint);
         logger.LogInformation(
-            "BLE manufacturer publisher started (payloadBytes={PayloadBytes}, hintHex={HintHex}, companyId=0x{CompanyId:X4})",
-            payloadBytes, Convert.ToHexString(hint), BleShortP2PGattProtocol.ManufacturerCompanyId);
+            "BLE manufacturer publisher started (payloadBytes={PayloadBytes}, networkId={NetworkId}, companyId=0x{CompanyId:X4})",
+            payloadBytes, networkId.ToShortString(), BleShortP2PGattProtocol.ManufacturerCompanyId);
     }
 
     public static void LogAdvertisementReceived(ILogger? logger, ulong bluetoothAddress, string macKey,
@@ -59,7 +56,7 @@ internal static class BleWindowsAdvertisementLog
 
         var ad = args.Advertisement;
         logger.LogDebug(
-            "BLE adv {Mac} addrType={AddressType} advType={AdvertisementType} rssi={Rssi} svc={ServiceUuidCount} mfg={ManufacturerCount} sections={SectionCount} mergedHint={HasHint} mergedLegacy={HasLegacy}",
+            "BLE adv {Mac} addrType={AddressType} advType={AdvertisementType} rssi={Rssi} svc={ServiceUuidCount} mfg={ManufacturerCount} sections={SectionCount} mergedNetworkId={HasNetworkId}",
             macKey,
             args.BluetoothAddressType,
             args.AdvertisementType,
@@ -67,17 +64,16 @@ internal static class BleWindowsAdvertisementLog
             ad.ServiceUuids.Count,
             ad.ManufacturerData.Count,
             ad.DataSections.Count,
-            merged.HasHint,
-            merged.LegacyFullNetworkId != null);
+            merged.HasNetworkId);
 
         if (logger.IsEnabled(LogLevel.Trace))
         {
-            logger.LogTrace("BLE adv {Mac} detail: services=[{Services}] mfg=[{Manufacturer}] sections=[{Sections}] hintHex={HintHex}",
+            logger.LogTrace("BLE adv {Mac} detail: services=[{Services}] mfg=[{Manufacturer}] sections=[{Sections}] networkId={NetworkId}",
                 macKey,
                 FormatServiceUuids(ad),
                 FormatManufacturerData(ad),
                 FormatDataSections(ad),
-                merged.HasHint ? Convert.ToHexString(merged.NetworkIdHint.Span) : "");
+                merged.NetworkId);
         }
     }
 
@@ -87,12 +83,10 @@ internal static class BleWindowsAdvertisementLog
             return;
 
         logger.LogInformation(
-            "BLE scan peer {Mac} hint={HasHint} legacy={HasLegacy} improved={Improved} hintHex={HintHex}",
+            "BLE scan peer {Mac} networkId={NetworkId} improved={Improved}",
             macKey,
-            merged.HasHint,
-            merged.LegacyFullNetworkId != null,
-            improved,
-            merged.HasHint ? Convert.ToHexString(merged.NetworkIdHint.Span) : "");
+            merged.NetworkId,
+            improved);
     }
 
     public static void LogIdentityMerged(ILogger? logger, ulong bluetoothAddress, BleAdScanResult merged)
@@ -101,11 +95,9 @@ internal static class BleWindowsAdvertisementLog
             return;
 
         logger.LogDebug(
-            "BLE identity merged for {Address:X12}: hint={HasHint} hintHex={HintHex} legacy={Legacy}",
+            "BLE identity merged for {Address:X12}: networkId={NetworkId}",
             bluetoothAddress,
-            merged.HasHint,
-            merged.HasHint ? Convert.ToHexString(merged.NetworkIdHint.Span) : "",
-            merged.LegacyFullNetworkId);
+            merged.NetworkId);
     }
 
     private static string FormatServiceUuids(BluetoothLEAdvertisement ad)

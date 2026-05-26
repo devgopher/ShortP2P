@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using ShortP2P.Auth.Data;
 
 namespace ShortP2P.Discovery.Gossip;
 
@@ -16,34 +17,36 @@ public static class GossipWireCodec
 
     public const int MaxNicknameUtf8Bytes = 512;
 
-    public const int ProbeLength = 1 + 8 + 16 + 16;
-    public const int AckHeaderLength = 1 + 8 + 16 + 2 + 2;
+    public const int ProbeLength = 1 + 8 + CompressedNetworkId.WireLength + CompressedNetworkId.WireLength;
+    public const int AckHeaderLength = 1 + 8 + CompressedNetworkId.WireLength + 2 + 2;
 
-    public static byte[] BuildProbe(long nonce, Guid senderNetworkId, Guid targetNetworkId)
+    public static byte[] BuildProbe(long nonce, CompressedNetworkId senderNetworkId, CompressedNetworkId targetNetworkId)
     {
         var buf = new byte[ProbeLength];
         buf[0] = FrameProbe;
         BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(1, 8), nonce);
-        senderNetworkId.TryWriteBytes(buf.AsSpan(9, 16));
-        targetNetworkId.TryWriteBytes(buf.AsSpan(25, 16));
+        if (!senderNetworkId.TryWriteBytes(buf.AsSpan(9, CompressedNetworkId.WireLength)))
+            throw new InvalidOperationException("Failed to write sender network id.");
+        if (!targetNetworkId.TryWriteBytes(buf.AsSpan(21, CompressedNetworkId.WireLength)))
+            throw new InvalidOperationException("Failed to write target network id.");
         return buf;
     }
 
-    public static bool TryParseProbe(ReadOnlySpan<byte> datagram, out long nonce, out Guid senderNetworkId,
-        out Guid targetNetworkId)
+    public static bool TryParseProbe(ReadOnlySpan<byte> datagram, out long nonce, out CompressedNetworkId senderNetworkId,
+        out CompressedNetworkId targetNetworkId)
     {
         nonce = 0;
-        senderNetworkId = Guid.Empty;
-        targetNetworkId = Guid.Empty;
+        senderNetworkId = CompressedNetworkId.Empty;
+        targetNetworkId = CompressedNetworkId.Empty;
         if (datagram.Length < ProbeLength || datagram[0] != FrameProbe)
             return false;
         nonce = BinaryPrimitives.ReadInt64LittleEndian(datagram.Slice(1, 8));
-        senderNetworkId = new Guid(datagram.Slice(9, 16));
-        targetNetworkId = new Guid(datagram.Slice(25, 16));
+        senderNetworkId = CompressedNetworkId.FromWireBytes(datagram.Slice(9, CompressedNetworkId.WireLength));
+        targetNetworkId = CompressedNetworkId.FromWireBytes(datagram.Slice(21, CompressedNetworkId.WireLength));
         return true;
     }
 
-    public static byte[] BuildAck(long nonce, Guid responderNetworkId, int dataUdpPort, string nickname)
+    public static byte[] BuildAck(long nonce, CompressedNetworkId responderNetworkId, int dataUdpPort, string nickname)
     {
         nickname ??= "?";
         var trimmed = nickname.Trim();
@@ -58,24 +61,25 @@ public static class GossipWireCodec
         var buf = new byte[AckHeaderLength + nickBytes.Length];
         buf[0] = FrameAck;
         BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(1, 8), nonce);
-        responderNetworkId.TryWriteBytes(buf.AsSpan(9, 16));
+        if (!responderNetworkId.TryWriteBytes(buf.AsSpan(9, CompressedNetworkId.WireLength)))
+            throw new InvalidOperationException("Failed to write responder network id.");
         BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(25, 2), (ushort)dataUdpPort);
         BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(27, 2), (ushort)nickBytes.Length);
         nickBytes.CopyTo(buf.AsSpan(29));
         return buf;
     }
 
-    public static bool TryParseAck(ReadOnlySpan<byte> datagram, out long nonce, out Guid responderNetworkId,
+    public static bool TryParseAck(ReadOnlySpan<byte> datagram, out long nonce, out CompressedNetworkId responderNetworkId,
         out int dataUdpPort, out string nickname)
     {
         nonce = 0;
-        responderNetworkId = Guid.Empty;
+        responderNetworkId = CompressedNetworkId.Empty;
         dataUdpPort = 17500;
         nickname = "";
         if (datagram.Length < AckHeaderLength || datagram[0] != FrameAck)
             return false;
         nonce = BinaryPrimitives.ReadInt64LittleEndian(datagram.Slice(1, 8));
-        responderNetworkId = new Guid(datagram.Slice(9, 16));
+        responderNetworkId = CompressedNetworkId.FromWireBytes(datagram.Slice(9, CompressedNetworkId.WireLength));
         dataUdpPort = BinaryPrimitives.ReadUInt16BigEndian(datagram.Slice(25, 2));
         if (dataUdpPort is < 1 or > 65535)
             return false;

@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using ShortP2P.Auth.Data;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
@@ -17,8 +18,8 @@ public static class LanRoutingCodec
     private const byte MsgFind = 1;
     private const byte MsgFound = 2;
 
-    public static byte[] BuildFind(Guid searchId, Guid targetNetworkId, string targetNickname, byte ttl,
-        IReadOnlyList<Guid> visited, IReadOnlyList<TransportAddress> pathDataHops)
+    public static byte[] BuildFind(Guid searchId, CompressedNetworkId targetNetworkId, string targetNickname, byte ttl,
+        IReadOnlyList<CompressedNetworkId> visited, IReadOnlyList<TransportAddress> pathDataHops)
     {
         var nick = Encoding.UTF8.GetBytes(targetNickname.Trim());
         if (nick.Length > ushort.MaxValue)
@@ -39,7 +40,8 @@ public static class LanRoutingCodec
         foreach (var a in pathDataHops)
             pathBytes += 2 + a.Data.Length;
 
-        var bodyLen = 4 + 1 + 1 + 16 + 16 + 2 + nick.Length + 1 + 1 + visited.Count * 16 + 1 + pathBytes;
+        var bodyLen = 4 + 1 + 1 + 16 + CompressedNetworkId.WireLength + 2 + nick.Length + 1 + 1 +
+                      visited.Count * CompressedNetworkId.WireLength + 1 + pathBytes;
         var buf = new byte[1 + bodyLen];
         buf[0] = FrameFind;
         var o = 1;
@@ -49,18 +51,20 @@ public static class LanRoutingCodec
         buf[o++] = MsgFind;
         searchId.TryWriteBytes(buf.AsSpan(o, 16));
         o += 16;
-        targetNetworkId.TryWriteBytes(buf.AsSpan(o, 16));
-        o += 16;
+        if (!targetNetworkId.TryWriteBytes(buf.AsSpan(o, CompressedNetworkId.WireLength)))
+            throw new InvalidOperationException("Failed to write target network id.");
+        o += CompressedNetworkId.WireLength;
         BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(o, 2), (ushort)nick.Length);
         o += 2;
         nick.CopyTo(buf.AsSpan(o, nick.Length));
         o += nick.Length;
         buf[o++] = ttl;
         buf[o++] = (byte)visited.Count;
-        foreach (var g in visited)
+        foreach (var id in visited)
         {
-            g.TryWriteBytes(buf.AsSpan(o, 16));
-            o += 16;
+            if (!id.TryWriteBytes(buf.AsSpan(o, CompressedNetworkId.WireLength)))
+                throw new InvalidOperationException("Failed to write visited network id.");
+            o += CompressedNetworkId.WireLength;
         }
 
         buf[o++] = (byte)pathDataHops.Count;
@@ -75,11 +79,11 @@ public static class LanRoutingCodec
         return buf;
     }
 
-    public static bool TryParseFind(ReadOnlySpan<byte> datagram, out Guid searchId, out Guid targetNetworkId,
-        out string targetNickname, out byte ttl, out List<Guid> visited, out List<TransportAddress> pathDataHops)
+    public static bool TryParseFind(ReadOnlySpan<byte> datagram, out Guid searchId, out CompressedNetworkId targetNetworkId,
+        out string targetNickname, out byte ttl, out List<CompressedNetworkId> visited, out List<TransportAddress> pathDataHops)
     {
         searchId = default;
-        targetNetworkId = default;
+        targetNetworkId = CompressedNetworkId.Empty;
         targetNickname = "";
         ttl = 0;
         visited = [];
@@ -87,15 +91,15 @@ public static class LanRoutingCodec
         if (datagram.Length == 0 || datagram[0] != FrameFind)
             return false;
         var d = datagram.Slice(1);
-        if (d.Length < 4 + 1 + 1 + 16 + 16 + 2 + 1 + 1)
+        if (d.Length < 4 + 1 + 1 + 16 + CompressedNetworkId.WireLength + 2 + 1 + 1)
             return false;
         if (!d.StartsWith(Magic)) return false;
         if (d[4] != WireVersion || d[5] != MsgFind) return false;
         var o = 6;
         searchId = new Guid(d.Slice(o, 16));
         o += 16;
-        targetNetworkId = new Guid(d.Slice(o, 16));
-        o += 16;
+        targetNetworkId = CompressedNetworkId.FromWireBytes(d.Slice(o, CompressedNetworkId.WireLength));
+        o += CompressedNetworkId.WireLength;
         var nickLen = BinaryPrimitives.ReadUInt16BigEndian(d.Slice(o, 2));
         o += 2;
         if (nickLen > 4096 || d.Length < o + nickLen + 2) return false;
@@ -103,11 +107,11 @@ public static class LanRoutingCodec
         o += nickLen;
         ttl = d[o++];
         var vCount = d[o++];
-        if (vCount > 8 || d.Length < o + vCount * 16 + 1) return false;
+        if (vCount > 8 || d.Length < o + vCount * CompressedNetworkId.WireLength + 1) return false;
         for (var i = 0; i < vCount; i++)
         {
-            visited.Add(new Guid(d.Slice(o, 16)));
-            o += 16;
+            visited.Add(CompressedNetworkId.FromWireBytes(d.Slice(o, CompressedNetworkId.WireLength)));
+            o += CompressedNetworkId.WireLength;
         }
 
         var pCount = d[o++];
@@ -127,7 +131,7 @@ public static class LanRoutingCodec
 
     /// <param name="firstRelayHop">Первый UDP-получатель от инициатора; null — прямой адрес peerHost/peerPort.</param>
     /// <param name="relayStripPath">Адреса для вложенного RELAY после первого хопа (длина ≤ 3).</param>
-    public static byte[] BuildFound(Guid searchId, Guid targetNetworkId, string nickname, string rsaPublicKeyJson,
+    public static byte[] BuildFound(Guid searchId, CompressedNetworkId targetNetworkId, string nickname, string rsaPublicKeyJson,
         string peerHost, int peerPort, TransportAddress? firstRelayHop, IReadOnlyList<TransportAddress> relayStripPath)
     {
         var nick = Encoding.UTF8.GetBytes(nickname.Trim());
@@ -153,7 +157,7 @@ public static class LanRoutingCodec
         foreach (var a in relayStripPath)
             relayBytes += 2 + a.Data.Length;
 
-        var bodyLen = 4 + 1 + 1 + 16 + 16 + 2 + nick.Length + 4 + pub.Length + 2 + host.Length + 2 + 1 + 1 + relayBytes;
+        var bodyLen = 4 + 1 + 1 + 16 + CompressedNetworkId.WireLength + 2 + nick.Length + 4 + pub.Length + 2 + host.Length + 2 + 1 + 1 + relayBytes;
         var buf = new byte[1 + bodyLen];
         buf[0] = FrameFound;
         var o = 1;
@@ -163,8 +167,9 @@ public static class LanRoutingCodec
         buf[o++] = MsgFound;
         searchId.TryWriteBytes(buf.AsSpan(o, 16));
         o += 16;
-        targetNetworkId.TryWriteBytes(buf.AsSpan(o, 16));
-        o += 16;
+        if (!targetNetworkId.TryWriteBytes(buf.AsSpan(o, CompressedNetworkId.WireLength)))
+            throw new InvalidOperationException("Failed to write target network id.");
+        o += CompressedNetworkId.WireLength;
         BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(o, 2), (ushort)nick.Length);
         o += 2;
         nick.CopyTo(buf.AsSpan(o, nick.Length));
@@ -200,12 +205,12 @@ public static class LanRoutingCodec
         return buf;
     }
 
-    public static bool TryParseFound(ReadOnlySpan<byte> datagram, out Guid searchId, out Guid targetNetworkId,
+    public static bool TryParseFound(ReadOnlySpan<byte> datagram, out Guid searchId, out CompressedNetworkId targetNetworkId,
         out string nickname, out string rsaPublicKeyJson, out string peerHost, out int peerPort,
         out TransportAddress? firstRelayHop, out List<TransportAddress> relayStripPath)
     {
         searchId = default;
-        targetNetworkId = default;
+        targetNetworkId = CompressedNetworkId.Empty;
         nickname = "";
         rsaPublicKeyJson = "";
         peerHost = "";
@@ -215,15 +220,15 @@ public static class LanRoutingCodec
         if (datagram.Length == 0 || datagram[0] != FrameFound)
             return false;
         var d = datagram.Slice(1);
-        if (d.Length < 4 + 1 + 1 + 16 + 16 + 2 + 4 + 2 + 2 + 1 + 1)
+        if (d.Length < 4 + 1 + 1 + 16 + CompressedNetworkId.WireLength + 2 + 4 + 2 + 2 + 1 + 1)
             return false;
         if (!d.StartsWith(Magic)) return false;
         if (d[4] != WireVersion || d[5] != MsgFound) return false;
         var o = 6;
         searchId = new Guid(d.Slice(o, 16));
         o += 16;
-        targetNetworkId = new Guid(d.Slice(o, 16));
-        o += 16;
+        targetNetworkId = CompressedNetworkId.FromWireBytes(d.Slice(o, CompressedNetworkId.WireLength));
+        o += CompressedNetworkId.WireLength;
         var nickLen = BinaryPrimitives.ReadUInt16BigEndian(d.Slice(o, 2));
         o += 2;
         if (d.Length < o + nickLen) return false;

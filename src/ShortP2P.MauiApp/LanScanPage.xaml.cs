@@ -21,7 +21,7 @@ public sealed class LanScanRow
 
     public static LanScanRow From(DiscoveredLocalPeer p, bool isPeerOnline)
     {
-        var idShort = CompressedNetworkId.FromGuid(p.NetworkId).ToShortString();
+        var idShort = p.NetworkId.ToShortString();
         var transport = p.TransportKind switch
         {
             TransportKind.Udp => "UDP",
@@ -80,7 +80,7 @@ public partial class LanScanPage : ContentPage
         _rows.Clear();
         foreach (var p in _p2p.LocalScan.Clients)
         {
-            var idShort = CompressedNetworkId.FromGuid(p.NetworkId).ToShortString();
+            var idShort = p.NetworkId.ToShortString();
             var online = _p2p.LocalScan.IsPeerSeenRecentlyOnLan(idShort);
             _rows.Add(LanScanRow.From(p, online));
         }

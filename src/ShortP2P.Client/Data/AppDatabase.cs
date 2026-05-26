@@ -176,16 +176,30 @@ public sealed class AppDatabase
             // column already exists
         }
 
+        await MigrateBleDiscoveredPeersToFullNetworkIdAsync(_connection).ConfigureAwait(false);
+
+        return _connection;
+    }
+
+    private static async Task MigrateBleDiscoveredPeersToFullNetworkIdAsync(SQLiteAsyncConnection connection)
+    {
+        const string flagKey = "network_id_12_bytes_v3";
         try
         {
-            await _connection.ExecuteAsync(
-                "ALTER TABLE ble_discovered_peers ADD COLUMN PeerNetworkIdHintHex TEXT NULL");
+            await connection.ExecuteAsync(
+                "CREATE TABLE IF NOT EXISTS app_schema_flags (key TEXT PRIMARY KEY, value TEXT NOT NULL)").ConfigureAwait(false);
+            var applied = await connection.ExecuteScalarAsync<string>(
+                "SELECT value FROM app_schema_flags WHERE key = ?", flagKey).ConfigureAwait(false);
+            if (string.Equals(applied, "1", StringComparison.Ordinal))
+                return;
+
+            await connection.ExecuteAsync("DELETE FROM ble_discovered_peers").ConfigureAwait(false);
+            await connection.ExecuteAsync(
+                "INSERT OR REPLACE INTO app_schema_flags (key, value) VALUES (?, ?)", flagKey, "1").ConfigureAwait(false);
         }
         catch
         {
-            // column already exists
+            // ignore migration issues on very old DB files
         }
-
-        return _connection;
     }
 }

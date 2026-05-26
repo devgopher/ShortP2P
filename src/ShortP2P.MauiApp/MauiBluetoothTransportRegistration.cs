@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using ShortP2P.Auth.Data;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Routing;
 using ShortP2P.Transport.Abstractions;
@@ -18,7 +19,7 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
 #endif
     private readonly object _sync = new();
     private ITransport? _instance;
-    private Guid? _localNetworkId;
+    private CompressedNetworkId? _localNetworkId;
 
     public ITransport? Current
     {
@@ -44,7 +45,7 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
         }
     }
 
-    public void SetLocalNetworkId(Guid? networkId)
+    public void SetLocalNetworkId(CompressedNetworkId? networkId)
     {
         lock (_sync)
             _localNetworkId = networkId;

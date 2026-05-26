@@ -122,7 +122,7 @@ public sealed class LocalNetworkScanForm : Form
             _list.Items.Clear();
             foreach (var p in _p2P.LocalScan.Clients)
             {
-                var idShort = CompressedNetworkId.FromGuid(p.NetworkId).ToShortString();
+                var idShort = p.NetworkId.ToShortString();
                 var row = new ListViewItem(string.IsNullOrEmpty(p.Nickname) ? "—" : p.Nickname)
                 {
                     Tag = p,
@@ -166,7 +166,7 @@ public sealed class LocalNetworkScanForm : Form
                 case LanChatStartKind.Created:
                     _userActions.LogInformation(
                         "LAN scan: start chat from peer {Nickname} (network id {NetworkId}, kind {Kind})",
-                        peer.Nickname, CompressedNetworkId.FromGuid(peer.NetworkId).ToShortString(), result.Kind);
+                        peer.Nickname, peer.NetworkId.ToShortString(), result.Kind);
                     if (_refreshMainChatsAsync != null)
                         await _refreshMainChatsAsync().ConfigureAwait(true);
                     if (result.Chat != null)
@@ -175,7 +175,7 @@ public sealed class LocalNetworkScanForm : Form
                 case LanChatStartKind.WaitingForPeer:
                     _userActions.LogInformation(
                         "LAN scan: waiting for peer {Nickname} (network id {NetworkId})",
-                        peer.Nickname, CompressedNetworkId.FromGuid(peer.NetworkId).ToShortString());
+                        peer.Nickname, peer.NetworkId.ToShortString());
                     MessageBox.Show(this, result.Message ?? "", "LAN", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     break;
                 case LanChatStartKind.Failed:

@@ -1,3 +1,4 @@
+using ShortP2P.Auth.Data;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Discovery.Ble;
@@ -10,6 +11,6 @@ public interface IBleDiscoveredPeerStore
     ValueTask RecordScanSeenAsync(TransportAddress bluetoothMac, BleAdScanResult scanResult = default,
         CancellationToken cancellationToken = default);
 
-    ValueTask RecordPingAsync(TransportAddress bluetoothMac, Guid peerNetworkId, string nickname,
+    ValueTask RecordPingAsync(TransportAddress bluetoothMac, CompressedNetworkId peerNetworkId, string nickname,
         CancellationToken cancellationToken = default);
 }

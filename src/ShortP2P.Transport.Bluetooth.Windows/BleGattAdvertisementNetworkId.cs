@@ -5,7 +5,7 @@ using Windows.Storage.Streams;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
 
-/// <summary>Парсинг hint / legacy NetworkId из BLE-рекламы ShortP2P.</summary>
+/// <summary>Парсинг полного NetworkId из BLE-рекламы ShortP2P.</summary>
 internal static class BleGattAdvertisementNetworkId
 {
     public static BleAdScanResult TryParseFromAdvertisement(BluetoothLEAdvertisement advertisement)

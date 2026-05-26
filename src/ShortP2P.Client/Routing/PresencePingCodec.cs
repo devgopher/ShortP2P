@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using ShortP2P.Auth.Data;
 using ShortP2P.Discovery;
 using ShortP2P.Discovery.Transceivers;
 using ShortP2P.Transport;
@@ -11,9 +12,9 @@ namespace ShortP2P.Client.Routing;
 ///     Единый модуль presence / discovery ping (кадр 0x31, порт <see cref="UdpPort" />): сериализация
 ///     <see cref="Build" /> / <see cref="TryParse" /> и приёмопередатчик <see cref="Transceiver" /> поверх
 ///     <see cref="ITransport" /> (UDP, BLE и т.д.).
-///     Формат: [0]=frame, [1..16]=Guid, [17..18]=длина ника, [19..]=UTF-8 ник, uint16 BE dataUdpPort,
+///     Формат: [0]=frame, [1..12]=network id, [13..14]=длина ника, [15..]=UTF-8 ник, uint16 BE dataUdpPort,
 ///     [+1]=<see cref="LinkTechnologyPreset" /> (опционально), [+2]=uint16 BE <see cref="PresencePeerCapabilities" /> (опционально, на будущее).
-///     Совместимость: 17 байт только Guid; 19+nick — ник без порта; без байта скорости — <see cref="LinkTechnologyPreset.Unlimited" />;
+///     Совместимость: 13 байт только id; 15+nick — ник без порта; без байта скорости — <see cref="LinkTechnologyPreset.Unlimited" />;
 ///     без двух байт маски — считается только Messaging (<see cref="PresencePeerCapabilities.Chat" />) у отправителя legacy-клиента.
 ///     Полный перечень ролей узла — README ShortP2P.Discovery, раздел «Узел и возможности».
 /// </summary>
@@ -29,7 +30,7 @@ public static class PresencePingCodec
     /// <summary>Если в пакете нет поля порта (старые клиенты).</summary>
     public const int DefaultDataUdpPort = 17500;
 
-    public static byte[] Build(Guid networkId, string nickname, int dataUdpPort,
+    public static byte[] Build(CompressedNetworkId networkId, string nickname, int dataUdpPort,
         LinkTechnologyPreset advertisedLink = LinkTechnologyPreset.Unlimited,
         PresencePeerCapabilities advertisedCapabilities = PresencePeerCapabilities.Chat)
     {
@@ -42,12 +43,13 @@ public static class PresencePingCodec
             nickBytes = nickBytes.AsSpan(0, MaxNicknameUtf8Bytes).ToArray();
 
         const int trailerAfterPort = 1 + 2; // LinkTechnology + capabilities BE
-        var buf = new byte[1 + 16 + 2 + nickBytes.Length + 2 + trailerAfterPort];
+        var buf = new byte[1 + CompressedNetworkId.WireLength + 2 + nickBytes.Length + 2 + trailerAfterPort];
         buf[0] = FramePresencePing;
-        networkId.TryWriteBytes(buf.AsSpan(1, 16));
-        BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(17, 2), (ushort)nickBytes.Length);
-        nickBytes.CopyTo(buf.AsSpan(19));
-        var portOff = 19 + nickBytes.Length;
+        if (!networkId.TryWriteBytes(buf.AsSpan(1, CompressedNetworkId.WireLength)))
+            throw new InvalidOperationException("Failed to write network id.");
+        BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(13, 2), (ushort)nickBytes.Length);
+        nickBytes.CopyTo(buf.AsSpan(15));
+        var portOff = 15 + nickBytes.Length;
         BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(portOff, 2), (ushort)dataUdpPort);
         buf[portOff + 2] = (byte)advertisedLink;
         var cap = (ushort)((ushort)advertisedCapabilities & (ushort)PresencePeerCapabilities.AllDefined);
@@ -56,46 +58,46 @@ public static class PresencePingCodec
         return buf;
     }
 
-    public static bool TryParse(ReadOnlySpan<byte> datagram, out Guid networkId, out string nickname,
+    public static bool TryParse(ReadOnlySpan<byte> datagram, out CompressedNetworkId networkId, out string nickname,
         out int dataUdpPort, out LinkTechnologyPreset advertisedLink,
         out PresencePeerCapabilities advertisedCapabilities)
     {
-        networkId = Guid.Empty;
+        networkId = CompressedNetworkId.Empty;
         nickname = "";
         dataUdpPort = DefaultDataUdpPort;
         advertisedLink = LinkTechnologyPreset.Unlimited;
         advertisedCapabilities = PresencePeerCapabilities.Chat;
 
-        if (datagram.Length < 17 || datagram[0] != FramePresencePing)
+        if (datagram.Length < 1 + CompressedNetworkId.WireLength || datagram[0] != FramePresencePing)
             return false;
 
-        networkId = new Guid(datagram.Slice(1, 16));
-        if (datagram.Length == 17)
+        networkId = CompressedNetworkId.FromWireBytes(datagram.Slice(1, CompressedNetworkId.WireLength));
+        if (datagram.Length == 1 + CompressedNetworkId.WireLength)
             return true;
 
-        if (datagram.Length < 19)
+        if (datagram.Length < 15)
             return false;
 
-        var nickLen = BinaryPrimitives.ReadUInt16BigEndian(datagram.Slice(17, 2));
+        var nickLen = BinaryPrimitives.ReadUInt16BigEndian(datagram.Slice(13, 2));
         if (nickLen > MaxNicknameUtf8Bytes)
             return false;
 
-        if (datagram.Length < 19 + nickLen)
+        if (datagram.Length < 15 + nickLen)
             return false;
 
         try
         {
-            nickname = Encoding.UTF8.GetString(datagram.Slice(19, nickLen));
+            nickname = Encoding.UTF8.GetString(datagram.Slice(15, nickLen));
         }
         catch
         {
             return false;
         }
 
-        if (datagram.Length == 19 + nickLen)
+        if (datagram.Length == 15 + nickLen)
             return true;
 
-        var afterNick = 19 + nickLen;
+        var afterNick = 15 + nickLen;
         if (datagram.Length == afterNick + 2)
         {
             dataUdpPort = BinaryPrimitives.ReadUInt16BigEndian(datagram.Slice(afterNick, 2));

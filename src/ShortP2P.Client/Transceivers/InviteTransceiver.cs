@@ -66,8 +66,7 @@ public sealed class InviteTransceiver(ITransport transport, int udpPort = ChatIn
     {
         if (!message.RawPayload.IsEmpty)
             return message.RawPayload.ToArray();
-        var nid = CompressedNetworkId.FromGuid(message.InitiatorNetworkId);
-        return ChatInviteCodec.Build(message.Nickname, nid, message.RsaPublicKeyJson,
+        return ChatInviteCodec.Build(message.Nickname, message.InitiatorNetworkId, message.RsaPublicKeyJson,
             message.DataHost, message.DataPort);
     }
 
@@ -78,10 +77,10 @@ public sealed class InviteTransceiver(ITransport transport, int udpPort = ChatIn
     {
         if (!_started)
             return;
-        if (!ChatInviteCodec.TryParse(msg.Payload.Span, out var peerGuid, out var nick, out var pub,
+        if (!ChatInviteCodec.TryParse(msg.Payload.Span, out var peerId, out var nick, out var pub,
                 out var host, out var port))
             return;
-        var invite = new InviteMessage(peerGuid, nick, pub, host, port, msg.Payload, msg.RemoteAddress);
+        var invite = new InviteMessage(peerId, nick, pub, host, port, msg.Payload, msg.RemoteAddress);
         try
         {
             GotData?.Invoke(this, invite);

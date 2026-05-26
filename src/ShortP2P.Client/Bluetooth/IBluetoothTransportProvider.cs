@@ -1,3 +1,4 @@
+using ShortP2P.Auth.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Transport.Abstractions;
 
@@ -8,7 +9,7 @@ public interface IBluetoothTransportProvider
 {
     ITransport? Current { get; }
 
-    void SetLocalNetworkId(Guid? networkId);
+    void SetLocalNetworkId(CompressedNetworkId? networkId);
 
     void ApplySettings(P2pRoutingSettings settings);
 }

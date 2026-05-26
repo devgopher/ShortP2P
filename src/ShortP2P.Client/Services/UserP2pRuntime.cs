@@ -399,7 +399,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             var user = _auth.CurrentUser;
             if (user == null)
                 return;
-            var peerShort = CompressedNetworkId.FromGuid(invite.InitiatorNetworkId).ToShortString();
+            var peerShort = invite.InitiatorNetworkId.ToShortString();
             var chat = await _chats.FindChatByPeerNetworkIdAsync(user.Id, peerShort).ConfigureAwait(false);
             if (chat == null)
                 return;
@@ -534,7 +534,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         Settings.SuggestBluetoothPairing = persisted.SuggestBluetoothPairing;
         Settings.TrafficSavingEnabled = persisted.TrafficSavingEnabled;
         Settings.AdvertisedPeerCapabilities = persisted.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
-        _bluetooth?.SetLocalNetworkId(CompressedNetworkId.FromShortString(user.NetworkIdShort).Value);
+        _bluetooth?.SetLocalNetworkId(CompressedNetworkId.FromShortString(user.NetworkIdShort));
         _bluetooth?.ApplySettings(Settings);
 
         // Инвайты (отдельный UDP) должны работать даже если presence/LAN bind на Android не удался.
@@ -582,7 +582,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         if (peer.TransportKind is not TransportKind.Udp and not TransportKind.Bluetooth)
             return;
 
-        var shortId = CompressedNetworkId.FromGuid(peer.NetworkId).ToShortString();
+        var shortId = peer.NetworkId.ToShortString();
         var chat = await _chats.FindChatByPeerNetworkIdAsync(user.Id, shortId).ConfigureAwait(false);
         if (chat == null)
             return;

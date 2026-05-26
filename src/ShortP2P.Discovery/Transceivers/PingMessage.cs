@@ -1,3 +1,4 @@
+using ShortP2P.Auth.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Transport.Abstractions;
 
@@ -7,7 +8,7 @@ namespace ShortP2P.Discovery.Transceivers;
 ///     Распарсенный presence ping (frame 0x31) с метаданными отправителя.
 /// </summary>
 public sealed class PingMessage(
-    Guid peerNetworkId,
+    CompressedNetworkId peerNetworkId,
     string nickname,
     int peerDataUdpPort,
     LinkTechnologyPreset advertisedLink,
@@ -15,7 +16,7 @@ public sealed class PingMessage(
     ReadOnlyMemory<byte> rawPayload,
     TransportAddress remoteAddress)
 {
-    public Guid PeerNetworkId { get; } = peerNetworkId;
+    public CompressedNetworkId PeerNetworkId { get; } = peerNetworkId;
     public string Nickname { get; } = nickname;
     public int PeerDataUdpPort { get; } = peerDataUdpPort;
     public LinkTechnologyPreset AdvertisedLink { get; } = advertisedLink;

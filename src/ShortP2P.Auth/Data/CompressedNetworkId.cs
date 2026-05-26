@@ -1,47 +1,57 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
+
 namespace ShortP2P.Auth.Data;
 
 /// <summary>
-///     Уникальный номер абонента в сети: 16 байт (UUID в бинарном виде), для UI — короткая base64url-строка.
+///     Уникальный номер абонента в сети: 12 байт (wire), для UI — base64url-строка (~16 символов).
 /// </summary>
-public readonly struct CompressedNetworkId(Guid value) : IEquatable<CompressedNetworkId>
+public readonly struct CompressedNetworkId : IEquatable<CompressedNetworkId>, IComparable<CompressedNetworkId>
 {
-    public Guid Value { get; } = value;
+    public const int WireLength = 12;
+
+    private readonly ulong _part0;
+    private readonly uint _part1;
+
+    public static CompressedNetworkId Empty => default;
 
     public static CompressedNetworkId New()
     {
-        return new CompressedNetworkId(Guid.NewGuid());
-    }
-
-    public static CompressedNetworkId FromGuid(Guid g)
-    {
-        return new CompressedNetworkId(g);
+        Span<byte> buf = stackalloc byte[WireLength];
+        RandomNumberGenerator.Fill(buf);
+        return FromWireBytes(buf);
     }
 
     public static CompressedNetworkId FromWireBytes(ReadOnlySpan<byte> bytes)
     {
-        return bytes.Length != 16
-            ? throw new ArgumentException("Wire form must be exactly 16 bytes.", nameof(bytes))
-            : new CompressedNetworkId(new Guid(bytes));
-    }
-
-    public bool TryWriteBytes(Span<byte> destination)
-    {
-        return Value.TryWriteBytes(destination);
+        if (bytes.Length != WireLength)
+            throw new ArgumentException($"Wire form must be exactly {WireLength} bytes.", nameof(bytes));
+        return new CompressedNetworkId(
+            BinaryPrimitives.ReadUInt64LittleEndian(bytes),
+            BinaryPrimitives.ReadUInt32LittleEndian(bytes[8..]));
     }
 
     public byte[] ToWireBytes()
     {
-        var b = new byte[16];
-        return !Value.TryWriteBytes(b) ? throw new InvalidOperationException("Failed to serialize Guid.") : b;
+        var buf = new byte[WireLength];
+        TryWriteBytes(buf);
+        return buf;
     }
 
-    /// <summary>
-    ///     Сжатое отображение для подписей и списков (безопасно для URL).
-    /// </summary>
+    public bool TryWriteBytes(Span<byte> destination)
+    {
+        if (destination.Length < WireLength)
+            return false;
+        BinaryPrimitives.WriteUInt64LittleEndian(destination, _part0);
+        BinaryPrimitives.WriteUInt32LittleEndian(destination[8..], _part1);
+        return true;
+    }
+
     public string ToShortString()
     {
-        Span<byte> buf = stackalloc byte[16];
-        return !Value.TryWriteBytes(buf) ? throw new InvalidOperationException() : ToBase64Url(buf);
+        Span<byte> buf = stackalloc byte[WireLength];
+        TryWriteBytes(buf);
+        return ToBase64Url(buf);
     }
 
     public static CompressedNetworkId FromShortString(string text)
@@ -51,34 +61,30 @@ public readonly struct CompressedNetworkId(Guid value) : IEquatable<CompressedNe
         return FromWireBytes(bytes);
     }
 
-    public static bool operator ==(CompressedNetworkId a, CompressedNetworkId b)
+    public bool IsEmpty => _part0 == 0 && _part1 == 0;
+
+    public int CompareTo(CompressedNetworkId other)
     {
-        return a.Value == b.Value;
+        var c = _part0.CompareTo(other._part0);
+        return c != 0 ? c : _part1.CompareTo(other._part1);
     }
 
-    public static bool operator !=(CompressedNetworkId a, CompressedNetworkId b)
-    {
-        return a.Value != b.Value;
-    }
+    public static bool operator ==(CompressedNetworkId a, CompressedNetworkId b) => a.Equals(b);
 
-    public bool Equals(CompressedNetworkId other)
-    {
-        return Value.Equals(other.Value);
-    }
+    public static bool operator !=(CompressedNetworkId a, CompressedNetworkId b) => !a.Equals(b);
 
-    public override bool Equals(object? obj)
-    {
-        return obj is CompressedNetworkId other && Equals(other);
-    }
+    public bool Equals(CompressedNetworkId other) => _part0 == other._part0 && _part1 == other._part1;
 
-    public override int GetHashCode()
-    {
-        return Value.GetHashCode();
-    }
+    public override bool Equals(object? obj) => obj is CompressedNetworkId other && Equals(other);
 
-    public override string ToString()
+    public override int GetHashCode() => HashCode.Combine(_part0, _part1);
+
+    public override string ToString() => IsEmpty ? "" : ToShortString();
+
+    private CompressedNetworkId(ulong part0, uint part1)
     {
-        return ToShortString();
+        _part0 = part0;
+        _part1 = part1;
     }
 
     private static string ToBase64Url(ReadOnlySpan<byte> data)
@@ -101,7 +107,8 @@ public readonly struct CompressedNetworkId(Guid value) : IEquatable<CompressedNe
         }
 
         var bytes = Convert.FromBase64String(t);
-        
-        return bytes.Length != 16 ? throw new FormatException("Decoded id must be 16 bytes.") : bytes;
+        return bytes.Length != WireLength
+            ? throw new FormatException($"Decoded id must be {WireLength} bytes.")
+            : bytes;
     }
 }

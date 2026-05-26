@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using ShortP2P.Auth.Data;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
 
@@ -12,10 +13,10 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 /// <param name="LocalAdapterBluetoothAddress">
 ///     MAC выбранного радио (ulong WinRT). <see langword="null" /> — адаптер по умолчанию.
 /// </param>
-/// <param name="LocalNetworkId">NetworkId hint в GATT Service Data и Manufacturer Data.</param>
+/// <param name="LocalNetworkId">NetworkId (12 байт wire) в GATT Service Data и Manufacturer Data.</param>
 /// <param name="Logger">Опциональный логгер (реклама, publisher, приём ADV).</param>
 public readonly record struct WindowsBluetoothTransportOptions(
     bool GattDiscoverable = true,
     ulong? LocalAdapterBluetoothAddress = null,
-    Guid? LocalNetworkId = null,
+    CompressedNetworkId? LocalNetworkId = null,
     ILogger? Logger = null);

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ShortP2P.Auth.Data;
 
 namespace ShortP2P.Discovery.RouteTables;
 
@@ -18,7 +19,7 @@ public sealed class PeerChain
     /// <summary>
     ///     Сетевой id конечного узла цепочки.
     /// </summary>
-    public Guid TargetNetworkId { get; set; }
+    public CompressedNetworkId TargetNetworkId { get; set; }
 
     /// <summary>
     ///     Сигнатура цепочки для дедупликации.

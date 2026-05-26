@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using ShortP2P.Auth.Data;
 using ShortP2P.Discovery.RouteTables;
 
 namespace ShortP2P.Discovery.Gossip;
@@ -12,7 +13,7 @@ public static class RouteTableWireClient
     /// <returns>Маршруты и признак усечения или <see langword="null" /> по таймауту.</returns>
     public static async Task<IReadOnlyList<Route>> QueryRoutesAsync(
         IPEndPoint remoteHost,
-        Guid localSenderNetworkId,
+        CompressedNetworkId localSenderNetworkId,
         TimeSpan waitTimeout,
         CancellationToken cancellationToken = default)
     {

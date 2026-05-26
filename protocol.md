@@ -6,9 +6,10 @@
 
 ## 1. Идентификация пиров
 
-- **NetworkId** — 16 байт в wire-формате (стандартный UUID `Guid` в порядке байт платформы .NET при сериализации в буфер).
-- В UI и в JSON QR используется **короткая строка** (`CompressedNetworkId.ToShortString()`): base64url от 16 байт UUID (без padding).
-- Сравнение ролей в крипто-сессии чата: лексикографическое сравнение **бинарного представления Guid** (как `Guid.CompareTo`): пир с **меньшим** NetworkId — **лидер** RSA-handshake; пир с **большим** — только запрос установки сессии (см. §6).
+- **NetworkId** — **12 байт** в wire-формате (случайные октеты, `CompressedNetworkId.WireLength`).
+- В UI и в JSON QR — **короткая строка** (`CompressedNetworkId.ToShortString()`): base64url от 12 байт (без padding, ~16 символов).
+- **BLE-реклама**: Manufacturer `[0x02][12 байт]`, GATT Service Data — `12 байт` (UUID сервиса в AD отдельно).
+- Сравнение ролей в крипто-сессии чата: лексикографическое сравнение **12 байт** (`CompressedNetworkId.CompareTo`): пир с **меньшим** NetworkId — **лидер** RSA-handshake; пир с **большим** — только запрос установки сессии (см. §6).
 
 ---
 

@@ -49,7 +49,7 @@ public sealed class LocalNetworkScanner(
 
     private volatile bool _scanSessionActive;
 
-    private readonly ConcurrentDictionary<Guid, DiscoveredLocalPeer> _entries = new();
+    private readonly ConcurrentDictionary<CompressedNetworkId, DiscoveredLocalPeer> _entries = new();
     private readonly object _snapshotSync = new();
     private IReadOnlyList<DiscoveredLocalPeer> _snapshot = [];
 
@@ -96,10 +96,10 @@ public sealed class LocalNetworkScanner(
     {
         if (string.IsNullOrWhiteSpace(peerNetworkIdShort))
             return false;
-        Guid id;
+        CompressedNetworkId id;
         try
         {
-            id = CompressedNetworkId.FromShortString(peerNetworkIdShort.Trim()).Value;
+            id = CompressedNetworkId.FromShortString(peerNetworkIdShort.Trim());
         }
         catch (FormatException)
         {
@@ -404,7 +404,7 @@ public sealed class LocalNetworkScanner(
         var localPeer = _localPeer;
         if (localPeer == null)
             return;
-        if (msg.PeerNetworkId == localPeer.NetworkId.Value)
+        if (msg.PeerNetworkId == localPeer.NetworkId)
             return;
 
         if (msg.RemoteAddress.Kind == TransportKind.Bluetooth)
@@ -512,7 +512,7 @@ public sealed class LocalNetworkScanner(
             return false;
 
         var localPeer = _localPeer;
-        if (localPeer != null && responderId == localPeer.NetworkId.Value)
+        if (localPeer != null && responderId == localPeer.NetworkId)
             return true;
 
         if (remote.Kind != TransportKind.Udp)
@@ -555,19 +555,19 @@ public sealed class LocalNetworkScanner(
         var localPeer = _localPeer;
         if (localPeer == null)
             return true;
-        var myGuid = localPeer.NetworkId.Value;
+        var myId = localPeer.NetworkId;
 
-        if (sender == myGuid)
+        if (sender == myId)
             return true;
 
-        if (target != Guid.Empty && target != myGuid)
+        if (!target.IsEmpty && target != myId)
             return true;
 
         var nick = string.IsNullOrWhiteSpace(localPeer.Nickname) ? "?" : localPeer.Nickname.Trim();
         var port = localPeer.DataUdpPort is >= 1 and <= 65535
             ? localPeer.DataUdpPort
             : PresencePingCodec.DefaultDataUdpPort;
-        var ack = GossipWireCodec.BuildAck(nonce, myGuid, port, nick);
+        var ack = GossipWireCodec.BuildAck(nonce, myId, port, nick);
         await replyTransport.SendAsync(ack, remote, cancellationToken).ConfigureAwait(false);
         return true;
     }
@@ -581,9 +581,9 @@ public sealed class LocalNetworkScanner(
         var localPeer = _localPeer;
         if (localPeer == null)
             return true;
-        var myGuid = localPeer.NetworkId.Value;
+        var myId = localPeer.NetworkId;
 
-        if (sender == myGuid)
+        if (sender == myId)
             return true;
 
         var caps = routingSettings.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
@@ -603,7 +603,7 @@ public sealed class LocalNetworkScanner(
             }
         }
 
-        var reply = RouteTableWireCodec.BuildReply(nonce, myGuid, routes);
+        var reply = RouteTableWireCodec.BuildReply(nonce, myId, routes);
         await replyTransport.SendAsync(reply, remote, cancellationToken).ConfigureAwait(false);
         return true;
     }
@@ -611,7 +611,7 @@ public sealed class LocalNetworkScanner(
     private void OnDiscoveryPingReceived(DiscoveredLocalPeer peer)
     {
         discoveryPingStore?.Write(
-            new PeerIdentity(peer.Nickname, new CompressedNetworkId(peer.NetworkId), peer.PeerDataUdpPort),
+            new PeerIdentity(peer.Nickname, peer.NetworkId, peer.PeerDataUdpPort),
             peer.SourceAddress, peer.LastSeenUtc);
         _entries.AddOrUpdate(peer.NetworkId, peer, (_, _) => peer);
         if (_scanSessionActive)
@@ -663,7 +663,7 @@ public sealed class LocalNetworkScanner(
             EnsurePublicIpv4InPresenceTargets();
             var caps = routingSettings.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
             var payload = PresencePingCodec.Build(
-                localPeer.NetworkId.Value,
+                localPeer.NetworkId,
                 localPeer.Nickname,
                 localPeer.DataUdpPort,
                 routingSettings.LinkTechnology,
@@ -789,7 +789,7 @@ public sealed class LocalNetworkScanner(
         } while (nonce == 0);
 
         RegisterGossipBroadcastNonce(nonce);
-        var probe = GossipWireCodec.BuildProbe(nonce, localPeer.NetworkId.Value, Guid.Empty);
+        var probe = GossipWireCodec.BuildProbe(nonce, localPeer.NetworkId, CompressedNetworkId.Empty);
 
         foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(GossipWireCodec.UdpPort))
         {

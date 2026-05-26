@@ -138,9 +138,9 @@ public sealed class AndroidBluetoothTransport : ITransport
                     .AddServiceUuid(new ParcelUuid(ServiceUuidJava))!
                     .Build();
                 var scanRspBuilder = new AdvertiseData.Builder()!;
-                if (_options.LocalNetworkId is { } networkId)
+                if (_options.LocalNetworkId is { } networkId && !networkId.IsEmpty)
                 {
-                    var payload = BleShortP2PGattProtocol.BuildManufacturerNetworkIdHintPayload(networkId);
+                    var payload = BleShortP2PGattProtocol.BuildManufacturerNetworkIdPayload(networkId);
                     scanRspBuilder.AddManufacturerData(BleShortP2PGattProtocol.ManufacturerCompanyId, payload)!;
                 }
 

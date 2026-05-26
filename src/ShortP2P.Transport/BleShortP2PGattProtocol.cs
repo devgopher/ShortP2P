@@ -1,157 +1,110 @@
 using System.Buffers.Binary;
+using ShortP2P.Auth.Data;
 
 namespace ShortP2P.Transport;
 
 /// <summary>
 ///     Общий BLE GATT-протокол ShortP2P (custom service, без OTS). UUID совпадают на Windows и Android.
 /// </summary>
-/// <remarks>
-///     <para><b>Дуплекс: две характеристики на GATT Server (peripheral)</b></para>
-///     <list type="bullet">
-///         <item>
-///             <see cref="PeerRxCharacteristicUuid" /> — <b>приём</b> на сервере: Central пишет (Write /
-///             Write Without Response). Локальный <c>ITransport.Inbound</c>.
-///         </item>
-///         <item>
-///             <see cref="PeerTxCharacteristicUuid" /> — <b>передача</b> с сервера: Notify/Indicate на
-///             подписанный Central. Удалённый Central подписывается (CCCD) и получает данные в
-///             <c>ValueChanged</c> / <c>OnCharacteristicChanged</c>.
-///         </item>
-///     </list>
-///     <para>
-///         <b>Исходящий Send (локальный Central):</b> запись в <see cref="PeerRxCharacteristicUuid" /> пира.
-///         <b>Входящий приём:</b> Write на локальный RX и/или Notify с <see cref="PeerTxCharacteristicUuid" /> пира
-///         (после подписки при подключении).
-///     </para>
-///     <para>
-///         Симметричный чат: у каждого узла поднят Server (RX+TX) и клиент к пиру (write в RX пира,
-///         subscribe на TX пира).
-///     </para>
-/// </remarks>
 public static class BleShortP2PGattProtocol
 {
-    /// <summary>Custom ShortP2P service (128-bit UUID).</summary>
     public static readonly Guid ServiceUuid = Guid.Parse("9FE8E58B-AF85-4D91-B245-2B40EA0439C7");
-
-    /// <summary>Приём на peripheral: Central → Write → сервер.</summary>
     public static readonly Guid PeerRxCharacteristicUuid = Guid.Parse("8DFE6F10-6CB7-4E73-A918-DC47AC34D9E9");
-    
-    /// <summary>Передача с peripheral: сервер → Notify → Central (нужна подписка CCCD).</summary>
     public static readonly Guid PeerTxCharacteristicUuid = Guid.Parse("7CF03A12-8B5E-4D91-B245-2B40EA0439C8");
 
-    /// <summary>Magic «SP2C» для опционального прикладного чанка поверх GATT.</summary>
     public const uint ApplicationChunkMagic = 0x53503243;
-
     public const int ApplicationChunkHeaderLength = 16;
 
-    /// <summary>Длина NetworkId в GATT Service Data (Guid wire, 16 байт).</summary>
-    public const int GattServiceDataNetworkIdLength = 16;
+    public const int GattServiceDataNetworkIdLength = CompressedNetworkId.WireLength;
 
-    /// <summary>
-    ///     Company ID для Manufacturer Data (производная от префикса <see cref="ServiceUuid" />).
-    ///     Укладывается в legacy scan response вместе с 16-байтным NetworkId.
-    /// </summary>
     public const ushort ManufacturerCompanyId = 0xE58B;
 
     private static ReadOnlySpan<byte> ManufacturerMagic => "SP2N"u8;
 
-    public const int ManufacturerNetworkIdPayloadLength = 4 + GattServiceDataNetworkIdLength;
+    public const byte ManufacturerPayloadTypeNetworkId = 0x02;
 
-    /// <summary>Manufacturer v2: тип payload — 8-байтный hint (первые байты open wire-Guid).</summary>
-    public const byte ManufacturerPayloadTypeNetworkIdHint = 0x01;
+    public const int ManufacturerNetworkIdPayloadLength = 1 + GattServiceDataNetworkIdLength;
 
-    public const int ManufacturerNetworkIdHintLength = 8;
+    public const int ManufacturerLegacyNetworkIdPayloadLength = 4 + 16;
 
-    public const int ManufacturerNetworkIdHintPayloadLength = 1 + ManufacturerNetworkIdHintLength;
-
-    /// <summary>Manufacturer v2: [type=0x01][hint 8 байт]. Полный NetworkId — по GATT после connect.</summary>
-    public static byte[] BuildManufacturerNetworkIdHintPayload(Guid networkId)
+    public static byte[] BuildManufacturerNetworkIdPayload(CompressedNetworkId networkId)
     {
-        if (networkId == Guid.Empty)
-            throw new ArgumentException("NetworkId must not be empty.", nameof(networkId));
-        var buf = new byte[ManufacturerNetworkIdHintPayloadLength];
-        buf[0] = ManufacturerPayloadTypeNetworkIdHint;
-        if (!TryWriteNetworkIdHint(networkId, buf.AsSpan(1)))
-            throw new InvalidOperationException("Failed to serialize NetworkId hint.");
-        return buf;
-    }
-
-    public static bool TryWriteNetworkIdHint(Guid networkId, Span<byte> destination)
-    {
-        if (destination.Length < ManufacturerNetworkIdHintLength || networkId == Guid.Empty)
-            return false;
-        Span<byte> wire = stackalloc byte[GattServiceDataNetworkIdLength];
-        if (!networkId.TryWriteBytes(wire))
-            return false;
-        wire.Slice(0, ManufacturerNetworkIdHintLength).CopyTo(destination);
-        return true;
-    }
-
-    public static bool NetworkIdHintMatches(Guid networkId, ReadOnlySpan<byte> hint)
-    {
-        if (hint.Length != ManufacturerNetworkIdHintLength)
-            return false;
-        Span<byte> expected = stackalloc byte[ManufacturerNetworkIdHintLength];
-        return TryWriteNetworkIdHint(networkId, expected) && expected.SequenceEqual(hint);
-    }
-
-    public static bool TryParseManufacturerNetworkIdHint(ushort companyId, ReadOnlySpan<byte> data,
-        out byte[] hint)
-    {
-        hint = [];
-        if (companyId != ManufacturerCompanyId || data.Length < ManufacturerNetworkIdHintPayloadLength)
-            return false;
-        if (data[0] != ManufacturerPayloadTypeNetworkIdHint)
-            return false;
-        hint = data.Slice(1, ManufacturerNetworkIdHintLength).ToArray();
-        return true;
-    }
-
-    /// <summary>Manufacturer Data v1 (legacy): magic «SP2N» + NetworkId (16 байт wire Guid).</summary>
-    public static byte[] BuildManufacturerNetworkIdPayload(Guid networkId)
-    {
-        if (networkId == Guid.Empty)
+        if (networkId.IsEmpty)
             throw new ArgumentException("NetworkId must not be empty.", nameof(networkId));
         var buf = new byte[ManufacturerNetworkIdPayloadLength];
-        ManufacturerMagic.CopyTo(buf);
-        if (!networkId.TryWriteBytes(buf.AsSpan(4)))
+        buf[0] = ManufacturerPayloadTypeNetworkId;
+        if (!networkId.TryWriteBytes(buf.AsSpan(1)))
             throw new InvalidOperationException("Failed to serialize NetworkId.");
         return buf;
     }
 
-    public static bool TryParseManufacturerNetworkId(ushort companyId, ReadOnlySpan<byte> data, out Guid networkId)
+    public static bool TryParseManufacturerNetworkIdPayload(ushort companyId, ReadOnlySpan<byte> data,
+        out CompressedNetworkId networkId)
     {
-        networkId = Guid.Empty;
+        networkId = CompressedNetworkId.Empty;
         if (companyId != ManufacturerCompanyId || data.Length < ManufacturerNetworkIdPayloadLength)
+            return false;
+        if (data[0] != ManufacturerPayloadTypeNetworkId)
+            return false;
+        networkId = CompressedNetworkId.FromWireBytes(data.Slice(1, GattServiceDataNetworkIdLength));
+        return !networkId.IsEmpty;
+    }
+
+    public static byte[] BuildManufacturerLegacyNetworkIdPayload(CompressedNetworkId networkId)
+    {
+        if (networkId.IsEmpty)
+            throw new ArgumentException("NetworkId must not be empty.", nameof(networkId));
+        var buf = new byte[ManufacturerLegacyNetworkIdPayloadLength];
+        ManufacturerMagic.CopyTo(buf);
+        Span<byte> wire = stackalloc byte[16];
+        networkId.TryWriteBytes(wire);
+        wire.CopyTo(buf.AsSpan(4, 12));
+        return buf;
+    }
+
+    public static bool TryParseManufacturerLegacyNetworkId(ushort companyId, ReadOnlySpan<byte> data,
+        out CompressedNetworkId networkId)
+    {
+        networkId = CompressedNetworkId.Empty;
+        if (companyId != ManufacturerCompanyId || data.Length < ManufacturerLegacyNetworkIdPayloadLength)
             return false;
         if (!data.Slice(0, 4).SequenceEqual(ManufacturerMagic))
             return false;
-        networkId = new Guid(data.Slice(4, GattServiceDataNetworkIdLength));
-        return networkId != Guid.Empty;
+        networkId = CompressedNetworkId.FromWireBytes(data.Slice(4, 12));
+        return !networkId.IsEmpty;
     }
 
-    public static bool TryParseGattServiceDataNetworkIdHint(ReadOnlySpan<byte> serviceData, out byte[] hint)
+    public static bool TryParseGattServiceDataNetworkIdPayload(ReadOnlySpan<byte> serviceData,
+        out CompressedNetworkId networkId)
     {
-        hint = [];
-        if (serviceData.Length < ManufacturerNetworkIdHintPayloadLength
-            || serviceData[0] != ManufacturerPayloadTypeNetworkIdHint)
-            return false;
-        hint = serviceData.Slice(1, ManufacturerNetworkIdHintLength).ToArray();
-        return true;
+        networkId = CompressedNetworkId.Empty;
+        if (serviceData.Length == ManufacturerNetworkIdPayloadLength
+            && serviceData[0] == ManufacturerPayloadTypeNetworkId)
+        {
+            networkId = CompressedNetworkId.FromWireBytes(serviceData.Slice(1, GattServiceDataNetworkIdLength));
+            return !networkId.IsEmpty;
+        }
+
+        return TryParseGattServiceDataNetworkId(serviceData, out networkId);
     }
 
-    /// <summary>Payload для GATT ServiceData (9 байт, UUID сервиса в AD отдельно).</summary>
-    public static byte[] BuildGattServiceDataNetworkIdHint(Guid networkId)
-        => BuildManufacturerNetworkIdHintPayload(networkId);
+    public static byte[] BuildGattServiceDataNetworkId(CompressedNetworkId networkId)
+    {
+        if (networkId.IsEmpty)
+            throw new ArgumentException("NetworkId must not be empty.", nameof(networkId));
+        var buf = new byte[GattServiceDataNetworkIdLength];
+        if (!networkId.TryWriteBytes(buf))
+            throw new InvalidOperationException("Failed to serialize NetworkId.");
+        return buf;
+    }
 
-    /// <summary>
-    ///     Service Data AD 0x21: либо UUID(16)+NetworkId(16), либо только NetworkId(16), если UUID уже в
-    ///     <c>ServiceUuids</c> рекламы.
-    /// </summary>
     public static bool TryParseAdvertisementServiceDataSection(ReadOnlySpan<byte> sectionPayload,
-        ReadOnlySpan<byte> serviceUuidBytes, bool serviceUuidAdvertised, out Guid networkId)
+        ReadOnlySpan<byte> serviceUuidBytes, bool serviceUuidAdvertised, out CompressedNetworkId networkId)
     {
-        networkId = Guid.Empty;
+        networkId = CompressedNetworkId.Empty;
+        if (TryParseGattServiceDataNetworkIdPayload(sectionPayload, out networkId))
+            return true;
+
         if (sectionPayload.Length == GattServiceDataNetworkIdLength)
         {
             if (!serviceUuidAdvertised)
@@ -162,27 +115,16 @@ public static class BleShortP2PGattProtocol
         if (sectionPayload.Length < 16 + GattServiceDataNetworkIdLength
             || !sectionPayload.Slice(0, 16).SequenceEqual(serviceUuidBytes))
             return false;
-        return TryParseGattServiceDataNetworkId(sectionPayload.Slice(16), out networkId);
+        return TryParseGattServiceDataNetworkIdPayload(sectionPayload.Slice(16), out networkId);
     }
 
-    /// <summary>Payload для <see cref="GattServiceProviderAdvertisingParameters.ServiceData" /> (UUID сервиса в AD отдельно).</summary>
-    public static byte[] BuildGattServiceDataNetworkId(Guid networkId)
+    public static bool TryParseGattServiceDataNetworkId(ReadOnlySpan<byte> serviceData, out CompressedNetworkId networkId)
     {
-        if (networkId == Guid.Empty)
-            throw new ArgumentException("NetworkId must not be empty.", nameof(networkId));
-        var buf = new byte[GattServiceDataNetworkIdLength];
-        if (!networkId.TryWriteBytes(buf))
-            throw new InvalidOperationException("Failed to serialize NetworkId.");
-        return buf;
-    }
-
-    public static bool TryParseGattServiceDataNetworkId(ReadOnlySpan<byte> serviceData, out Guid networkId)
-    {
-        networkId = Guid.Empty;
+        networkId = CompressedNetworkId.Empty;
         if (serviceData.Length < GattServiceDataNetworkIdLength)
             return false;
-        networkId = new Guid(serviceData.Slice(0, GattServiceDataNetworkIdLength));
-        return networkId != Guid.Empty;
+        networkId = CompressedNetworkId.FromWireBytes(serviceData.Slice(0, GattServiceDataNetworkIdLength));
+        return !networkId.IsEmpty;
     }
 
     public static byte[] BuildApplicationChunk(uint fullStreamCrc32, int chunkIndex, int totalChunks,

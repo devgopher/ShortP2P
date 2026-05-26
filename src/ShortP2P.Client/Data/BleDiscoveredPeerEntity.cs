@@ -15,8 +15,5 @@ public sealed class BleDiscoveredPeerEntity
 
     public string? PeerNetworkIdShort { get; set; }
 
-    /// <summary>Hex первых 8 байт NetworkId из BLE-рекламы (v2 hint).</summary>
-    public string? PeerNetworkIdHintHex { get; set; }
-
     public string? PeerNickname { get; set; }
 }

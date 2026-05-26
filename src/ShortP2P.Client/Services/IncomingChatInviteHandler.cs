@@ -26,7 +26,7 @@ public static class IncomingChatInviteHandler
         TransportAddress? sourceAddress = null,
         CancellationToken cancellationToken = default)
     {
-        if (!ChatInviteCodec.TryParse(datagram.Span, out var peerGuid, out var nick, out var pubJson, out var host,
+        if (!ChatInviteCodec.TryParse(datagram.Span, out var peerId, out var nick, out var pubJson, out var host,
                 out var port))
             return;
 
@@ -34,7 +34,7 @@ public static class IncomingChatInviteHandler
         if (user == null)
             return;
 
-        if (peerGuid == CompressedNetworkId.FromShortString(user.NetworkIdShort).Value)
+        if (peerId == CompressedNetworkId.FromShortString(user.NetworkIdShort))
             return;
 
         try
@@ -46,7 +46,7 @@ public static class IncomingChatInviteHandler
             return;
         }
 
-        var idShort = CompressedNetworkId.FromGuid(peerGuid).ToShortString();
+        var idShort = peerId.ToShortString();
         var effectiveHost = ResolvePeerHost(host, sourceAddress);
         cancellationToken.ThrowIfCancellationRequested();
         var existing = await repo.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);

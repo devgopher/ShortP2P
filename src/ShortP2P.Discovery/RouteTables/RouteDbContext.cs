@@ -52,7 +52,7 @@ public class RouteDbContext : DbContext
                     pi.Property(p => p.Nickname).IsRequired();
                     pi.Property(p => p.DataUdpPort);
                     pi.Property(p => p.NetworkId)
-                        .HasConversion(id => id.Value, v => CompressedNetworkId.FromGuid(v));
+                        .HasConversion(id => id.ToWireBytes(), v => CompressedNetworkId.FromWireBytes(v));
                 });
             });
         });
@@ -63,6 +63,8 @@ public class RouteDbContext : DbContext
             entity.Property(e => e.SourceRouteId).IsRequired();
             entity.Property(e => e.ChainKey).IsRequired();
             entity.HasIndex(e => e.ChainKey).IsUnique();
+            entity.Property(e => e.TargetNetworkId)
+                .HasConversion(id => id.ToWireBytes(), v => CompressedNetworkId.FromWireBytes(v));
             entity.HasIndex(e => e.TargetNetworkId);
             entity.Property(e => e.UpdatedAtUtc).IsRequired();
             entity.OwnsMany(e => e.PeerChainNodes, node =>
@@ -80,7 +82,7 @@ public class RouteDbContext : DbContext
                     pi.Property(p => p.Nickname).IsRequired();
                     pi.Property(p => p.DataUdpPort);
                     pi.Property(p => p.NetworkId)
-                        .HasConversion(id => id.Value, v => CompressedNetworkId.FromGuid(v));
+                        .HasConversion(id => id.ToWireBytes(), v => CompressedNetworkId.FromWireBytes(v));
                 });
             });
         });

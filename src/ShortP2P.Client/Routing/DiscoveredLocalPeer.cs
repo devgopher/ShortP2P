@@ -1,3 +1,4 @@
+using ShortP2P.Auth.Data;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Client.Routing;
@@ -9,7 +10,7 @@ namespace ShortP2P.Client.Routing;
 /// <param name="AdvertisedLinkTechnology">Пресет канала из пинга отправителя.</param>
 /// <param name="AdvertisedCapabilities">Маска возможностей из пинга; у старых клиентов без поля — только <see cref="PresencePeerCapabilities.Chat" />.</param>
 public sealed record DiscoveredLocalPeer(
-    Guid NetworkId,
+    CompressedNetworkId NetworkId,
     string Nickname,
     TransportAddress SourceAddress,
     TransportKind TransportKind,

@@ -28,15 +28,16 @@ public static class ChatInviteCodec
         if (dataPort is < 1 or > 65535)
             throw new ArgumentOutOfRangeException(nameof(dataPort));
 
-        var bodyLen = 4 + 1 + 16 + 2 + nick.Length + 4 + pub.Length + 2 + host.Length + 2;
+        var bodyLen = 4 + 1 + CompressedNetworkId.WireLength + 2 + nick.Length + 4 + pub.Length + 2 + host.Length + 2;
         var buf = new byte[1 + bodyLen];
         buf[0] = FrameChatInvite;
         var o = 1;
         Magic.CopyTo(buf.AsSpan(o, 4));
         o += 4;
         buf[o++] = WireVersion;
-        networkId.Value.TryWriteBytes(buf.AsSpan(o, 16));
-        o += 16;
+        if (!networkId.TryWriteBytes(buf.AsSpan(o, CompressedNetworkId.WireLength)))
+            throw new InvalidOperationException("Failed to write network id.");
+        o += CompressedNetworkId.WireLength;
         BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(o, 2), (ushort)nick.Length);
         o += 2;
         nick.CopyTo(buf.AsSpan(o, nick.Length));
@@ -53,10 +54,10 @@ public static class ChatInviteCodec
         return buf;
     }
 
-    public static bool TryParse(ReadOnlySpan<byte> datagram, out Guid initiatorNetworkId, out string nickname,
+    public static bool TryParse(ReadOnlySpan<byte> datagram, out CompressedNetworkId initiatorNetworkId, out string nickname,
         out string rsaPublicKeyJson, out string dataHost, out int dataPort)
     {
-        initiatorNetworkId = default;
+        initiatorNetworkId = CompressedNetworkId.Empty;
         nickname = "";
         rsaPublicKeyJson = "";
         dataHost = "";
@@ -64,13 +65,13 @@ public static class ChatInviteCodec
         if (datagram.Length < 2 || datagram[0] != FrameChatInvite)
             return false;
         var d = datagram.Slice(1);
-        if (d.Length < 4 + 1 + 16 + 2 + 4 + 2 + 2)
+        if (d.Length < 4 + 1 + CompressedNetworkId.WireLength + 2 + 4 + 2 + 2)
             return false;
         if (!d.StartsWith(Magic) || d[4] != WireVersion)
             return false;
         var o = 5;
-        initiatorNetworkId = new Guid(d.Slice(o, 16));
-        o += 16;
+        initiatorNetworkId = CompressedNetworkId.FromWireBytes(d.Slice(o, CompressedNetworkId.WireLength));
+        o += CompressedNetworkId.WireLength;
         var nickLen = BinaryPrimitives.ReadUInt16BigEndian(d.Slice(o, 2));
         o += 2;
         if (d.Length < o + nickLen + 4) return false;

@@ -42,7 +42,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
 
     private const byte FrameHandshake = 0x01;
     private const byte FrameCipher = 0x02;
-    /// <summary>Запрос на установку сессии: только от пира с большим NetworkId; тело — 16 байт Guid отправителя.</summary>
+    /// <summary>Запрос на установку сессии: только от пира с большим NetworkId; тело — 12 байт wire id отправителя.</summary>
     private const byte FrameSessionSetupRequest = 0x04;
     public const int MaxMessageChars = 32768;
     private static readonly TimeSpan DecryptRecoveryCooldown = TimeSpan.FromSeconds(10);
@@ -537,7 +537,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
         if (_cts == null)
             throw new InvalidOperationException("Сессия чата не запущена.");
 
-        var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort).Value;
+        var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
         var link = routingSettings?.LinkTechnology ?? LinkTechnologyPreset.Unlimited;
         var ping = PresencePingCodec.Build(nid, user.Nickname, user.DataUdpPort, link);
         var sentUdpTargets = new HashSet<string>(StringComparer.Ordinal);
@@ -802,7 +802,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
         string peerShort;
         try
         {
-            peerShort = CompressedNetworkId.FromGuid(e.Peer.NetworkId).ToShortString();
+            peerShort = e.Peer.NetworkId.ToShortString();
         }
         catch (FormatException)
         {
@@ -1344,11 +1344,11 @@ public sealed class ChatP2pSession : IAsyncDisposable
     {
         if (!IsCryptoSessionLeader())
             return;
-        if (body.Length != 16)
+        if (body.Length != 1 + CompressedNetworkId.WireLength)
             return;
-        var peerGuid = new Guid(body.Span);
-        var expected = CompressedNetworkId.FromShortString(chat.PeerNetworkIdShort.Trim()).Value;
-        if (peerGuid != expected)
+        var peerId = CompressedNetworkId.FromWireBytes(body.Span.Slice(1, CompressedNetworkId.WireLength));
+        var expected = CompressedNetworkId.FromShortString(chat.PeerNetworkIdShort.Trim());
+        if (peerId != expected)
             return;
 
         await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -1566,20 +1566,20 @@ public sealed class ChatP2pSession : IAsyncDisposable
         return false;
     }
 
-    /// <summary>Меньший NetworkId (Guid) — единственный, кто высылает RSA-handshake; больший — только 0x04-запрос.</summary>
+    /// <summary>Меньший NetworkId — единственный, кто высылает RSA-handshake; больший — только 0x04-запрос.</summary>
     private bool IsCryptoSessionLeader()
     {
-        var ours = CompressedNetworkId.FromShortString(user.NetworkIdShort.Trim()).Value;
-        var peer = CompressedNetworkId.FromShortString(chat.PeerNetworkIdShort.Trim()).Value;
+        var ours = CompressedNetworkId.FromShortString(user.NetworkIdShort.Trim());
+        var peer = CompressedNetworkId.FromShortString(chat.PeerNetworkIdShort.Trim());
         return ours.CompareTo(peer) < 0;
     }
 
     private async Task SendSessionSetupRequestPacketAsync(CancellationToken cancellationToken)
     {
         var id = CompressedNetworkId.FromShortString(user.NetworkIdShort.Trim());
-        var buf = new byte[17];
+        var buf = new byte[1 + CompressedNetworkId.WireLength];
         buf[0] = FrameSessionSetupRequest;
-        if (!id.Value.TryWriteBytes(buf.AsSpan(1)))
+        if (!id.TryWriteBytes(buf.AsSpan(1, CompressedNetworkId.WireLength)))
             throw new InvalidOperationException("Failed to write network id.");
         await SendRouteRawAsync(buf, cancellationToken).ConfigureAwait(false);
     }

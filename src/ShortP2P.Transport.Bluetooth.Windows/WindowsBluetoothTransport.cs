@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.Versioning;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
+using ShortP2P.Auth.Data;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 using Windows.Devices.Bluetooth;
@@ -242,16 +243,16 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     }
 
     private static void StartBleGattProviderAdvertising(GattServiceProvider provider, bool discoverable,
-        Guid? localNetworkId, ILogger? logger)
+        CompressedNetworkId? localNetworkId, ILogger? logger)
     {
         var advertising = new GattServiceProviderAdvertisingParameters
         {
             IsDiscoverable = discoverable,
             IsConnectable = true,
         };
-        if (localNetworkId is { } networkId)
+        if (localNetworkId is { } networkId && !networkId.IsEmpty)
         {
-            var payload = BleShortP2PGattProtocol.BuildGattServiceDataNetworkIdHint(networkId);
+            var payload = BleShortP2PGattProtocol.BuildGattServiceDataNetworkId(networkId);
             var writer = new DataWriter();
             writer.WriteBytes(payload);
             advertising.ServiceData = writer.DetachBuffer();
@@ -264,17 +265,17 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     }
 
     /// <summary>
-    ///     Manufacturer Data в scan response (≈24 байта) — надёжный канал NetworkId на Win11 при GATT-рекламе.
+    ///     Manufacturer Data в scan response — надёжный канал полного NetworkId (17 байт) на Win11 при GATT-рекламе.
     /// </summary>
-    private void StartNetworkIdManufacturerAdvertising(Guid? localNetworkId)
+    private void StartNetworkIdManufacturerAdvertising(CompressedNetworkId? localNetworkId)
     {
         StopNetworkIdManufacturerAdvertising();
-        if (localNetworkId is not { } networkId)
+        if (localNetworkId is not { } networkId || networkId.IsEmpty)
             return;
 
         try
         {
-            var payload = BleShortP2PGattProtocol.BuildManufacturerNetworkIdHintPayload(networkId);
+            var payload = BleShortP2PGattProtocol.BuildManufacturerNetworkIdPayload(networkId);
             var writer = new DataWriter();
             writer.WriteBytes(payload);
             var advertisement = new BluetoothLEAdvertisement();

@@ -52,12 +52,6 @@ internal static class BleWindowsAdvertisementHelper
 
     public static bool IdentityImproved(BleAdScanResult previous, BleAdScanResult current)
     {
-        if (!current.HasIdentity)
-            return false;
-        if (!previous.HasIdentity)
-            return true;
-        if (!previous.HasHint && current.HasHint)
-            return true;
-        return previous.LegacyFullNetworkId == null && current.LegacyFullNetworkId != null;
+        return !previous.HasNetworkId && current.HasNetworkId;
     }
 }
