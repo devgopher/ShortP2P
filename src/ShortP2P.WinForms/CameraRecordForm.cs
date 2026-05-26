@@ -1,30 +1,33 @@
-using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.WinForms;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
+using Windows.Graphics.Imaging;
+using Windows.Media.Capture;
+using Windows.Media.Capture.Frames;
+using Windows.Media.MediaProperties;
+using Windows.Storage;
 
 namespace ShortP2P.WinForms;
 
 internal sealed class CameraRecordForm : Form
 {
-    private const string RecorderHost = "camera.shortp2p.local";
     private readonly bool _trafficSavingEnabled;
     private readonly int _captureWidth;
     private readonly int _captureHeight;
-    private readonly int _audioBitrate;
     private readonly string? _videoDeviceId;
-    private readonly WebView2 _web = new() { Dock = DockStyle.Fill };
+    private readonly PictureBox _preview = new() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom };
     private readonly Label _status = new() { Dock = DockStyle.Top, Height = 26, TextAlign = ContentAlignment.MiddleLeft };
     private readonly Button _record = new() { Text = "Record", AutoSize = true };
     private readonly Button _close = new() { Text = "Close", AutoSize = true };
     private readonly System.Windows.Forms.Timer _recordTimer = new() { Interval = 200 };
+    private MediaCapture? _capture;
+    private MediaFrameReader? _frameReader;
+    private StorageFile? _recordFile;
     private DateTime _recordStartedUtc;
     private bool _recording;
-    private string _targetMime = "video/webm";
     private bool _ready;
     private bool _stopping;
-    private string? _webRootPath;
-    private static readonly JsonSerializerOptions WebMsgJson = new() { PropertyNameCaseInsensitive = true };
+    private string? _recordTempPath;
 
     public CameraRecordedVideo? Result { get; private set; }
 
@@ -35,7 +38,6 @@ internal sealed class CameraRecordForm : Form
         var resolution = VideoAttachHelper.GetRequiredResolution(_trafficSavingEnabled);
         _captureWidth = resolution.Width;
         _captureHeight = resolution.Height;
-        _audioBitrate = _trafficSavingEnabled ? VoiceRecordHelper.TrafficSavingBitrate : VoiceRecordHelper.DefaultBitrate;
         Text = "Камера";
         Width = 820;
         Height = 620;
@@ -51,7 +53,7 @@ internal sealed class CameraRecordForm : Form
         buttons.Controls.Add(_close);
         buttons.Controls.Add(_record);
 
-        Controls.Add(_web);
+        Controls.Add(_preview);
         Controls.Add(_status);
         Controls.Add(buttons);
 
@@ -65,23 +67,30 @@ internal sealed class CameraRecordForm : Form
     {
         try
         {
-            await _web.EnsureCoreWebView2Async().ConfigureAwait(true);
-            _web.CoreWebView2.PermissionRequested += OnPermissionRequested;
-            _web.CoreWebView2.Settings.IsZoomControlEnabled = false;
-            _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-            _web.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
-            _webRootPath = Path.Combine(Path.GetTempPath(), $"shortp2p-cam-web-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(_webRootPath);
-            var htmlPath = Path.Combine(_webRootPath, "recorder.html");
-            await File.WriteAllTextAsync(htmlPath, BuildRecorderPageHtml()).ConfigureAwait(true);
-            _web.CoreWebView2.SetVirtualHostNameToFolderMapping(RecorderHost, _webRootPath,
-                CoreWebView2HostResourceAccessKind.Allow);
-            _web.Source = new Uri($"https://{RecorderHost}/recorder.html");
-            await Task.Delay(250).ConfigureAwait(true);
-            await _web.ExecuteScriptAsync("window.shortp2p.startPreview();").ConfigureAwait(true);
+            _capture = new MediaCapture();
+            var settings = new MediaCaptureInitializationSettings
+            {
+                StreamingCaptureMode = StreamingCaptureMode.AudioAndVideo,
+                MediaCategory = MediaCategory.Communications,
+                MemoryPreference = MediaCaptureMemoryPreference.Cpu,
+            };
+            if (!string.IsNullOrWhiteSpace(_videoDeviceId))
+                settings.VideoDeviceId = _videoDeviceId;
+
+            await _capture.InitializeAsync(settings).AsTask().ConfigureAwait(true);
+            var frameSource = FindPreviewFrameSource(_capture);
+            if (frameSource == null)
+                throw new InvalidOperationException("Камера не предоставила видеопоток для предпросмотра.");
+
+            _frameReader = await _capture.CreateFrameReaderAsync(frameSource).AsTask().ConfigureAwait(true);
+            _frameReader.AcquisitionMode = MediaFrameReaderAcquisitionMode.Realtime;
+            _frameReader.FrameArrived += OnPreviewFrameArrived;
+            await _frameReader.StartAsync().AsTask().ConfigureAwait(true);
+
             _ready = true;
+            var audioKbps = (_trafficSavingEnabled ? VoiceRecordHelper.TrafficSavingBitrate : VoiceRecordHelper.DefaultBitrate) / 1000;
             _status.Text =
-                $"Готово: {_captureWidth}x{_captureHeight}, audio {_audioBitrate / 1000} kbit/s. Нажмите Record.";
+                $"Готово: {_captureWidth}x{_captureHeight}, audio ~{audioKbps} kbit/s (MP4). Нажмите Record.";
         }
         catch (Exception ex)
         {
@@ -90,9 +99,80 @@ internal sealed class CameraRecordForm : Form
         }
     }
 
+    private static MediaFrameSource? FindPreviewFrameSource(MediaCapture capture)
+    {
+        foreach (var source in capture.FrameSources.Values)
+        {
+            if (source.Info.MediaStreamType == MediaStreamType.VideoPreview)
+                return source;
+        }
+
+        foreach (var source in capture.FrameSources.Values)
+        {
+            if (source.Info.MediaStreamType == MediaStreamType.VideoRecord)
+                return source;
+        }
+
+        foreach (var source in capture.FrameSources.Values)
+        {
+            if (source.Info.SourceKind == MediaFrameSourceKind.Color)
+                return source;
+        }
+
+        return capture.FrameSources.Values.FirstOrDefault();
+    }
+
+    private void OnPreviewFrameArrived(MediaFrameReader sender, MediaFrameArrivedEventArgs args)
+    {
+        if (IsDisposed || !IsHandleCreated)
+            return;
+
+        using var frame = sender.TryAcquireLatestFrame();
+        var softwareBitmap = frame?.VideoMediaFrame?.SoftwareBitmap;
+        if (softwareBitmap == null)
+            return;
+
+        try
+        {
+            using var bitmap = SoftwareBitmapToBitmap(softwareBitmap);
+            BeginInvoke(() =>
+            {
+                if (IsDisposed)
+                    return;
+                var old = _preview.Image;
+                _preview.Image = (Image)bitmap.Clone();
+                old?.Dispose();
+            });
+        }
+        catch
+        {
+            // ignore preview glitches
+        }
+    }
+
+    private static Bitmap SoftwareBitmapToBitmap(SoftwareBitmap softwareBitmap)
+    {
+        using var converted = SoftwareBitmap.Convert(softwareBitmap, BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied);
+        var bytes = new byte[converted.PixelWidth * converted.PixelHeight * 4];
+        converted.CopyToBuffer(bytes.AsBuffer());
+        var bitmap = new Bitmap(converted.PixelWidth, converted.PixelHeight, PixelFormat.Format32bppArgb);
+        var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+        var data = bitmap.LockBits(rect, ImageLockMode.WriteOnly, bitmap.PixelFormat);
+        try
+        {
+            Marshal.Copy(bytes, 0, data.Scan0, bytes.Length);
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
+        }
+
+        return bitmap;
+    }
+
     private async Task ToggleRecordingAsync()
     {
-        if (!_ready)
+        if (!_ready || _capture == null)
             return;
         if (_recording)
         {
@@ -102,7 +182,14 @@ internal sealed class CameraRecordForm : Form
 
         try
         {
-            await _web.ExecuteScriptAsync($"window.shortp2p.startRecording({_audioBitrate});").ConfigureAwait(true);
+            var folder = await StorageFolder.GetFolderFromPathAsync(Path.GetTempPath()).AsTask().ConfigureAwait(true);
+            _recordFile = await folder
+                .CreateFileAsync($"shortp2p-cam-{Guid.NewGuid():N}.mp4", CreationCollisionOption.ReplaceExisting)
+                .AsTask()
+                .ConfigureAwait(true);
+            _recordTempPath = _recordFile.Path;
+            var profile = CreateEncodingProfile();
+            await _capture.StartRecordToStorageFileAsync(profile, _recordFile).AsTask().ConfigureAwait(true);
             _recording = true;
             _recordStartedUtc = DateTime.UtcNow;
             _record.Text = "Stop";
@@ -113,6 +200,27 @@ internal sealed class CameraRecordForm : Form
         {
             MessageBox.Show(this, ex.Message, "Камера", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
+    }
+
+    private MediaEncodingProfile CreateEncodingProfile()
+    {
+        var audioBitrate = (uint)(_trafficSavingEnabled
+            ? VoiceRecordHelper.TrafficSavingBitrate
+            : VoiceRecordHelper.DefaultBitrate);
+        var videoBitrate = (uint)(_trafficSavingEnabled ? 250_000 : 700_000);
+        var template = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.Wvga);
+        var profile = new MediaEncodingProfile
+        {
+            Audio = AudioEncodingProperties.CreateAac(audioBitrate, 1, 48_000),
+            Video = VideoEncodingProperties.CreateH264(),
+            Container = template.Container,
+        };
+        profile.Video.Width = (uint)_captureWidth;
+        profile.Video.Height = (uint)_captureHeight;
+        profile.Video.Bitrate = videoBitrate;
+        profile.Video.FrameRate.Numerator = 15;
+        profile.Video.FrameRate.Denominator = 1;
+        return profile;
     }
 
     private void UpdateRecordingTime()
@@ -128,7 +236,7 @@ internal sealed class CameraRecordForm : Form
 
     private async Task StopRecordingAsync()
     {
-        if (_stopping)
+        if (_stopping || _capture == null || !_recording)
             return;
         _stopping = true;
         _recording = false;
@@ -136,7 +244,22 @@ internal sealed class CameraRecordForm : Form
         _record.Text = "Record";
         try
         {
-            await _web.ExecuteScriptAsync("window.shortp2p.stopRecording();").ConfigureAwait(true);
+            await _capture.StopRecordAsync().AsTask().ConfigureAwait(true);
+            if (string.IsNullOrWhiteSpace(_recordTempPath) || !File.Exists(_recordTempPath))
+                throw new InvalidOperationException("Файл записи не найден.");
+
+            var bytes = await File.ReadAllBytesAsync(_recordTempPath).ConfigureAwait(true);
+            if (bytes.Length == 0)
+                throw new InvalidOperationException("Запись пуста.");
+
+            Result = new CameraRecordedVideo(bytes, $"camera-{DateTime.UtcNow:yyyyMMdd-HHmmss}.mp4", "video/mp4");
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Камера", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            _status.Text = "Ошибка сохранения записи.";
         }
         finally
         {
@@ -149,11 +272,21 @@ internal sealed class CameraRecordForm : Form
         _recordTimer.Stop();
         try
         {
-            if (_web.CoreWebView2 != null)
+            if (_recording && _capture != null)
+                _ = _capture.StopRecordAsync().AsTask();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            if (_frameReader != null)
             {
-                _web.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
-                _web.CoreWebView2.PermissionRequested -= OnPermissionRequested;
-                _web.CoreWebView2.ClearVirtualHostNameToFolderMapping(RecorderHost);
+                _frameReader.FrameArrived -= OnPreviewFrameArrived;
+                _ = _frameReader.StopAsync().AsTask();
+                _frameReader.Dispose();
             }
         }
         catch
@@ -163,18 +296,20 @@ internal sealed class CameraRecordForm : Form
 
         try
         {
-            _web.Dispose();
+            _capture?.Dispose();
         }
         catch
         {
             // ignore
         }
 
-        if (!string.IsNullOrWhiteSpace(_webRootPath))
+        _preview.Image?.Dispose();
+
+        if (!string.IsNullOrWhiteSpace(_recordTempPath))
         {
             try
             {
-                Directory.Delete(_webRootPath, recursive: true);
+                File.Delete(_recordTempPath);
             }
             catch
             {
@@ -183,156 +318,6 @@ internal sealed class CameraRecordForm : Form
         }
 
         base.OnFormClosed(e);
-    }
-
-    private void OnPermissionRequested(object? sender, CoreWebView2PermissionRequestedEventArgs e)
-    {
-        if (e.PermissionKind is CoreWebView2PermissionKind.Camera or CoreWebView2PermissionKind.Microphone)
-            e.State = CoreWebView2PermissionState.Allow;
-    }
-
-    private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
-    {
-        try
-        {
-            var json = e.TryGetWebMessageAsString();
-            var dto = JsonSerializer.Deserialize<WebMsg>(json, WebMsgJson);
-            if (dto == null)
-                return;
-            if (string.Equals(dto.Type, "error", StringComparison.OrdinalIgnoreCase))
-            {
-                MessageBox.Show(this, dto.Message ?? "Ошибка камеры/микрофона.", "Камера", MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-                _status.Text = "Ошибка доступа к камере или микрофону.";
-                return;
-            }
-
-            if (!string.Equals(dto.Type, "recorded", StringComparison.OrdinalIgnoreCase) ||
-                string.IsNullOrWhiteSpace(dto.Base64))
-                return;
-            var bytes = Convert.FromBase64String(dto.Base64);
-            var mime = string.IsNullOrWhiteSpace(dto.Mime) ? _targetMime : dto.Mime.Trim();
-            var ext = string.Equals(mime, "video/webm", StringComparison.OrdinalIgnoreCase) ? ".webm" : ".bin";
-            Result = new CameraRecordedVideo(bytes, $"camera-{DateTime.UtcNow:yyyyMMdd-HHmmss}{ext}", mime);
-            DialogResult = DialogResult.OK;
-            Close();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "Камера", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
-    }
-
-    private string BuildRecorderPageHtml()
-    {
-        return $$"""
-                <!doctype html>
-                <html>
-                <head>
-                  <meta charset="utf-8"/>
-                  <style>
-                    html,body { margin:0; background:#111; height:100%; }
-                    #v { width:100%; height:100%; object-fit:contain; background:#000; }
-                  </style>
-                </head>
-                <body>
-                  <video id="v" autoplay muted playsinline></video>
-                  <script>
-                    const targetWidth = {{_captureWidth}};
-                    const targetHeight = {{_captureHeight}};
-                    const defaultAudioBps = {{_audioBitrate}};
-                    const preferredDeviceId = {{JsonSerializer.Serialize(_videoDeviceId)}};
-                    let stream = null;
-                    let rec = null;
-                    let chunks = [];
-                    const v = document.getElementById('v');
-
-                    function post(obj) {
-                      window.chrome.webview.postMessage(JSON.stringify(obj));
-                    }
-
-                    async function ensureStream() {
-                      if (stream) return stream;
-                      const videoConstraints = preferredDeviceId
-                        ? { deviceId: { exact: preferredDeviceId }, width: { ideal: targetWidth }, height: { ideal: targetHeight } }
-                        : { width: { ideal: targetWidth }, height: { ideal: targetHeight } };
-                      stream = await navigator.mediaDevices.getUserMedia({
-                        video: videoConstraints,
-                        audio: true
-                      });
-                      v.srcObject = stream;
-                      return stream;
-                    }
-
-                    window.shortp2p = {
-                      async startPreview() {
-                        try {
-                          await ensureStream();
-                        } catch (e) {
-                          post({ type:'error', message: e?.message || String(e) });
-                        }
-                      },
-                      async startRecording(audioBps) {
-                        try {
-                          await ensureStream();
-                          chunks = [];
-                          const opts = {
-                            mimeType: 'video/webm;codecs=vp8,opus',
-                            audioBitsPerSecond: Number(audioBps) || defaultAudioBps
-                          };
-                          rec = new MediaRecorder(stream, opts);
-                          rec.ondataavailable = ev => {
-                            if (ev.data && ev.data.size > 0) chunks.push(ev.data);
-                          };
-                          rec.onstop = async () => {
-                            try {
-                              const blob = new Blob(chunks, { type: 'video/webm' });
-                              const buf = await blob.arrayBuffer();
-                              const bytes = new Uint8Array(buf);
-                              let bin = '';
-                              const step = 0x8000;
-                              for (let i = 0; i < bytes.length; i += step) {
-                                const piece = bytes.subarray(i, i + step);
-                                bin += String.fromCharCode.apply(null, piece);
-                              }
-                              const b64 = btoa(bin);
-                              post({ type:'recorded', mime:'video/webm', base64:b64 });
-                            } catch (e) {
-                              post({ type:'error', message: e?.message || String(e) });
-                            }
-                          };
-                          rec.start();
-                        } catch (e) {
-                          post({ type:'error', message: e?.message || String(e) });
-                        }
-                      },
-                      stopRecording() {
-                        try {
-                          if (rec && rec.state !== 'inactive') rec.stop();
-                        } catch (e) {
-                          post({ type:'error', message: e?.message || String(e) });
-                        }
-                      }
-                    };
-                  </script>
-                </body>
-                </html>
-                """;
-    }
-
-    private sealed class WebMsg
-    {
-        [JsonPropertyName("type")]
-        public string? Type { get; set; }
-
-        [JsonPropertyName("message")]
-        public string? Message { get; set; }
-
-        [JsonPropertyName("base64")]
-        public string? Base64 { get; set; }
-
-        [JsonPropertyName("mime")]
-        public string? Mime { get; set; }
     }
 }
 

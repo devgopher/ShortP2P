@@ -1,4 +1,10 @@
-using Microsoft.Web.WebView2.WinForms;
+using System.Diagnostics;
+using System.Runtime.InteropServices.WindowsRuntime;
+using OpenCvSharp;
+using OpenCvSharp.Extensions;
+using Windows.Media.Core;
+using Windows.Media.Playback;
+using Windows.Storage;
 
 namespace ShortP2P.WinForms;
 
@@ -6,8 +12,17 @@ internal sealed class VideoPlayerForm : Form
 {
     private readonly byte[] _videoBytes;
     private readonly string _fileName;
-    private readonly WebView2 _web = new() { Dock = DockStyle.Fill };
+    private readonly PictureBox _view = new()
+    {
+        Dock = DockStyle.Fill,
+        SizeMode = PictureBoxSizeMode.Zoom,
+        BackColor = Color.Black,
+    };
+    private readonly System.Windows.Forms.Timer _frameTimer = new();
+    private VideoCapture? _capture;
+    private MediaPlayer? _mediaPlayer;
     private string? _tempPath;
+    private bool _ended;
 
     public VideoPlayerForm(byte[] videoBytes, string fileName)
     {
@@ -17,23 +32,47 @@ internal sealed class VideoPlayerForm : Form
         StartPosition = FormStartPosition.CenterParent;
         Width = 760;
         Height = 560;
-        Controls.Add(_web);
-        Shown += async (_, _) => await LoadVideoAsync().ConfigureAwait(true);
+        Controls.Add(_view);
+        _frameTimer.Tick += (_, _) => AdvanceFrame();
+        Shown += async (_, _) => await LoadAsync().ConfigureAwait(true);
     }
 
-    private async Task LoadVideoAsync()
+    private async Task LoadAsync()
     {
         try
         {
-            _tempPath = Path.Combine(Path.GetTempPath(), $"shortp2p-video-{Guid.NewGuid():N}.ogv");
+            var ext = Path.GetExtension(_fileName);
+            if (string.IsNullOrWhiteSpace(ext))
+                ext = ".ogv";
+
+            _tempPath = Path.Combine(Path.GetTempPath(), $"shortp2p-video-{Guid.NewGuid():N}{ext}");
             await File.WriteAllBytesAsync(_tempPath, _videoBytes).ConfigureAwait(true);
-            await _web.EnsureCoreWebView2Async().ConfigureAwait(true);
-            var videoUri = new Uri(_tempPath).AbsoluteUri;
-            var html =
-                "<!doctype html><html><head><meta charset=\"utf-8\"></head><body style=\"margin:0;background:#111;display:flex;justify-content:center;align-items:center;height:100vh;\">" +
-                $"<video controls autoplay style=\"max-width:100%;max-height:100%;\" src=\"{videoUri}\"></video>" +
-                "</body></html>";
-            _web.NavigateToString(html);
+
+            _capture = new VideoCapture(_tempPath);
+            if (!_capture.IsOpened())
+            {
+                OpenExternalPlayer();
+                return;
+            }
+
+            var fps = _capture.Fps;
+            if (fps <= 0 || double.IsNaN(fps) || double.IsInfinity(fps))
+                fps = 15;
+            _frameTimer.Interval = Math.Clamp((int)Math.Round(1000.0 / fps), 15, 200);
+
+            if (await TryStartSystemAudioAsync(_tempPath).ConfigureAwait(true))
+            {
+                _mediaPlayer!.MediaEnded += (_, _) => BeginInvoke(OnPlaybackEnded);
+            }
+
+            if (!ShowFrame())
+            {
+                OpenExternalPlayer();
+                return;
+            }
+
+            _frameTimer.Start();
+            _mediaPlayer?.Play();
         }
         catch (Exception ex)
         {
@@ -42,27 +81,128 @@ internal sealed class VideoPlayerForm : Form
         }
     }
 
-    protected override void OnFormClosed(FormClosedEventArgs e)
+    private async Task<bool> TryStartSystemAudioAsync(string path)
     {
-        base.OnFormClosed(e);
+        if (!IsSystemAudioSupported(path))
+            return false;
+
         try
         {
-            _web.Dispose();
+            var file = await StorageFile.GetFileFromPathAsync(path).AsTask().ConfigureAwait(true);
+            _mediaPlayer = new MediaPlayer();
+            _mediaPlayer.Source = MediaSource.CreateFromStorageFile(file);
+            return true;
+        }
+        catch
+        {
+            _mediaPlayer?.Dispose();
+            _mediaPlayer = null;
+            return false;
+        }
+    }
+
+    private static bool IsSystemAudioSupported(string path)
+    {
+        var ext = Path.GetExtension(path);
+        return ext.Equals(".mp4", StringComparison.OrdinalIgnoreCase)
+               || ext.Equals(".m4v", StringComparison.OrdinalIgnoreCase)
+               || ext.Equals(".mov", StringComparison.OrdinalIgnoreCase)
+               || ext.Equals(".wmv", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void AdvanceFrame()
+    {
+        if (_capture == null || _ended)
+            return;
+
+        if (!ShowFrame())
+        {
+            _frameTimer.Stop();
+            if (_mediaPlayer == null)
+                OnPlaybackEnded();
+        }
+    }
+
+    private bool ShowFrame()
+    {
+        using var frame = new Mat();
+        if (_capture == null || !_capture.Read(frame) || frame.Empty())
+            return false;
+
+        using var bitmap = BitmapConverter.ToBitmap(frame);
+        var previous = _view.Image;
+        _view.Image = (Image)bitmap.Clone();
+        previous?.Dispose();
+        return true;
+    }
+
+    private void OnPlaybackEnded()
+    {
+        if (_ended)
+            return;
+        _ended = true;
+        _frameTimer.Stop();
+        Close();
+    }
+
+    private void OpenExternalPlayer()
+    {
+        _frameTimer.Stop();
+        _capture?.Dispose();
+        _capture = null;
+        _mediaPlayer?.Dispose();
+        _mediaPlayer = null;
+        _view.Image?.Dispose();
+        _view.Image = null;
+
+        if (string.IsNullOrWhiteSpace(_tempPath))
+            return;
+
+        Process.Start(new ProcessStartInfo(_tempPath) { UseShellExecute = true });
+        Controls.Clear();
+        Controls.Add(new Label
+        {
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Text =
+                "Встроенный просмотр недоступен для этого формата.\r\nВидео открыто в проигрывате по умолчанию.",
+        });
+        Width = 420;
+        Height = 140;
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        _frameTimer.Stop();
+        _frameTimer.Dispose();
+        _capture?.Dispose();
+        _capture = null;
+        try
+        {
+            _mediaPlayer?.Pause();
+            _mediaPlayer?.Dispose();
         }
         catch
         {
             // ignore
         }
 
-        if (string.IsNullOrWhiteSpace(_tempPath))
-            return;
-        try
+        _mediaPlayer = null;
+        _view.Image?.Dispose();
+        _view.Image = null;
+
+        if (!string.IsNullOrWhiteSpace(_tempPath))
         {
-            File.Delete(_tempPath);
+            try
+            {
+                File.Delete(_tempPath);
+            }
+            catch
+            {
+                // ignore
+            }
         }
-        catch
-        {
-            // ignore
-        }
+
+        base.OnFormClosed(e);
     }
 }
