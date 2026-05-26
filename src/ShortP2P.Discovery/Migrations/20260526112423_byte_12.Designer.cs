@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ShortP2P.Discovery.RouteTables;
 
@@ -10,9 +11,11 @@ using ShortP2P.Discovery.RouteTables;
 namespace ShortP2P.Discovery.Migrations
 {
     [DbContext(typeof(RouteDbContext))]
-    partial class RouteDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260526112423_byte_12")]
+    partial class byte_12
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.0");
