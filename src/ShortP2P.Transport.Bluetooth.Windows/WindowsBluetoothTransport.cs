@@ -165,8 +165,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         _myBluetoothAddr = await LocalAdapterBluetoothMac.TryGetAdapterAddressAsync().ConfigureAwait(false)
                            ?? 0;
         
-        StartBleGattProviderAdvertising(_bleServiceProvider, _options.GattDiscoverable, _options.LocalNetworkId, _logger); 
-        //StartNetworkIdManufacturerAdvertising(_options.LocalNetworkId);
+        //StartBleGattProviderAdvertising(_bleServiceProvider, _options.GattDiscoverable, _options.LocalNetworkId, _logger); 
+        StartNetworkIdManufacturerAdvertising(_options.LocalNetworkId);
         StartBleShortP2PAdvertisementWatcher();
     }
 
@@ -273,30 +273,31 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
         try
         {
-            //var payload = BleShortP2PGattProtocol.BuildManufacturerNetworkIdPayload(networkId);
-            var payload = new byte[CompressedNetworkId.WireLength];
-            if (!localNetworkId.Value.TryWriteBytes(payload))
-                return;
-            
+            ushort uuid16 = 0xFEFF;
+
+            var adv = new BluetoothLEAdvertisement();
+
+            byte[] sd = new byte[2 + CompressedNetworkId.WireLength];
+            sd[0] = (byte)(uuid16 & 0xFF);
+            sd[1] = (byte)((uuid16 >> 8) & 0xFF);
+            Array.Copy(networkId.ToWireBytes(), 0, sd, 2, CompressedNetworkId.WireLength);
+
             var writer = new DataWriter();
-            writer.WriteBytes(payload);
-            var advertisement = new BluetoothLEAdvertisement();
-            advertisement.ManufacturerData.Add(new BluetoothLEManufacturerData(
-                BleShortP2PGattProtocol.ManufacturerCompanyId, writer.DetachBuffer()));
-            advertisement.ServiceUuids.Add(BleShortP2PGattProtocol.ServiceUuid);
-            
-            advertisement.DataSections.Add(new BluetoothLEAdvertisementDataSection
+            writer.WriteBytes(sd);
+            IBuffer buf = writer.DetachBuffer();
+            writer.Dispose();
+
+            var section = new BluetoothLEAdvertisementDataSection
             {
-                //Data = writer.DetachBuffer(),
-                DataType = BleAdvertisementIdentityParser.AdTypeServiceData128
-            });
-            
-            _networkIdManufacturerPublisher = new BluetoothLEAdvertisementPublisher(advertisement);
-            _manufacturerPublisherStatusHandler = (_, e) =>
-                BleWindowsAdvertisementLog.LogPublisherStatus(_logger, e.Status);
-            _networkIdManufacturerPublisher.StatusChanged += _manufacturerPublisherStatusHandler;
-            _networkIdManufacturerPublisher.Start();
-            BleWindowsAdvertisementLog.LogManufacturerPublisherStarted(_logger, networkId, payload.Length);
+                DataType = 0x16,
+                Data = buf
+            };
+            adv.DataSections.Add(section);
+
+            var pub = new BluetoothLEAdvertisementPublisher(adv);
+            pub.StatusChanged += (s, e) => System.Diagnostics.Debug.WriteLine(e.Status);
+            pub.Start();
+            BleWindowsAdvertisementLog.LogManufacturerPublisherStarted(_logger, networkId, sd.Length);
         }
         catch (Exception ex)
         {

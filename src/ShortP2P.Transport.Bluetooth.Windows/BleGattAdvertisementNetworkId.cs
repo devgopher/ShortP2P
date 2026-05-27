@@ -14,7 +14,7 @@ internal static class BleGattAdvertisementNetworkId
         {
             var bytes = ReadBuffer(md.Data);
             result = BleAdvertisementIdentityParser.Merge(result,
-                BleAdvertisementIdentityParser.ParseManufacturerData((ushort)md.CompanyId, bytes));
+                BleAdvertisementIdentityParser.ParseManufacturerData(md.CompanyId, bytes));
         }
 
         if (result.HasIdentity)
