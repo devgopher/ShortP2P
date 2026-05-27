@@ -289,7 +289,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
             var section = new BluetoothLEAdvertisementDataSection
             {
-                DataType = 0x21,
+                DataType = 0x16,
                 Data = buf
             };
             adv.DataSections.Add(section);
