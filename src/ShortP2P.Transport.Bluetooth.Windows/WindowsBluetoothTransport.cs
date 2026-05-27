@@ -130,7 +130,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         {
             CharacteristicProperties = GattCharacteristicProperties.Write
                                        | GattCharacteristicProperties.WriteWithoutResponse
-                                       | GattCharacteristicProperties.Read,
+                                       | GattCharacteristicProperties.Read
+                                       | GattCharacteristicProperties.Broadcast,
             WriteProtectionLevel = GattProtectionLevel.Plain,
             UserDescription = "ShortP2P BLE RX"
         };
@@ -164,8 +165,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         _myBluetoothAddr = await LocalAdapterBluetoothMac.TryGetAdapterAddressAsync().ConfigureAwait(false)
                            ?? 0;
         
-        StartBleGattProviderAdvertising(_bleServiceProvider, _options.GattDiscoverable, _options.LocalNetworkId, _logger);
-        StartNetworkIdManufacturerAdvertising(_options.LocalNetworkId);
+        StartBleGattProviderAdvertising(_bleServiceProvider, _options.GattDiscoverable, _options.LocalNetworkId, _logger); 
+        //StartNetworkIdManufacturerAdvertising(_options.LocalNetworkId);
         StartBleShortP2PAdvertisementWatcher();
     }
 
@@ -207,18 +208,14 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             return;
         try
         {
-            foreach (var _addr in AlternateBluetoothAddresses(mac))
-            {
-                var dev = await BluetoothLEDevice.FromBluetoothAddressAsync(_addr).AsTask().ConfigureAwait(false);
+            var dev = await BluetoothLEDevice.FromBluetoothAddressAsync(addr).AsTask().ConfigureAwait(false);
 
-                if (dev != null)
-                {
-                    var scanResult = _bleAdvertisementMergeCache.Observe(addr, args.Advertisement);
-                    BleWindowsAdvertisementLog.LogAdvertisementReceived(_logger, addr, macKey, args, scanResult);
-                    if (_bleAdvertisementDeviceCache.TryAdd(macKey, dev))
-                        _logger?.LogInformation("BLE device cached from advertisement: {Mac}", macKey);
-                }
-            }
+            if (dev == null)
+                return;
+            var scanResult = _bleAdvertisementMergeCache.Observe(addr, args.Advertisement);
+            BleWindowsAdvertisementLog.LogAdvertisementReceived(_logger, addr, macKey, args, scanResult);
+            if (_bleAdvertisementDeviceCache.TryAdd(macKey, dev))
+                _logger?.LogInformation("BLE device cached from advertisement: {Mac}", macKey);
         }
         catch
         {
@@ -251,7 +248,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             IsDiscoverable = discoverable,
             IsConnectable = true,
         };
-        if (localNetworkId is { } networkId && !networkId.IsEmpty)
+        if (localNetworkId is { IsEmpty: false } networkId)
         {
             var payload = BleShortP2PGattProtocol.BuildGattServiceDataNetworkId(networkId);
             var writer = new DataWriter();
@@ -290,7 +287,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             
             advertisement.DataSections.Add(new BluetoothLEAdvertisementDataSection
             {
-                Data = writer.DetachBuffer(),
+                //Data = writer.DetachBuffer(),
                 DataType = BleAdvertisementIdentityParser.AdTypeServiceData128
             });
             
