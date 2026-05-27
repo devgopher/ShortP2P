@@ -1,4 +1,3 @@
-using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Storage.Streams;

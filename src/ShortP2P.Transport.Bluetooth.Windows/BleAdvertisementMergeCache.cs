@@ -24,7 +24,7 @@ internal sealed class BleAdvertisementMergeCache
         var parsed = BleGattAdvertisementNetworkId.TryParseFromAdvertisement(advertisement);
         if (!parsed.HasIdentity)
         {
-            return _identityByAddress.TryGetValue(bluetoothAddress, out var prev) ? prev : default;
+            return _identityByAddress.GetValueOrDefault(bluetoothAddress);
         }
 
         var merged = _identityByAddress.AddOrUpdate(bluetoothAddress, parsed,

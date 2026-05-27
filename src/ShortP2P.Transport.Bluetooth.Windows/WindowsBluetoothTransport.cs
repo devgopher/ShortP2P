@@ -13,6 +13,7 @@ using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Devices.Enumeration;
 using Windows.Foundation;
 using Windows.Storage.Streams;
+using Buffer = Windows.Storage.Streams.Buffer;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
 
@@ -275,13 +276,24 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
         try
         {
-            var payload = BleShortP2PGattProtocol.BuildManufacturerNetworkIdPayload(networkId);
+            //var payload = BleShortP2PGattProtocol.BuildManufacturerNetworkIdPayload(networkId);
+            var payload = new byte[CompressedNetworkId.WireLength];
+            if (!localNetworkId.Value.TryWriteBytes(payload))
+                return;
+            
             var writer = new DataWriter();
             writer.WriteBytes(payload);
             var advertisement = new BluetoothLEAdvertisement();
             advertisement.ManufacturerData.Add(new BluetoothLEManufacturerData(
                 BleShortP2PGattProtocol.ManufacturerCompanyId, writer.DetachBuffer()));
             advertisement.ServiceUuids.Add(BleShortP2PGattProtocol.ServiceUuid);
+            
+            advertisement.DataSections.Add(new BluetoothLEAdvertisementDataSection
+            {
+                Data = writer.DetachBuffer(),
+                DataType = BleAdvertisementIdentityParser.AdTypeServiceData128
+            });
+            
             _networkIdManufacturerPublisher = new BluetoothLEAdvertisementPublisher(advertisement);
             _manufacturerPublisherStatusHandler = (_, e) =>
                 BleWindowsAdvertisementLog.LogPublisherStatus(_logger, e.Status);
