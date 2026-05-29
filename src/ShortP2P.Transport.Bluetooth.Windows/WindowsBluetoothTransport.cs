@@ -549,6 +549,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             {
                 try
                 {
+                    _blePeerDevices.Remove(macKey, out device);
                     device.Dispose();
                 }
                 catch
