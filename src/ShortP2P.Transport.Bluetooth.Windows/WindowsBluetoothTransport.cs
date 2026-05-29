@@ -165,7 +165,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         _myBluetoothAddr = await LocalAdapterBluetoothMac.TryGetAdapterAddressAsync().ConfigureAwait(false)
                            ?? 0;
         
-        //StartBleGattProviderAdvertising(_bleServiceProvider, _options.GattDiscoverable, _options.LocalNetworkId, _logger); 
+        StartBleGattProviderAdvertising(_bleServiceProvider, _options.GattDiscoverable, _logger);
         StartNetworkIdManufacturerAdvertising(_options.LocalNetworkId);
         StartBleShortP2PAdvertisementWatcher();
     }
@@ -240,30 +240,19 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         }
     }
 
-    private static void StartBleGattProviderAdvertising(GattServiceProvider provider, bool discoverable,
-        CompressedNetworkId? localNetworkId, ILogger? logger)
+    private static void StartBleGattProviderAdvertising(GattServiceProvider provider, bool discoverable, ILogger? logger)
     {
         var advertising = new GattServiceProviderAdvertisingParameters
         {
             IsDiscoverable = discoverable,
             IsConnectable = true,
         };
-        if (localNetworkId is { IsEmpty: false } networkId)
-        {
-            var payload = BleShortP2PGattProtocol.BuildGattServiceDataNetworkId(networkId);
-            var writer = new DataWriter();
-            writer.WriteBytes(payload);
-            advertising.ServiceData = writer.DetachBuffer();
-            BleWindowsAdvertisementLog.LogGattAdvertisingStarted(logger, discoverable, networkId, payload.Length);
-        }
-        else
-            BleWindowsAdvertisementLog.LogGattAdvertisingStarted(logger, discoverable, null, null);
-
+        BleWindowsAdvertisementLog.LogGattAdvertisingStarted(logger, discoverable);
         provider.StartAdvertising(advertising);
     }
 
     /// <summary>
-    ///     Manufacturer Data в scan response — надёжный канал полного NetworkId (17 байт) на Win11 при GATT-рекламе.
+    ///     Manufacturer Data (company 0xE58B, type 0x02 + 12 байт wire) — канонический NetworkId в рекламе.
     /// </summary>
     private void StartNetworkIdManufacturerAdvertising(CompressedNetworkId? localNetworkId)
     {
@@ -273,31 +262,24 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
         try
         {
-            ushort uuid16 = 0xFEFF;
+            var payload = BleShortP2PGattProtocol.BuildManufacturerNetworkIdPayload(networkId);
+            var writer = new DataWriter();
+            writer.WriteBytes(payload);
 
             var adv = new BluetoothLEAdvertisement();
-
-            byte[] sd = new byte[2 + CompressedNetworkId.WireLength];
-            sd[0] = (byte)(uuid16 & 0xFF);
-            sd[1] = (byte)((uuid16 >> 8) & 0xFF);
-            Array.Copy(networkId.ToWireBytes(), 0, sd, 2, CompressedNetworkId.WireLength);
-
-            var writer = new DataWriter();
-            writer.WriteBytes(sd);
-            IBuffer buf = writer.DetachBuffer();
-            writer.Dispose();
-
-            var section = new BluetoothLEAdvertisementDataSection
+            adv.ManufacturerData.Add(new BluetoothLEManufacturerData
             {
-                DataType = 0x16,
-                Data = buf
-            };
-            adv.DataSections.Add(section);
+                CompanyId = BleShortP2PGattProtocol.ManufacturerCompanyId,
+                Data = writer.DetachBuffer()
+            });
 
             var pub = new BluetoothLEAdvertisementPublisher(adv);
-            pub.StatusChanged += (s, e) => System.Diagnostics.Debug.WriteLine(e.Status);
+            _manufacturerPublisherStatusHandler = (_, e) =>
+                BleWindowsAdvertisementLog.LogPublisherStatus(_logger, e.Status);
+            pub.StatusChanged += _manufacturerPublisherStatusHandler;
             pub.Start();
-            BleWindowsAdvertisementLog.LogManufacturerPublisherStarted(_logger, networkId, sd.Length);
+            _networkIdManufacturerPublisher = pub;
+            BleWindowsAdvertisementLog.LogManufacturerPublisherStarted(_logger, networkId, payload.Length);
         }
         catch (Exception ex)
         {

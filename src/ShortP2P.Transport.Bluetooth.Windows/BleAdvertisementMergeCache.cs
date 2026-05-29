@@ -38,16 +38,11 @@ internal static class BleWindowsAdvertisementHelper
 {
     public static bool IsShortP2P(BluetoothLEAdvertisement advertisement)
     {
-        if (advertisement.ServiceUuids.Contains(BleShortP2PGattProtocol.ServiceUuid))
-            return true;
-
-        foreach (var md in advertisement.ManufacturerData)
-        {
-            if (md.CompanyId == BleShortP2PGattProtocol.ManufacturerCompanyId)
-                return true;
-        }
-
-        return false;
+        var hasService = advertisement.ServiceUuids.Contains(BleShortP2PGattProtocol.ServiceUuid);
+        IEnumerable<ushort>? companyIds = advertisement.ManufacturerData.Count > 0
+            ? advertisement.ManufacturerData.Select(md => md.CompanyId)
+            : null;
+        return BleAdvertisementIdentityParser.IsShortP2P(hasService, companyIds);
     }
 
     public static bool IdentityImproved(BleAdScanResult previous, BleAdScanResult current)

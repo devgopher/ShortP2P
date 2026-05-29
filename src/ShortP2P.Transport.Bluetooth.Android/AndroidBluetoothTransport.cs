@@ -141,11 +141,11 @@ public sealed class AndroidBluetoothTransport : ITransport
                 if (_options.LocalNetworkId is { } networkId && !networkId.IsEmpty)
                 {
                     var payload = BleShortP2PGattProtocol.BuildManufacturerNetworkIdPayload(networkId);
-                    scanRspBuilder.AddManufacturerData(BleShortP2PGattProtocol.ManufacturerCompanyId, payload)!;
+                    scanRspBuilder.AddManufacturerData(BleShortP2PGattProtocol.ManufacturerCompanyId, payload);
                 }
 
                 if (_options.GattDiscoverable)
-                    scanRspBuilder.SetIncludeDeviceName(true)!;
+                    scanRspBuilder.SetIncludeDeviceName(true);
                 var scanRsp = scanRspBuilder.Build();
                 _advertiseCallback = new AdvertiseCallbackImpl();
                 _advertiser.StartAdvertising(settings, data, scanRsp, _advertiseCallback);
@@ -251,7 +251,7 @@ public sealed class AndroidBluetoothTransport : ITransport
 
     private static bool DeviceToTransportAddress(BluetoothDevice device, out TransportAddress addr)
     {
-        var s = device.Address?.Replace('-', ':', StringComparison.Ordinal);
+        var s = device.Address?.Replace("-", ":", StringComparison.Ordinal);
         if (string.IsNullOrEmpty(s) || !BluetoothTransportAddress.TryParseMac(s, out var mac))
         {
             addr = new TransportAddress(TransportKind.Bluetooth, new byte[BluetoothTransportAddress.MacLength]);

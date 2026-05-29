@@ -88,43 +88,55 @@ public sealed class AndroidBluetoothLeShortP2PScanner(Context context) : IBleSho
             if (record == null)
                 return default;
 
-            var parsed = default(BleAdScanResult);
             var mfg = record.ManufacturerSpecificData;
-            if (mfg != null)
+            if (mfg != null && mfg.Size() > 0)
             {
+                var entries = new List<BleManufacturerDataEntry>(mfg.Size());
                 for (var i = 0; i < mfg.Size(); i++)
                 {
-                    var companyId = (ushort)mfg.KeyAt(i);
-                    var bytes = mfg.ValueAt(i);
+                    var bytes = ReadManufacturerPayload(mfg.ValueAt(i));
                     if (bytes == null)
                         continue;
-                    parsed = BleAdvertisementIdentityParser.Merge(parsed,
-                        BleAdvertisementIdentityParser.ParseManufacturerData(companyId, bytes));
+                    entries.Add(new BleManufacturerDataEntry((ushort)mfg.KeyAt(i), bytes));
                 }
-            }
 
-            if (parsed.HasIdentity)
-                return parsed;
+                var fromManufacturer = BleAdvertisementIdentityParser.ParseManufacturerEntries(entries);
+                if (fromManufacturer.HasIdentity)
+                    return fromManufacturer;
+            }
 
             var serviceData = record.ServiceData;
             if (serviceData == null)
-                return parsed;
+                return default;
 
             Span<byte> uuidBytes = stackalloc byte[16];
             if (!BleShortP2PGattProtocol.ServiceUuid.TryWriteBytes(uuidBytes))
-                return parsed;
+                return default;
 
             var serviceAdvertised = record.ServiceUuids?.Contains(new ParcelUuid(ServiceUuidJava)) == true;
             var serviceUuidKey = new ParcelUuid(ServiceUuidJava);
             if (!serviceData.ContainsKey(serviceUuidKey))
-                return parsed;
+                return default;
 
-            var sectionPayload = serviceData.Get(serviceUuidKey);
-            if (sectionPayload == null)
-                return parsed;
+            if (!serviceData.TryGetValue(serviceUuidKey, out var sectionPayload) || sectionPayload == null)
+                return default;
 
-            return BleAdvertisementIdentityParser.Merge(parsed,
-                BleAdvertisementIdentityParser.ParseServiceDataSection(sectionPayload, uuidBytes, serviceAdvertised));
+            return BleAdvertisementIdentityParser.ParseServiceDataSection(sectionPayload, uuidBytes,
+                serviceAdvertised);
+        }
+
+        private static byte[]? ReadManufacturerPayload(object? value)
+        {
+            if (value is byte[] bytes)
+                return bytes;
+            if (value is Java.Nio.ByteBuffer buffer)
+            {
+                var arr = new byte[buffer.Remaining()];
+                buffer.Get(arr);
+                return arr;
+            }
+
+            return null;
         }
 
         private static bool TryDeviceToAddress(BluetoothDevice device, out TransportAddress addr)

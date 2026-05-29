@@ -13,7 +13,7 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 /// <param name="LocalAdapterBluetoothAddress">
 ///     MAC выбранного радио (ulong WinRT). <see langword="null" /> — адаптер по умолчанию.
 /// </param>
-/// <param name="LocalNetworkId">NetworkId (12 байт wire) в GATT Service Data и Manufacturer Data.</param>
+/// <param name="LocalNetworkId">NetworkId (12 байт wire) в BLE Manufacturer Data (company 0xE58B).</param>
 /// <param name="Logger">Опциональный логгер (реклама, publisher, приём ADV).</param>
 public readonly record struct WindowsBluetoothTransportOptions(
     bool GattDiscoverable = true,

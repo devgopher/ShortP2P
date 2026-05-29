@@ -56,9 +56,9 @@ public static class BleShortP2PGattProtocol
             throw new ArgumentException("NetworkId must not be empty.", nameof(networkId));
         var buf = new byte[ManufacturerLegacyNetworkIdPayloadLength];
         ManufacturerMagic.CopyTo(buf);
-        Span<byte> wire = stackalloc byte[16];
+        Span<byte> wire = stackalloc byte[GattServiceDataNetworkIdLength];
         networkId.TryWriteBytes(wire);
-        wire.CopyTo(buf.AsSpan(4, 12));
+        wire.CopyTo(buf.AsSpan(4, GattServiceDataNetworkIdLength));
         return buf;
     }
 

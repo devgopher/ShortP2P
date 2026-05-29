@@ -22,20 +22,11 @@ internal static class BleWindowsAdvertisementLog
             logger.LogInformation("BLE manufacturer publisher status: {Status}", status);
     }
 
-    public static void LogGattAdvertisingStarted(ILogger? logger, bool discoverable, CompressedNetworkId? networkId, int? serviceDataBytes)
+    public static void LogGattAdvertisingStarted(ILogger? logger, bool discoverable)
     {
-        if (logger == null)
-            return;
-
-        if (networkId is { } id && !id.IsEmpty)
-        {
-            logger.LogInformation(
-                "BLE GATT advertising started (discoverable={Discoverable}, serviceDataBytes={ServiceDataBytes}, networkId={NetworkId})",
-                discoverable, serviceDataBytes, id.ToShortString());
-        }
-        else
-            logger.LogInformation("BLE GATT advertising started (discoverable={Discoverable}, no NetworkId)",
-                discoverable);
+        logger?.LogInformation(
+            "BLE GATT advertising started (discoverable={Discoverable}, networkId via manufacturer publisher)",
+            discoverable);
     }
 
     public static void LogManufacturerPublisherStarted(ILogger? logger, CompressedNetworkId networkId, int payloadBytes)

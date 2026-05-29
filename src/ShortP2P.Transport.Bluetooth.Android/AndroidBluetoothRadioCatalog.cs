@@ -18,7 +18,7 @@ public sealed class AndroidBluetoothRadioCatalog : IBluetoothRadioCatalog
             if (string.IsNullOrWhiteSpace(addr) ||
                 string.Equals(addr, "02:00:00:00:00:00", StringComparison.OrdinalIgnoreCase))
                 return ValueTask.FromResult<IReadOnlyList<BluetoothRadioInfo>>(list);
-            var mac = addr.Replace('-', ':', StringComparison.Ordinal);
+            var mac = addr.Replace("-", ":", StringComparison.Ordinal);
             list.Add(new BluetoothRadioInfo("default", a.Name ?? mac, mac, true));
         }
         catch
