@@ -7,6 +7,18 @@ namespace ShortP2P.Transport.Tests;
 public sealed class BleAdvertisementIdentityParserTests
 {
     [Fact]
+    public void NetworkIdAnnouncePacket_roundtrips()
+    {
+        var networkId = CompressedNetworkId.New();
+        var packet = BleShortP2PGattProtocol.BuildNetworkIdAnnouncePacket(networkId);
+
+        Assert.Equal(BleShortP2PGattProtocol.NetworkIdAnnouncePacketLength, packet.Length);
+        Assert.Equal(BleShortP2PGattProtocol.FrameNetworkIdAnnounce, packet[0]);
+        Assert.True(BleShortP2PGattProtocol.TryParseNetworkIdAnnouncePacket(packet, out var parsed));
+        Assert.Equal(networkId, parsed);
+    }
+
+    [Fact]
     public void BuildManufacturerNetworkIdPayload_roundtrips()
     {
         var networkId = CompressedNetworkId.New();

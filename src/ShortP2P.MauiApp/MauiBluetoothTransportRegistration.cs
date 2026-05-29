@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Routing;
+using ShortP2P.Discovery.Ble;
 using ShortP2P.Transport.Abstractions;
 #if ANDROID
 using ShortP2P.Transport.Bluetooth.Android;
@@ -20,6 +21,7 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
     private readonly object _sync = new();
     private ITransport? _instance;
     private CompressedNetworkId? _localNetworkId;
+    private IBleDiscoveredPeerStore? _bleDiscoveredPeerStore;
 
     public ITransport? Current
     {
@@ -30,8 +32,10 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
         }
     }
 
-    public MauiBluetoothTransportRegistration(ILoggerFactory loggerFactory)
+    public MauiBluetoothTransportRegistration(ILoggerFactory loggerFactory,
+        IBleDiscoveredPeerStore? bleDiscoveredPeerStore = null)
     {
+        _bleDiscoveredPeerStore = bleDiscoveredPeerStore;
 #if WINDOWS
         _transportLogger = loggerFactory.CreateLogger<WindowsBluetoothTransport>();
 #endif
@@ -89,12 +93,23 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
                 GattDiscoverable: true,
                 LocalAdapterBluetoothAddress: localAddr,
                 LocalNetworkId: _localNetworkId,
+                OnPeerNetworkIdReceived: OnPeerNetworkIdReceived,
                 Logger: _transportLogger));
 #elif ANDROID
             _instance = new AndroidBluetoothTransport(global::Android.App.Application.Context,
-                new AndroidBluetoothTransportOptions(GattDiscoverable: true, LocalNetworkId: _localNetworkId));
+                new AndroidBluetoothTransportOptions(
+                    GattDiscoverable: true,
+                    LocalNetworkId: _localNetworkId,
+                    OnPeerNetworkIdReceived: OnPeerNetworkIdReceived));
 #endif
         }
+    }
+
+    private void OnPeerNetworkIdReceived(TransportAddress addr, CompressedNetworkId peerNetworkId)
+    {
+        if (_bleDiscoveredPeerStore == null)
+            return;
+        _ = _bleDiscoveredPeerStore.RecordScanSeenAsync(addr, new BleAdScanResult { NetworkId = peerNetworkId });
     }
 
     public async ValueTask DisposeAsync()

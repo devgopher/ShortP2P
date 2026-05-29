@@ -12,6 +12,11 @@ public static class BleShortP2PGattProtocol
     public static readonly Guid PeerRxCharacteristicUuid = Guid.Parse("8DFE6F10-6CB7-4E73-A918-DC47AC34D9E9");
     public static readonly Guid PeerTxCharacteristicUuid = Guid.Parse("7CF03A12-8B5E-4D91-B245-2B40EA0439C8");
 
+    /// <summary>Кадр объявления NetworkId по GATT RX (только для сопряжённых пиров, не в рекламе).</summary>
+    public const byte FrameNetworkIdAnnounce = 0x32;
+
+    public const int NetworkIdAnnouncePacketLength = 1 + CompressedNetworkId.WireLength;
+
     public const uint ApplicationChunkMagic = 0x53503243;
     public const int ApplicationChunkHeaderLength = 16;
 
@@ -141,6 +146,26 @@ public static class BleShortP2PGattProtocol
         BinaryPrimitives.WriteInt32BigEndian(buf.AsSpan(12, 4), totalChunks);
         payloadSlice.CopyTo(buf.AsSpan(ApplicationChunkHeaderLength));
         return buf;
+    }
+
+    public static byte[] BuildNetworkIdAnnouncePacket(CompressedNetworkId networkId)
+    {
+        if (networkId.IsEmpty)
+            throw new ArgumentException("NetworkId must not be empty.", nameof(networkId));
+        var buf = new byte[NetworkIdAnnouncePacketLength];
+        buf[0] = FrameNetworkIdAnnounce;
+        if (!networkId.TryWriteBytes(buf.AsSpan(1)))
+            throw new InvalidOperationException("Failed to serialize NetworkId.");
+        return buf;
+    }
+
+    public static bool TryParseNetworkIdAnnouncePacket(ReadOnlySpan<byte> buffer, out CompressedNetworkId networkId)
+    {
+        networkId = CompressedNetworkId.Empty;
+        if (buffer.Length < NetworkIdAnnouncePacketLength || buffer[0] != FrameNetworkIdAnnounce)
+            return false;
+        networkId = CompressedNetworkId.FromWireBytes(buffer.Slice(1, CompressedNetworkId.WireLength));
+        return !networkId.IsEmpty;
     }
 
     public static bool TryParseApplicationChunk(ReadOnlySpan<byte> buffer, out uint fullStreamCrc32,

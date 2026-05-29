@@ -25,7 +25,7 @@ internal static class BleWindowsAdvertisementLog
     public static void LogGattAdvertisingStarted(ILogger? logger, bool discoverable)
     {
         logger?.LogInformation(
-            "BLE GATT advertising started (discoverable={Discoverable}, networkId via manufacturer publisher)",
+            "BLE GATT advertising started (discoverable={Discoverable}, networkId via GATT announce to paired peers)",
             discoverable);
     }
 

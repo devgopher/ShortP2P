@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
+using ShortP2P.Auth.Data;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 using Windows.Devices.Bluetooth.Advertisement;
@@ -21,12 +22,16 @@ internal sealed class BleAdvertisementMergeCache
 
     public BleAdScanResult Observe(ulong bluetoothAddress, BluetoothLEAdvertisement advertisement)
     {
-        var parsed = BleGattAdvertisementNetworkId.TryParseFromAdvertisement(advertisement);
-        if (!parsed.HasIdentity)
-        {
-            return _identityByAddress.GetValueOrDefault(bluetoothAddress);
-        }
+        _ = advertisement;
+        return _identityByAddress.GetValueOrDefault(bluetoothAddress);
+    }
 
+    public BleAdScanResult RecordGattNetworkId(ulong bluetoothAddress, CompressedNetworkId networkId)
+    {
+        if (networkId.IsEmpty)
+            return _identityByAddress.GetValueOrDefault(bluetoothAddress);
+
+        var parsed = new BleAdScanResult { NetworkId = networkId };
         var merged = _identityByAddress.AddOrUpdate(bluetoothAddress, parsed,
             (_, existing) => BleAdvertisementIdentityParser.Merge(existing, parsed));
         BleWindowsAdvertisementLog.LogIdentityMerged(_logger, bluetoothAddress, merged);

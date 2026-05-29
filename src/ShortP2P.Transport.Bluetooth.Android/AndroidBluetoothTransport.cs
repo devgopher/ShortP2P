@@ -34,6 +34,7 @@ public sealed class AndroidBluetoothTransport : ITransport
         });
 
     private readonly ConcurrentDictionary<string, OutboundPeerState> _outbound = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _networkIdOfferedToMac = new(StringComparer.OrdinalIgnoreCase);
     private BluetoothManager? _btManager;
     private BluetoothAdapter? _adapter;
     private BluetoothLeAdvertiser? _advertiser;
@@ -138,11 +139,6 @@ public sealed class AndroidBluetoothTransport : ITransport
                     .AddServiceUuid(new ParcelUuid(ServiceUuidJava))!
                     .Build();
                 var scanRspBuilder = new AdvertiseData.Builder()!;
-                if (_options.LocalNetworkId is { } networkId && !networkId.IsEmpty)
-                {
-                    var payload = BleShortP2PGattProtocol.BuildManufacturerNetworkIdPayload(networkId);
-                    scanRspBuilder.AddManufacturerData(BleShortP2PGattProtocol.ManufacturerCompanyId, payload);
-                }
 
                 if (_options.GattDiscoverable)
                     scanRspBuilder.SetIncludeDeviceName(true);
@@ -153,6 +149,7 @@ public sealed class AndroidBluetoothTransport : ITransport
 
             _started = true;
             startedOk = true;
+            _ = PushNetworkIdToBondedPeersAsync(ct);
         }
         finally
         {
@@ -244,7 +241,70 @@ public sealed class AndroidBluetoothTransport : ITransport
             return;
         if (!DeviceToTransportAddress(device, out var addr))
             addr = new TransportAddress(TransportKind.Bluetooth, new byte[BluetoothTransportAddress.MacLength]);
+
+        if (BleShortP2PGattProtocol.TryParseNetworkIdAnnouncePacket(value, out var peerNetworkId))
+        {
+            if (_options.LocalNetworkId is { } local && local == peerNetworkId)
+                return;
+            try
+            {
+                _options.OnPeerNetworkIdReceived?.Invoke(addr, peerNetworkId);
+            }
+            catch
+            {
+                // ignore subscriber errors
+            }
+
+            return;
+        }
+
         _ = _inbound.Writer.TryWrite(new TransportReceiveMessage(value, addr));
+    }
+
+    private async Task PushNetworkIdToBondedPeersAsync(CancellationToken ct)
+    {
+        foreach (var addr in GetBondedDeviceAddresses())
+            await TryOfferNetworkIdToPeerAsync(addr, ct).ConfigureAwait(false);
+    }
+
+    private IReadOnlyList<TransportAddress> GetBondedDeviceAddresses()
+    {
+        var list = new List<TransportAddress>();
+        var bonded = _adapter?.GetBondedDevices();
+        if (bonded == null)
+            return list;
+        foreach (var device in bonded)
+        {
+            if (DeviceToTransportAddress(device, out var addr))
+                list.Add(addr);
+        }
+
+        return list;
+    }
+
+    public Task<IReadOnlyList<TransportAddress>> GetPairedDeviceAddressesAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult<IReadOnlyList<TransportAddress>>(GetBondedDeviceAddresses());
+    }
+
+    private async Task TryOfferNetworkIdToPeerAsync(TransportAddress destination, CancellationToken ct)
+    {
+        if (_options.LocalNetworkId is not { } localNetworkId || localNetworkId.IsEmpty)
+            return;
+        var macKey = BluetoothTransportAddress.ToMacString(destination.Data);
+        if (!_networkIdOfferedToMac.TryAdd(macKey, 0))
+            return;
+
+        try
+        {
+            var packet = BleShortP2PGattProtocol.BuildNetworkIdAnnouncePacket(localNetworkId);
+            await SendAsync(packet, destination, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            _networkIdOfferedToMac.TryRemove(macKey, out _);
+        }
     }
 
     internal void OnServiceAdded(bool success) => _serviceAddedTcs.TrySetResult(success);
@@ -287,6 +347,7 @@ public sealed class AndroidBluetoothTransport : ITransport
         }
 
         _advertiseCallback = null;
+        _networkIdOfferedToMac.Clear();
 
         foreach (var kv in _outbound.ToArray())
         {

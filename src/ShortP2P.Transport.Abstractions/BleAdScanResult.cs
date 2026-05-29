@@ -3,7 +3,7 @@ using ShortP2P.Auth.Data;
 namespace ShortP2P.Transport.Abstractions;
 
 /// <summary>
-///     Идентичность пира из BLE-рекламы: канонический NetworkId (12 байт).
+///     Идентичность BLE-пира: канонический NetworkId (12 байт), обычно из GATT-кадра 0x32, не из рекламы.
 /// </summary>
 public readonly struct BleAdScanResult
 {

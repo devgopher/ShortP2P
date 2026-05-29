@@ -78,8 +78,7 @@ public sealed class AndroidBluetoothLeShortP2PScanner(Context context) : IBleSho
             var key = Convert.ToBase64String(addr.Data);
             if (!_seen.Add(key))
                 return;
-            var scanResult = ParseScanResult(result);
-            onDevice(addr, scanResult);
+            onDevice(addr, default);
         }
 
         private static BleAdScanResult ParseScanResult(ScanResult result)

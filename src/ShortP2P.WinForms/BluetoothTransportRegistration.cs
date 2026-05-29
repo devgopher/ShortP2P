@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Routing;
+using ShortP2P.Discovery.Ble;
 using ShortP2P.Transport.Abstractions;
 using ShortP2P.Transport.Bluetooth.Windows;
 
@@ -13,6 +14,7 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
     private readonly object _sync = new();
     private ITransport? _instance;
     private CompressedNetworkId? _localNetworkId;
+    private readonly IBleDiscoveredPeerStore _bleDiscoveredPeerStore;
 
     public IBleShortP2PPeripheralScanner PeripheralScanner { get; }
 
@@ -27,8 +29,9 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
 
     public ITransport? Instance => Current;
 
-    public BluetoothTransportRegistration(ILoggerFactory loggerFactory)
+    public BluetoothTransportRegistration(ILoggerFactory loggerFactory, IBleDiscoveredPeerStore bleDiscoveredPeerStore)
     {
+        _bleDiscoveredPeerStore = bleDiscoveredPeerStore;
         _transportLogger = loggerFactory.CreateLogger<WindowsBluetoothTransport>();
         PeripheralScanner = new WindowsBluetoothLeShortP2PScanner(
             loggerFactory.CreateLogger<WindowsBluetoothLeShortP2PScanner>());
@@ -85,8 +88,14 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
                 GattDiscoverable: true,
                 LocalAdapterBluetoothAddress: localAddr,
                 LocalNetworkId: _localNetworkId,
+                OnPeerNetworkIdReceived: OnPeerNetworkIdReceived,
                 Logger: _transportLogger));
         }
+    }
+
+    private void OnPeerNetworkIdReceived(TransportAddress addr, CompressedNetworkId peerNetworkId)
+    {
+        _ = _bleDiscoveredPeerStore.RecordScanSeenAsync(addr, new BleAdScanResult { NetworkId = peerNetworkId });
     }
 
     public async ValueTask DisposeAsync()

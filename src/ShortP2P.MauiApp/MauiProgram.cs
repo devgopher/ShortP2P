@@ -78,7 +78,9 @@ public static class MauiProgram
             new WindowsBluetoothLeShortP2PScanner(
                 sp.GetRequiredService<ILoggerFactory>().CreateLogger<WindowsBluetoothLeShortP2PScanner>()));
 #endif
-        builder.Services.AddSingleton<MauiBluetoothTransportRegistration>();
+        builder.Services.AddSingleton(sp => new MauiBluetoothTransportRegistration(
+            sp.GetRequiredService<ILoggerFactory>(),
+            sp.GetService<IBleDiscoveredPeerStore>()));
         builder.Services.AddSingleton<IBluetoothTransportProvider>(sp =>
             sp.GetRequiredService<MauiBluetoothTransportRegistration>());
         builder.Services.AddSingleton(sp => new UserP2pRuntime(
