@@ -122,16 +122,17 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         if (create.Error != BluetoothError.Success || create.ServiceProvider == null)
             return;
         _bleServiceProvider = create.ServiceProvider;
-
+        
         var rxParameters = new GattLocalCharacteristicParameters
         {
             CharacteristicProperties = GattCharacteristicProperties.Write
                                        | GattCharacteristicProperties.WriteWithoutResponse
-                                       | GattCharacteristicProperties.Read
-                                       | GattCharacteristicProperties.Broadcast,
+                                       | GattCharacteristicProperties.Notify,
             WriteProtectionLevel = GattProtectionLevel.Plain,
+            ReadProtectionLevel = GattProtectionLevel.Plain,
             UserDescription = "ShortP2P BLE RX"
         };
+        
         var rxResult = await _bleServiceProvider.Service
             .CreateCharacteristicAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid, rxParameters)
             .AsTask(ct).ConfigureAwait(false);
@@ -139,7 +140,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             return;
         _bleRxCharacteristic = rxResult.Characteristic;
         _bleRxCharacteristic.WriteRequested += OnBleRxWriteRequested;
-
+        
         var txParameters = new GattLocalCharacteristicParameters
         {
             CharacteristicProperties = GattCharacteristicProperties.Notify | GattCharacteristicProperties.Read,
@@ -158,7 +159,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         else
             _myBluetoothMac = await LocalAdapterBluetoothMac.TryGetAdapterMacStringAsync().ConfigureAwait(false)
                                ?? "none";
-
+        
         _myBluetoothAddr = await LocalAdapterBluetoothMac.TryGetAdapterAddressAsync().ConfigureAwait(false)
                            ?? 0;
         
