@@ -92,7 +92,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
         try
         {
-            await StartBleGattAsync(ct).ConfigureAwait(false);
+           await StartBleGattAsync(ct).ConfigureAwait(false);
         }
         catch (Exception ex) when ((uint)ex.HResult == BluetoothUnavailableHResult)
         {
@@ -580,8 +580,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         }
 
         if (!device.DeviceInformation.Pairing.IsPaired &&
-            (first.status == GattCommunicationStatus.AccessDenied ||
-             first.status == GattCommunicationStatus.ProtocolError))
+            first.status is GattCommunicationStatus.AccessDenied or GattCommunicationStatus.ProtocolError)
         {
             await EnsureBlePairedAsync(device, ct).ConfigureAwait(false);
             var second = await TryDiscoverBlePeerCharacteristicsAsync(device, ct).ConfigureAwait(false);
@@ -599,7 +598,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private static async Task<(GattCharacteristic? rx, GattCharacteristic? tx, GattCommunicationStatus status)>
         TryDiscoverBlePeerCharacteristicsAsync(BluetoothLEDevice device, CancellationToken ct)
     {
-        var serviceResult = await device.GetGattServicesForUuidAsync(BleShortP2PGattProtocol.ServiceUuid).AsTask(ct)
+        var serviceResult = await device.GetGattServicesForUuidAsync(BleShortP2PGattProtocol.ServiceUuid, BluetoothCacheMode.Uncached).AsTask(ct)
             .ConfigureAwait(false);
         if (serviceResult.Status != GattCommunicationStatus.Success || serviceResult.Services.Count == 0)
             return (null, null, serviceResult.Status);
@@ -612,11 +611,10 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         if (rx == null)
             return (null, null, GattCommunicationStatus.ProtocolError);
 
-        GattCharacteristic? tx = null;
         var txResult = await service.GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerTxCharacteristicUuid)
             .AsTask(ct)
             .ConfigureAwait(false);
-        tx = txResult.Characteristics.FirstOrDefault();
+        var tx = txResult.Characteristics.FirstOrDefault();
 
         return (rx, tx, GattCommunicationStatus.Success);
     }
