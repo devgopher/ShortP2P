@@ -22,7 +22,6 @@ internal sealed class BleAdvertisementMergeCache
 
     public BleAdScanResult Observe(ulong bluetoothAddress, BluetoothLEAdvertisement advertisement)
     {
-        _ = advertisement;
         return _identityByAddress.GetValueOrDefault(bluetoothAddress);
     }
 
@@ -41,14 +40,7 @@ internal sealed class BleAdvertisementMergeCache
 
 internal static class BleWindowsAdvertisementHelper
 {
-    public static bool IsShortP2P(BluetoothLEAdvertisement advertisement)
-    {
-        var hasService = advertisement.ServiceUuids.Contains(BleShortP2PGattProtocol.ServiceUuid);
-        IEnumerable<ushort>? companyIds = advertisement.ManufacturerData.Count > 0
-            ? advertisement.ManufacturerData.Select(md => md.CompanyId)
-            : null;
-        return BleAdvertisementIdentityParser.IsShortP2P(hasService, companyIds);
-    }
+    public static bool IsShortP2P(BluetoothLEAdvertisement advertisement) => advertisement.ServiceUuids.Contains(BleShortP2PGattProtocol.ServiceUuid);
 
     public static bool IdentityImproved(BleAdScanResult previous, BleAdScanResult current)
     {
