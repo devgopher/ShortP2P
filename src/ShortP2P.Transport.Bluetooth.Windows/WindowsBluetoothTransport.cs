@@ -326,8 +326,9 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private async Task TryOfferNetworkIdToPeerAsync(string macKey, byte[] mac6, BluetoothLEDevice? device,
         CancellationToken ct = default)
     {
-        if (_options.LocalNetworkId is not { } localNetworkId || localNetworkId.IsEmpty)
+        if (!_options.LocalNetworkId.HasValue)
             return;
+        
         if (!_networkIdOfferedToMac.TryAdd(macKey, 0))
             return;
 
@@ -345,8 +346,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
                 _networkIdOfferedToMac.TryRemove(macKey, out _);
                 return;
             }
-
-            var packet = BleShortP2PGattProtocol.BuildNetworkIdAnnouncePacket(localNetworkId);
+            
+            var packet = BleShortP2PGattProtocol.BuildNetworkIdAnnouncePacket(_options.LocalNetworkId.Value);
             await SendViaBleAsync(macKey, mac6, packet, ct).ConfigureAwait(false);
             _logger?.LogInformation("BLE NetworkId announce sent to paired peer {Mac}", macKey);
         }
