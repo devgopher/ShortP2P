@@ -168,13 +168,7 @@ public partial class AddChatPage : ContentPage
                 .AddChatAsync(u.Id, payload.N, payload.Id, payload.K, payload.GetCommaSeparatedHosts(), payload.P)
                 .ConfigureAwait(true);
 
-            await _p2p.EnsureStartedAsync(u).ConfigureAwait(true);
-            var session = _p2p.GetSession(chat, u, _auth, _chats, SynchronizationContext.Current);
-            if (!_p2p.IsChatSessionStarted(chat.Id))
-            {
-                await session.StartAsync().ConfigureAwait(true);
-                _p2p.MarkChatSessionStarted(chat.Id);
-            }
+            await _p2p.TryEnsureChatSessionStartedAsync(chat.Id, SynchronizationContext.Current).ConfigureAwait(true);
 
             await Navigation.PopModalAsync().ConfigureAwait(true);
         }
@@ -221,7 +215,16 @@ public partial class AddChatPage : ContentPage
             return;
         }
 
-        await _chats.AddChatAsync(u.Id, nick, id, pub, host, port).ConfigureAwait(true);
+        var chat = await _chats.AddChatAsync(u.Id, nick, id, pub, host, port).ConfigureAwait(true);
+        try
+        {
+            await _p2p.TryEnsureChatSessionStartedAsync(chat.Id, SynchronizationContext.Current).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Start P2P session after add chat");
+        }
+
         await Navigation.PopModalAsync().ConfigureAwait(true);
     }
 }

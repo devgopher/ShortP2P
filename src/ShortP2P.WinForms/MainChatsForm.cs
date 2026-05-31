@@ -416,11 +416,21 @@ public sealed class MainChatsForm : Form
             return;
         }
 
-        await _chats.AddChatAsync(u.Id, dlg.PeerNickname, dlg.PeerNetworkIdShort, dlg.PeerPublicKeyJson.Trim(),
+        var chat = await _chats.AddChatAsync(u.Id, dlg.PeerNickname, dlg.PeerNetworkIdShort, dlg.PeerPublicKeyJson.Trim(),
             dlg.PeerHosts, dlg.PeerPort).ConfigureAwait(true);
         _userActions.LogInformation(
             "Chats: chat added (peer {Peer}, network id {NetworkId}, host {Host}:{Port})",
             dlg.PeerNickname, dlg.PeerNetworkIdShort, dlg.PeerHosts, dlg.PeerPort);
+        try
+        {
+            await _p2P.EnsureStartedAsync(u).ConfigureAwait(true);
+            await _p2P.TryEnsureChatSessionStartedAsync(chat.Id, SynchronizationContext.Current).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Start P2P session after add chat");
+        }
+
         await RefreshAsync().ConfigureAwait(true);
     }
 

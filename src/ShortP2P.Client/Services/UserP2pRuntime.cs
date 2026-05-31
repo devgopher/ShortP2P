@@ -327,21 +327,54 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     {
         var list = await repo.ListChatsAsync(user.Id).ConfigureAwait(false);
         foreach (var c in list)
-        {
-            var session = GetSession(c, user, auth, repo, uiSync);
-            var needStart = !IsChatSessionStarted(c.Id);
+            await TryEnsureChatSessionStartedAsync(c.Id, uiSync, cancellationToken).ConfigureAwait(false);
+    }
 
-            if (!needStart)
-                continue;
+    /// <summary>
+    ///     Запускает P2P-сессию для одного чата (invite и negotiation), если ещё не стартовала.
+    ///     Вызывается после ручного Add chat, LAN discovery и входящего invite.
+    /// </summary>
+    public async Task TryEnsureChatSessionStartedAsync(int chatId, SynchronizationContext? uiSync,
+        CancellationToken cancellationToken = default)
+    {
+        if (IsChatSessionStarted(chatId))
+            return;
+
+        var sem = _discoverySessionStartGates.GetOrAdd(chatId, _ => new SemaphoreSlim(1, 1));
+        await sem.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (IsChatSessionStarted(chatId))
+                return;
+
+            var user = _auth.CurrentUser;
+            if (user == null)
+                return;
+
+            var chat = await _chats.GetChatAsync(chatId).ConfigureAwait(false);
+            if (chat == null)
+                return;
+
+            if (IsChatSessionStarted(chatId))
+                return;
+
+            await EnsureStartedAsync(user, cancellationToken).ConfigureAwait(false);
+
+            var session = GetSession(chat, user, _auth, _chats, uiSync);
             try
             {
                 await session.StartAsync(cancellationToken).ConfigureAwait(false);
-                MarkChatSessionStarted(c.Id);
             }
             catch
             {
-                // пир недоступен и т.п.
+                return;
             }
+
+            MarkChatSessionStarted(chatId);
+        }
+        finally
+        {
+            sem.Release();
         }
     }
 
@@ -403,18 +436,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             var chat = await _chats.FindChatByPeerNetworkIdAsync(user.Id, peerShort).ConfigureAwait(false);
             if (chat == null)
                 return;
-            var session = GetSession(chat, user, _auth, _chats, uiSync: null);
-            if (IsChatSessionStarted(chat.Id))
-                return;
-            try
-            {
-                await session.StartAsync(cancellationToken).ConfigureAwait(false);
-                MarkChatSessionStarted(chat.Id);
-            }
-            catch
-            {
-                // peer may be temporarily unavailable
-            }
+            await TryEnsureChatSessionStartedAsync(chat.Id, uiSync: null, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -593,12 +615,12 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
         await ApplyDiscoveryPingRouteAsync(chat, peer.TransportKind, seenDirect, cancellationToken)
             .ConfigureAwait(false);
-        await TryEnsureChatSessionStartedFromDiscoveryAsync(chat.Id, cancellationToken).ConfigureAwait(false);
+        await TryEnsureChatSessionStartedAsync(chat.Id, uiSync: null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     ///     Обновление маршрута из пинга; старт сессии выполняется отдельно
-    ///     <see cref="TryEnsureChatSessionStartedFromDiscoveryAsync" />.
+    ///     <see cref="TryEnsureChatSessionStartedAsync" />.
     /// </summary>
     private async Task ApplyDiscoveryPingRouteAsync(ChatEntity chat, TransportKind pingKind, string seenDirect,
         CancellationToken cancellationToken)
@@ -647,51 +669,6 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         await _chats.UpdateChatP2pRouteAsync(chat.Id, mergedHost, chat.PeerPort, null).ConfigureAwait(false);
         _chats.NotifyChatListChanged();
         await RefreshSessionChatRowAsync(chat.Id, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    ///     Локальная отметка: <see cref="_sessionsStarted" />. Первый успешный пинг собеседника поднимает сессию, если ещё не в множестве.
-    /// </summary>
-    private async Task TryEnsureChatSessionStartedFromDiscoveryAsync(int chatId,
-        CancellationToken cancellationToken)
-    {
-        if (IsChatSessionStarted(chatId))
-            return;
-
-        var sem = _discoverySessionStartGates.GetOrAdd(chatId, _ => new SemaphoreSlim(1, 1));
-        await sem.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (IsChatSessionStarted(chatId))
-                return;
-
-            var user = _auth.CurrentUser;
-            if (user == null)
-                return;
-
-            var chat = await _chats.GetChatAsync(chatId).ConfigureAwait(false);
-            if (chat == null)
-                return;
-
-            if (IsChatSessionStarted(chatId))
-                return;
-            var session = GetSession(chat, user, _auth, _chats, uiSync: null);
-
-            try
-            {
-                await session.StartAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch
-            {
-                return;
-            }
-
-            MarkChatSessionStarted(chatId);
-        }
-        finally
-        {
-            sem.Release();
-        }
     }
 
     private async Task RefreshSessionChatRowAsync(int chatId, CancellationToken cancellationToken)
