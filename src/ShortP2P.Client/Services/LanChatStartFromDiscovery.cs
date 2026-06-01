@@ -62,7 +62,13 @@ public static class LanChatStartFromDiscovery
             : UdpTransportAddress.FromIPEndPoint(
                 new IPEndPoint(UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address, ChatInviteCodec.InviteUdpPort));
 
-        var host = LocalIPv4Resolver.GetInviteHostsCommaSeparated(TimeSpan.FromSeconds(10));
+        var host = InviteHostsBuilder.BuildCommaSeparated(
+            inviteListenerCoordinator?.Settings,
+            inviteListenerCoordinator?.Settings.EnableBluetoothTransport == false
+                ? null
+                : inviteListenerCoordinator?.Settings.SelectedBluetoothAdapterMac,
+            user.NetworkIdShort,
+            TimeSpan.FromSeconds(10));
         var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
         var invite = ChatInviteCodec.Build(user.Nickname, nid,
             RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), host, ChatInviteCodec.InviteUdpPort);

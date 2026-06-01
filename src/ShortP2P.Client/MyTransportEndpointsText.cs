@@ -101,7 +101,7 @@ public static class MyTransportEndpointsText
             ordered.Add(ip);
         }
 
-        foreach (var ip in GetAllUnicastIpv6Ordered())
+        foreach (var ip in LocalIPv4Resolver.GetAllUnicastIpv6Ordered())
         {
             if (ordered.Contains(ip, StringComparer.OrdinalIgnoreCase))
                 continue;
@@ -114,30 +114,6 @@ public static class MyTransportEndpointsText
             ordered.Add("::1");
 
         return ordered;
-    }
-
-    private static IEnumerable<string> GetAllUnicastIpv6Ordered()
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
-        {
-            if (ni.OperationalStatus != OperationalStatus.Up)
-                continue;
-            if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
-                continue;
-
-            foreach (var ua in ni.GetIPProperties().UnicastAddresses)
-            {
-                var addr = ua.Address;
-                if (addr.AddressFamily != AddressFamily.InterNetworkV6)
-                    continue;
-                if (IPAddress.IsLoopback(addr))
-                    continue;
-                set.Add(addr.ToString());
-            }
-        }
-
-        return set.OrderBy(x => x, StringComparer.Ordinal);
     }
 
     private static string FormatHostPort(string host, int port)

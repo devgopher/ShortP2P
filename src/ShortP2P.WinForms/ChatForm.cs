@@ -120,6 +120,7 @@ public sealed class ChatForm : Form
         TabStop = false,
     };
     private readonly Button _techHandshake = new() { Text = "Send handshake", AutoSize = true };
+    private readonly Button _techInvite = new() { Text = "Send Invite", AutoSize = true };
     private readonly Button _techPing = new() { Text = "Send ping", AutoSize = true };
     private readonly ToolTip _buttonTooltips = new() { ShowAlways = true };
     private ChatP2pSession? _p2PSession;
@@ -207,6 +208,7 @@ public sealed class ChatForm : Form
         _buttonTooltips.SetToolTip(_clearChat,
             "Удалить все сообщения с этого ПК и отменить недоставленные отправки.");
         _buttonTooltips.SetToolTip(_techHandshake, "Временно: сброс крипто-сессии и повторный RSA handshake");
+        _buttonTooltips.SetToolTip(_techInvite, "Временно: chat invite (frame 0x30) на адреса пира");
         _buttonTooltips.SetToolTip(_techPing, "Временно: presence ping на порт discovery (17501)");
 
         var techFlow = new FlowLayoutPanel
@@ -218,6 +220,7 @@ public sealed class ChatForm : Form
             Padding = new Padding(0, 2, 0, 0),
         };
         techFlow.Controls.Add(_techHandshake);
+        techFlow.Controls.Add(_techInvite);
         techFlow.Controls.Add(_techPing);
         _techGroup.Controls.Add(techFlow);
 
@@ -237,6 +240,7 @@ public sealed class ChatForm : Form
         _attachDocument.Click += async (_, _) => await OnAttachDocumentAsync().ConfigureAwait(true);
         _send.Click += async (_, _) => await OnSendAsync().ConfigureAwait(true);
         _techHandshake.Click += async (_, _) => await OnTechHandshakeAsync().ConfigureAwait(true);
+        _techInvite.Click += async (_, _) => await OnTechInviteAsync().ConfigureAwait(true);
         _techPing.Click += async (_, _) => await OnTechPingAsync().ConfigureAwait(true);
         _messages.DrawItem += OnMessagesDrawItem;
         _messages.MeasureItem += OnMessagesMeasureItem;
@@ -735,6 +739,22 @@ public sealed class ChatForm : Form
         {
             _logger.LogWarning(ex, "TECH handshake failed chat {ChatId}", _chat.Id);
             MessageBox.Show(this, ex.Message, "TECH: handshake", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private async Task OnTechInviteAsync()
+    {
+        if (_p2PSession == null)
+            return;
+        try
+        {
+            await _p2PSession.TechSendInviteAsync().ConfigureAwait(true);
+            _userActions.LogInformation("Chat {Peer}: TECH send invite", _chat.PeerNickname);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "TECH invite failed chat {ChatId}", _chat.Id);
+            MessageBox.Show(this, ex.Message, "TECH: invite", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 

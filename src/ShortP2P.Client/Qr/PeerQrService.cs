@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using QRCoder;
 using ShortP2P.Auth.Data;
+using ShortP2P.Client;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using ZXing;
@@ -16,7 +17,9 @@ public static class PeerQrService
     {
         List<string> hosts;
         var single = hostOverride?.Trim();
-        hosts = !string.IsNullOrEmpty(single) ? [single] : LocalIPv4Resolver.GetInviteHostCandidatesOrdered(TimeSpan.FromSeconds(2));
+        hosts = !string.IsNullOrEmpty(single)
+            ? [single]
+            : InviteHostsBuilder.GetCandidatesOrdered(networkIdShort: user.NetworkIdShort).ToList();
 
         return new PeerQrPayload
         {

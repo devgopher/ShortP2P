@@ -73,6 +73,31 @@ public static class LocalIPv4Resolver
             .ToList();
     }
 
+    /// <summary>Все поднятые unicast IPv6 (без loopback), лексикографически.</summary>
+    public static List<string> GetAllUnicastIpv6Ordered()
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (ni.OperationalStatus != OperationalStatus.Up)
+                continue;
+            if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                continue;
+
+            foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+            {
+                var addr = ua.Address;
+                if (addr.AddressFamily != AddressFamily.InterNetworkV6)
+                    continue;
+                if (IPAddress.IsLoopback(addr))
+                    continue;
+                set.Add(addr.ToString());
+            }
+        }
+
+        return set.OrderBy(x => x, StringComparer.Ordinal).ToList();
+    }
+
     /// <summary>Best-effort public IPv4 via external HTTP echo services; null if unavailable.</summary>
     public static string? TryGetPublicIpv4(TimeSpan timeout)
     {

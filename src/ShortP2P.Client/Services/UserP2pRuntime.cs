@@ -427,6 +427,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 async (payload, dest, _) => await udp.SendAsync(payload, dest, CancellationToken.None)
                     .ConfigureAwait(false),
                 invite.RemoteAddress,
+                Settings,
+                Settings.EnableBluetoothTransport ? Settings.SelectedBluetoothAdapterMac : null,
                 CancellationToken.None).ConfigureAwait(false);
 
             var user = _auth.CurrentUser;

@@ -471,7 +471,11 @@ public sealed class ChatP2pSession : IAsyncDisposable
             try
             {
                 await IncomingChatInviteHandler.TryAcceptAsync(msg.RawPayload, auth, repo,
-                    SendInviteRawAsync, msg.RemoteAddress, CancellationToken.None).ConfigureAwait(false);
+                    SendInviteRawAsync, msg.RemoteAddress, routingSettings,
+                    routingSettings?.EnableBluetoothTransport == false
+                        ? null
+                        : routingSettings?.SelectedBluetoothAdapterMac,
+                    CancellationToken.None).ConfigureAwait(false);
             }
             catch
             {
@@ -529,6 +533,15 @@ public sealed class ChatP2pSession : IAsyncDisposable
         await ResetCryptoStateAsync(cancellationToken).ConfigureAwait(false);
         await EnsureSessionAsInitiatorAsync(cancellationToken).ConfigureAwait(false);
         _ = TryConfirmCryptoSessionAsync(cancellationToken);
+    }
+
+    /// <summary>Временная отладка UI: chat invite (frame 0x30) на адреса пира.</summary>
+    public async Task TechSendInviteAsync(CancellationToken cancellationToken = default)
+    {
+        if (_cts == null)
+            throw new InvalidOperationException("Сессия чата не запущена.");
+
+        await SendChatInviteWithRetryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Временная отладка UI: presence ping (порт discovery) на адреса пира.</summary>
@@ -628,7 +641,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
         var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
         var invite = ChatInviteCodec.Build(user.Nickname, nid,
             RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), host, ChatInviteCodec.InviteUdpPort);
-        await SendRouteRawAsync(invite, cancellationToken).ConfigureAwait(false);
+        await SendInviteRouteRawAsync(invite, cancellationToken).ConfigureAwait(false);
         await SendSessionNegotiationAfterInviteAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -652,10 +665,12 @@ public sealed class ChatP2pSession : IAsyncDisposable
         await SendSessionSetupRequestPacketAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static string BuildInviteHosts()
-    {
-        return LocalIPv4Resolver.GetInviteHostsCommaSeparated(TimeSpan.FromSeconds(2));
-    }
+    private string BuildInviteHosts() =>
+        InviteHostsBuilder.BuildCommaSeparated(
+            routingSettings,
+            routingSettings?.EnableBluetoothTransport == false ? null : routingSettings?.SelectedBluetoothAdapterMac,
+            user.NetworkIdShort,
+            TimeSpan.FromSeconds(2));
 
     private async Task SendChatInviteWithRetryAsync(CancellationToken cancellationToken)
     {
@@ -1272,7 +1287,81 @@ public sealed class ChatP2pSession : IAsyncDisposable
     }
 
     /// <summary>
-    ///     Отправка «сырых» пакетов на пира: invite (0x30) и handshake-фреймы (0x01/0x04). Перебирает peer endpoints
+    ///     Invite (0x30) на все адреса пира по каждому включённому виду транспорта (UDP invite-порт, Bluetooth).
+    ///     Ошибка только если не удалось отправить ни по одному транспорту.
+    /// </summary>
+    private async ValueTask SendInviteRouteRawAsync(ReadOnlyMemory<byte> packet, CancellationToken cancellationToken)
+    {
+        var destinations = BuildOrderedDirectPeerAddresses();
+        if (destinations.Count == 0)
+            throw new InvalidOperationException("Нет адресов пира для отправки invite.");
+
+        var hadAttempt = false;
+        var anySuccess = false;
+        Exception? last = null;
+
+        foreach (var dest in destinations)
+        {
+            if (!IsTransportEnabled(dest.Kind))
+                continue;
+
+            hadAttempt = true;
+            try
+            {
+                await SendInviteOnPeerAddressAsync(packet, dest, cancellationToken).ConfigureAwait(false);
+                anySuccess = true;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                last = ex;
+            }
+        }
+
+        if (!hadAttempt)
+            throw new InvalidOperationException("Нет включённых транспортов для отправки invite.");
+
+        if (!anySuccess)
+            throw new InvalidOperationException("Все транспорты недоступны: не удалось отправить invite.", last);
+    }
+
+    private async ValueTask SendInviteOnPeerAddressAsync(ReadOnlyMemory<byte> packet, TransportAddress destination,
+        CancellationToken cancellationToken)
+    {
+        switch (destination.Kind)
+        {
+            case TransportKind.Udp:
+                if (!IsTransportEnabled(TransportKind.Udp))
+                    throw new InvalidOperationException("UDP-транспорт отключён в настройках.");
+                var inviteTx = _runtime.Invite
+                               ?? throw new InvalidOperationException(
+                                   "UDP invite-транспорт недоступен (слушатель не запущен).");
+                var inviteDest = ToInviteUdpDestination(destination);
+                var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
+                var inviteMsg = new InviteMessage(nid, user.Nickname, "", "", 0, packet, inviteDest);
+                await inviteTx.SendAsync(inviteMsg, inviteDest, cancellationToken).ConfigureAwait(false);
+                return;
+
+            case TransportKind.Bluetooth:
+                if (!IsTransportEnabled(TransportKind.Bluetooth))
+                    throw new InvalidOperationException("Bluetooth-транспорт отключён в настройках.");
+                var bt = ResolveOutbound(destination)
+                         ?? throw new InvalidOperationException("Bluetooth-транспорт недоступен.");
+                await bt.SendAsync(packet, destination, cancellationToken).ConfigureAwait(false);
+                return;
+
+            default:
+                throw new InvalidOperationException($"Транспорт {destination.Kind} не поддерживается для invite.");
+        }
+    }
+
+    private static TransportAddress ToInviteUdpDestination(TransportAddress destination)
+    {
+        var ep = UdpTransportAddress.ToIPEndPoint(destination);
+        return UdpTransportAddress.FromIPEndPoint(new IPEndPoint(ep.Address, ChatInviteCodec.InviteUdpPort));
+    }
+
+    /// <summary>
+    ///     Отправка «сырых» пакетов handshake (0x01/0x04) на пира. Перебирает peer endpoints
     ///     в порядке предпочтения (свежий <c>_peerAddress</c> первым), останавливается на первом успешном.
     ///     Маршрут UDP идёт через общий data-сокет в <see cref="UserP2pRuntime" />, BT — через общий BT-транспорт.
     /// </summary>
@@ -1299,14 +1388,9 @@ public sealed class ChatP2pSession : IAsyncDisposable
             throw last;
     }
 
-    private async Task SendInviteRawAsync(ReadOnlyMemory<byte> payload, TransportAddress destination,
-        CancellationToken cancellationToken)
-    {
-        var transport = ResolveOutbound(destination);
-        if (transport == null)
-            return;
-        await transport.SendAsync(payload, destination, cancellationToken).ConfigureAwait(false);
-    }
+    private Task SendInviteRawAsync(ReadOnlyMemory<byte> payload, TransportAddress destination,
+        CancellationToken cancellationToken) =>
+        SendInviteOnPeerAddressAsync(payload, destination, cancellationToken).AsTask();
 
     /// <summary>
     ///     Отправка cipher payload (без префикса 0x02) через глобальный <see cref="MessageTransceiver" />.

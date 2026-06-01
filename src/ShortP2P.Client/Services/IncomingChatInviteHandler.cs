@@ -3,7 +3,6 @@ using System.Net;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Data;
-using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Crypto;
 using ShortP2P.Discovery;
@@ -24,6 +23,8 @@ public static class IncomingChatInviteHandler
     public static async Task TryAcceptAsync(ReadOnlyMemory<byte> datagram, AuthService auth, ChatRepository repo,
         Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, Task>? sendInviteReplyAsync,
         TransportAddress? sourceAddress = null,
+        P2pRoutingSettings? routingSettings = null,
+        string? bluetoothAdapterMac = null,
         CancellationToken cancellationToken = default)
     {
         if (!ChatInviteCodec.TryParse(datagram.Span, out var peerId, out var nick, out var pubJson, out var host,
@@ -63,24 +64,28 @@ public static class IncomingChatInviteHandler
             existing.RelayRouteBlob = null;
             existing.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
             repo.NotifyChatListChanged();
-            ScheduleInviteReply(auth, user, host, port, sourceAddress, sendInviteReplyAsync);
+            ScheduleInviteReply(auth, user, host, port, sourceAddress, sendInviteReplyAsync, routingSettings,
+                bluetoothAdapterMac);
             return;
         }
 
         await repo.AddChatAsync(user.Id, nick, idShort, pubJson, effectiveHost, PresencePingCodec.DefaultDataUdpPort)
             .ConfigureAwait(false);
 
-        ScheduleInviteReply(auth, user, host, port, sourceAddress, sendInviteReplyAsync);
+        ScheduleInviteReply(auth, user, host, port, sourceAddress, sendInviteReplyAsync, routingSettings,
+            bluetoothAdapterMac);
     }
 
     private static void ScheduleInviteReply(AuthService auth, UserEntity user, string inviteHostList,
         int invitePacketPort, TransportAddress? sourceAddress,
-        Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, Task>? sendInviteReplyAsync)
+        Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, Task>? sendInviteReplyAsync,
+        P2pRoutingSettings? routingSettings = null,
+        string? bluetoothAdapterMac = null)
     {
         if (sendInviteReplyAsync == null)
             return;
         _ = TrySendInviteReplyAsync(auth, user, inviteHostList, invitePacketPort, sourceAddress, sendInviteReplyAsync,
-                CancellationToken.None)
+                routingSettings, bluetoothAdapterMac, CancellationToken.None)
             .ContinueWith(
                 static t =>
                 {
@@ -94,11 +99,17 @@ public static class IncomingChatInviteHandler
     private static async Task TrySendInviteReplyAsync(AuthService auth, UserEntity user, string inviteHostList,
         int invitePacketPort, TransportAddress? sourceAddress,
         Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, Task>? sendInviteReplyAsync,
+        P2pRoutingSettings? routingSettings,
+        string? bluetoothAdapterMac,
         CancellationToken cancellationToken)
     {
         if (sendInviteReplyAsync == null)
             return;
-        var myHost = LocalIPv4Resolver.GetInviteHostsCommaSeparated(TimeSpan.FromSeconds(2));
+        var myHost = InviteHostsBuilder.BuildCommaSeparated(
+            routingSettings,
+            routingSettings?.EnableBluetoothTransport == false ? null : bluetoothAdapterMac,
+            user.NetworkIdShort,
+            TimeSpan.FromSeconds(2));
         var nid = CompressedNetworkId.FromShortString(user.NetworkIdShort);
         var reply = ChatInviteCodec.Build(user.Nickname, nid,
             RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey()), myHost, ChatInviteCodec.InviteUdpPort);

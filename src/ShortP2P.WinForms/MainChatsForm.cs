@@ -576,8 +576,8 @@ public sealed class MainChatsForm : Form
     {
         UpdateIndicator(_udpTransportIndicator, "UDP", _p2P.Settings.EnableUdpTransport, _p2P.LocalScan.IsUdpListening);
         var btRunning = _p2P.LocalScan.IsBluetoothListening;
-        if (_p2P.BluetoothTransport is WindowsBluetoothTransport wbt)
-            btRunning = wbt.IsRunning;
+        // if (_p2P.BluetoothTransport is WindowsBluetoothTransport wbt)
+        //     btRunning = wbt.IsRunning;
         UpdateIndicator(_bluetoothTransportIndicator, "Bluetooth", _p2P.Settings.EnableBluetoothTransport, btRunning);
     }
 

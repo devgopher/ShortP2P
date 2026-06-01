@@ -47,6 +47,7 @@
                 <Label Text="TECH" FontSize="11" TextColor="Gray" />
                 <HorizontalStackLayout Spacing="8">
                     <Button Text="Send handshake" Clicked="OnTechHandshakeClicked" />
+                    <Button Text="Send Invite" Clicked="OnTechInviteClicked" />
                     <Button Text="Send ping" Clicked="OnTechPingClicked" />
                 </HorizontalStackLayout>
             </VerticalStackLayout>

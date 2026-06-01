@@ -555,6 +555,21 @@ public partial class ChatDetailPage : ContentPage
         }
     }
 
+    private async void OnTechInviteClicked(object? sender, EventArgs e)
+    {
+        if (_p2pSession == null)
+            return;
+        try
+        {
+            await _p2pSession.TechSendInviteAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "TECH invite failed");
+            await DisplayAlert("TECH: invite", ex.Message, "OK").ConfigureAwait(true);
+        }
+    }
+
     private async void OnTechPingClicked(object? sender, EventArgs e)
     {
         if (_p2pSession == null)
