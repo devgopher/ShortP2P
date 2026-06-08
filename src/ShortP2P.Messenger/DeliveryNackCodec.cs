@@ -55,7 +55,8 @@ internal static class DeliveryNackCodec
         var pos = 19;
         for (var i = 0; i < count; i++)
         {
-            var idx = (plaintext[pos] << 24) | (plaintext[pos + 1] << 16) | (plaintext[pos + 2] << 8) | plaintext[pos + 3];
+            var idx = (plaintext[pos] << 24) | (plaintext[pos + 1] << 16) | (plaintext[pos + 2] << 8) |
+                      plaintext[pos + 3];
             if (idx < 0)
                 return false;
             indices[i] = idx;

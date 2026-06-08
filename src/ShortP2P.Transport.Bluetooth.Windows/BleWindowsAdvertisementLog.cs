@@ -1,10 +1,9 @@
 using System.Text;
-using Microsoft.Extensions.Logging;
-using ShortP2P.Auth.Data;
-using ShortP2P.Transport;
-using ShortP2P.Transport.Abstractions;
 using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Storage.Streams;
+using Microsoft.Extensions.Logging;
+using ShortP2P.Auth.Data;
+using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
 
@@ -58,14 +57,13 @@ internal static class BleWindowsAdvertisementLog
             merged.HasNetworkId);
 
         if (logger.IsEnabled(LogLevel.Trace))
-        {
-            logger.LogTrace("BLE adv {Mac} detail: services=[{Services}] mfg=[{Manufacturer}] sections=[{Sections}] networkId={NetworkId}",
+            logger.LogTrace(
+                "BLE adv {Mac} detail: services=[{Services}] mfg=[{Manufacturer}] sections=[{Sections}] networkId={NetworkId}",
                 macKey,
                 FormatServiceUuids(ad),
                 FormatManufacturerData(ad),
                 FormatDataSections(ad),
                 merged.NetworkId);
-        }
     }
 
     public static void LogScanDiscovery(ILogger? logger, string macKey, BleAdScanResult merged, bool improved)

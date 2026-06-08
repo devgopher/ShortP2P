@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 
 namespace ShortP2P.Client.Transport;
 
@@ -15,10 +16,12 @@ public sealed class TcpTransferService
         var listener = new TcpListener(IPAddress.Any, 0);
         listener.Start();
         var ep = (IPEndPoint)listener.LocalEndpoint;
-        return Task.FromResult(new TcpListenerLease(listener, transferId, token, DateTimeOffset.UtcNow.Add(ttl), ep.Port));
+        return Task.FromResult(new TcpListenerLease(listener, transferId, token, DateTimeOffset.UtcNow.Add(ttl),
+            ep.Port));
     }
 
-    public async Task<byte[]> AcceptAndReceiveAsync(TcpListenerLease lease, long expectedSize, CancellationToken cancellationToken)
+    public async Task<byte[]> AcceptAndReceiveAsync(TcpListenerLease lease, long expectedSize,
+        CancellationToken cancellationToken)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var ttlLeft = lease.ExpiresAtUtc - DateTimeOffset.UtcNow;
@@ -44,7 +47,7 @@ public sealed class TcpTransferService
         await client.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
         await using var stream = client.GetStream();
         var header = new TcpTransferHeader(transferId, token, payload.Length);
-        var headerJson = System.Text.Json.JsonSerializer.Serialize(header);
+        var headerJson = JsonSerializer.Serialize(header);
         var headerUtf8 = Encoding.UTF8.GetBytes(headerJson);
         if (headerUtf8.Length > HeaderMaxBytes)
             throw new InvalidDataException("Header too large.");
@@ -56,7 +59,8 @@ public sealed class TcpTransferService
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<TcpTransferHeader> ReadHeaderAsync(NetworkStream stream, CancellationToken cancellationToken)
+    private static async Task<TcpTransferHeader> ReadHeaderAsync(NetworkStream stream,
+        CancellationToken cancellationToken)
     {
         var lenBuf = new byte[4];
         await ReadExactlyAsync(stream, lenBuf, cancellationToken).ConfigureAwait(false);
@@ -65,7 +69,7 @@ public sealed class TcpTransferService
             throw new InvalidDataException("Invalid TCP header length.");
         var headerBuf = new byte[len];
         await ReadExactlyAsync(stream, headerBuf, cancellationToken).ConfigureAwait(false);
-        var header = System.Text.Json.JsonSerializer.Deserialize<TcpTransferHeader>(headerBuf);
+        var header = JsonSerializer.Deserialize<TcpTransferHeader>(headerBuf);
         return header ?? throw new InvalidDataException("Invalid TCP header.");
     }
 
@@ -94,7 +98,8 @@ public sealed class TcpTransferService
 
 public sealed class TcpListenerLease : IDisposable
 {
-    public TcpListenerLease(TcpListener listener, string transferId, string token, DateTimeOffset expiresAtUtc, int port)
+    public TcpListenerLease(TcpListener listener, string transferId, string token, DateTimeOffset expiresAtUtc,
+        int port)
     {
         Listener = listener;
         TransferId = transferId;
@@ -109,7 +114,10 @@ public sealed class TcpListenerLease : IDisposable
     public DateTimeOffset ExpiresAtUtc { get; }
     public int Port { get; }
 
-    public void Dispose() => Listener.Stop();
+    public void Dispose()
+    {
+        Listener.Stop();
+    }
 }
 
 public sealed record TcpTransferHeader(string TransferId, string Token, int SizeBytes);

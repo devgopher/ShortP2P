@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using ShortP2P.Auth.Data;
-using ShortP2P.Discovery;
 
 namespace ShortP2P.Discovery.RouteTables;
 
@@ -30,10 +29,8 @@ public class RouteDbContext : DbContext
     {
         var now = DateTime.UtcNow;
         foreach (var entry in ChangeTracker.Entries<PeerIdentityAddress>())
-        {
             if (entry.State is EntityState.Added or EntityState.Modified)
                 entry.Entity.LastSeen = now;
-        }
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

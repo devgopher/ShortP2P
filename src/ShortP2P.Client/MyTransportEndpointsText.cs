@@ -1,6 +1,5 @@
 using System.IO.Ports;
 using System.Net;
-using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using ShortP2P.Auth.Data;
@@ -38,14 +37,12 @@ public static class MyTransportEndpointsText
             user.DataUdpPort,
             PresencePingCodec.UdpPort,
             ChatInviteCodec.InviteUdpPort,
-            UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort,
+            UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort
         };
 
         foreach (var ip in ips)
-        {
-            foreach (var port in ports)
-                lineSet.Add(FormatHostPort(ip, port));
-        }
+        foreach (var port in ports)
+            lineSet.Add(FormatHostPort(ip, port));
 
         foreach (var line in lineSet.OrderBy(x => x, StringComparer.Ordinal))
             sb.AppendLine(line);

@@ -8,6 +8,6 @@ public class Route
     [Key]
     [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public required string RouteId { get; set; }
-    
+
     public required List<PeerIdentityAddress> PeerRoutes { get; init; }
 }

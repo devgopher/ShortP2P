@@ -1,18 +1,17 @@
 using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
-using ShortP2P.Client.Services;
 
 namespace ShortP2P.WinForms;
 
 public sealed class RegisterForm : Form
 {
     private readonly AuthService _auth;
+    private readonly Button _btnCancel = new() { Text = "Cancel", DialogResult = DialogResult.Cancel };
+    private readonly Button _btnOk = new() { Text = "Create account" };
     private readonly ILogger<RegisterForm> _logger;
-    private readonly ILogger<UserAction> _userActions;
     private readonly TextBox _nick = new() { PlaceholderText = "Nickname" };
     private readonly TextBox _pass = new() { PlaceholderText = "Password", UseSystemPasswordChar = true };
-    private readonly Button _btnOk = new() { Text = "Create account" };
-    private readonly Button _btnCancel = new() { Text = "Cancel", DialogResult = DialogResult.Cancel };
+    private readonly ILogger<UserAction> _userActions;
 
     public RegisterForm(AuthService auth, ILogger<RegisterForm> logger, ILogger<UserAction> userActions)
     {

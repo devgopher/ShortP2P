@@ -10,7 +10,7 @@ public sealed class ChatMediaOptions
     {
         PropertyNameCaseInsensitive = true,
         ReadCommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true,
+        AllowTrailingCommas = true
     };
 
     /// <summary>Максимальный размер одного изображения (байт), по умолчанию 100 КиБ.</summary>
@@ -21,7 +21,7 @@ public sealed class ChatMediaOptions
     [
         "image/jpeg",
         "image/png",
-        "image/gif",
+        "image/gif"
     ];
 
     /// <summary>Максимальный размер одного документа (Word / LibreOffice и т.п.), по умолчанию 10 МиБ.</summary>
@@ -51,7 +51,7 @@ public sealed class ChatMediaOptions
         "video/x-ms-wmv",
         "video/ogg",
         "video/webm",
-        "audio/ogg",
+        "audio/ogg"
     ];
 
     public static ChatMediaOptions LoadOrDefault(string? jsonPath)
@@ -126,11 +126,9 @@ public sealed class ChatMediaOptions
 
     private sealed class ChatMediaFileDto
     {
-        [JsonPropertyName("maxImageBytes")]
-        public int? MaxImageBytes { get; set; }
+        [JsonPropertyName("maxImageBytes")] public int? MaxImageBytes { get; set; }
 
-        [JsonPropertyName("maxDocumentBytes")]
-        public int? MaxDocumentBytes { get; set; }
+        [JsonPropertyName("maxDocumentBytes")] public int? MaxDocumentBytes { get; set; }
 
         [JsonPropertyName("allowedImageMimeTypes")]
         public List<string>? AllowedImageMimeTypes { get; set; }

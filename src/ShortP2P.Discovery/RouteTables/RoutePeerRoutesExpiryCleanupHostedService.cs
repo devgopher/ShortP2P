@@ -6,9 +6,9 @@ namespace ShortP2P.Discovery.RouteTables;
 
 internal sealed class RoutePeerRoutesExpiryCleanupHostedService : BackgroundService
 {
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly RoutePeerRoutesExpiryOptions _options;
     private readonly ILogger<RoutePeerRoutesExpiryCleanupHostedService> _logger;
+    private readonly RoutePeerRoutesExpiryOptions _options;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public RoutePeerRoutesExpiryCleanupHostedService(
         IServiceScopeFactory scopeFactory,
@@ -20,6 +20,8 @@ internal sealed class RoutePeerRoutesExpiryCleanupHostedService : BackgroundServ
         _logger = logger;
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
-        RoutePeerRoutesExpiryCleanup.RunPeriodicAsync(_scopeFactory, _options, _logger, stoppingToken);
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        return RoutePeerRoutesExpiryCleanup.RunPeriodicAsync(_scopeFactory, _options, _logger, stoppingToken);
+    }
 }

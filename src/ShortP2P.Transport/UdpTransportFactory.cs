@@ -31,7 +31,9 @@ public sealed class UdpTransportFactory : IUdpTransportFactory
         var entry = _entries.GetOrAdd(key, static k =>
             new CacheEntry(UdpTransport.CreateUdpTransport(k.Ip, k.Port, k.EnableBroadcast)));
         lock (entry.Gate)
+        {
             entry.RefCount++;
+        }
 
         return entry.Transport;
     }
@@ -41,14 +43,12 @@ public sealed class UdpTransportFactory : IUdpTransportFactory
         CacheEntry? found = null;
         UdpTransportCacheKey? foundKey = null;
         foreach (var kv in _entries)
-        {
             if (ReferenceEquals(kv.Value.Transport, transport))
             {
                 found = kv.Value;
                 foundKey = kv.Key;
                 break;
             }
-        }
 
         if (found == null || foundKey is not { } key)
             return;
@@ -83,8 +83,8 @@ public sealed class UdpTransportFactory : IUdpTransportFactory
 
     private sealed class CacheEntry(UdpTransport transport)
     {
-        public UdpTransport Transport { get; } = transport;
         public int RefCount;
+        public UdpTransport Transport { get; } = transport;
         public object Gate { get; } = new();
     }
 
@@ -101,11 +101,19 @@ public sealed class UdpTransportFactory : IUdpTransportFactory
         public int Port { get; }
         public bool EnableBroadcast { get; }
 
-        public bool Equals(UdpTransportCacheKey other) =>
-            Port == other.Port && EnableBroadcast == other.EnableBroadcast && Ip.Equals(other.Ip);
+        public bool Equals(UdpTransportCacheKey other)
+        {
+            return Port == other.Port && EnableBroadcast == other.EnableBroadcast && Ip.Equals(other.Ip);
+        }
 
-        public override bool Equals(object? obj) => obj is UdpTransportCacheKey other && Equals(other);
+        public override bool Equals(object? obj)
+        {
+            return obj is UdpTransportCacheKey other && Equals(other);
+        }
 
-        public override int GetHashCode() => HashCode.Combine(Ip.GetHashCode(), Port, EnableBroadcast);
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(Ip.GetHashCode(), Port, EnableBroadcast);
+        }
     }
 }

@@ -1,41 +1,39 @@
-using System.Drawing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
-using ShortP2P.Client.ChatMedia;
-using ShortP2P.Crypto;
-using ShortP2P.Client.Data;
-using ShortP2P.Client.Routing;
 using ShortP2P.Client;
 using ShortP2P.Client.Bluetooth;
+using ShortP2P.Client.ChatMedia;
+using ShortP2P.Client.Data;
+using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Crypto;
 using ShortP2P.Transport;
-using ShortP2P.Transport.Bluetooth.Windows;
 
 namespace ShortP2P.WinForms;
 
 public sealed class MainChatsForm : Form
 {
+    private readonly AppSettingsStore _appSettings;
     private readonly AuthService _auth;
+    private readonly IBluetoothRadioCatalog _bluetoothCatalog;
+    private readonly Label _bluetoothTransportIndicator = new() { AutoSize = true };
+    private readonly ILogger<ChatForm> _chatLog;
+    private readonly ChatMediaOptions _chatMedia;
     private readonly ChatRepository _chats;
     private readonly HashSet<int> _knownChatIds = [];
+    private readonly ILogger<LocalNetworkScanForm> _lanScanLog;
     private readonly ListBox _list = new() { IntegralHeight = false, DrawMode = DrawMode.OwnerDrawFixed };
+    private readonly ILogger<MainChatsForm> _logger;
     private readonly HashSet<int> _newChatIds = [];
     private readonly UserP2pRuntime _p2P;
     private readonly Label _profile = new() { AutoSize = true };
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
-    private readonly HashSet<int> _unreadChatIds = [];
     private readonly IServiceProvider _services;
-    private readonly ILogger<MainChatsForm> _logger;
-    private readonly ILogger<ChatForm> _chatLog;
-    private readonly ILogger<LocalNetworkScanForm> _lanScanLog;
-    private readonly ILogger<UserAction> _userActions;
-    private readonly ChatMediaOptions _chatMedia;
-    private readonly AppSettingsStore _appSettings;
-    private readonly IBluetoothRadioCatalog _bluetoothCatalog;
     private readonly Label _udpTransportIndicator = new() { AutoSize = true };
-    private readonly Label _bluetoothTransportIndicator = new() { AutoSize = true };
+    private readonly HashSet<int> _unreadChatIds = [];
+    private readonly ILogger<UserAction> _userActions;
     private int? _focusedChatId;
     private bool _knownChatsInitialized;
     private LogViewerForm? _logViewer;
@@ -121,7 +119,7 @@ public sealed class MainChatsForm : Form
             AutoSize = true,
             FlowDirection = FlowDirection.LeftToRight,
             Dock = DockStyle.Bottom,
-            Padding = new Padding(0, 6, 0, 0),
+            Padding = new Padding(0, 6, 0, 0)
         };
         transportIndicators.Controls.Add(_udpTransportIndicator);
         transportIndicators.Controls.Add(new Label { AutoSize = true, Text = "   " });
@@ -416,7 +414,8 @@ public sealed class MainChatsForm : Form
             return;
         }
 
-        var chat = await _chats.AddChatAsync(u.Id, dlg.PeerNickname, dlg.PeerNetworkIdShort, dlg.PeerPublicKeyJson.Trim(),
+        var chat = await _chats.AddChatAsync(u.Id, dlg.PeerNickname, dlg.PeerNetworkIdShort,
+            dlg.PeerPublicKeyJson.Trim(),
             dlg.PeerHosts, dlg.PeerPort).ConfigureAwait(true);
         _userActions.LogInformation(
             "Chats: chat added (peer {Peer}, network id {NetworkId}, host {Host}:{Port})",

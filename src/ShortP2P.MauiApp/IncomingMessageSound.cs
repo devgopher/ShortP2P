@@ -1,7 +1,3 @@
-using System.Threading;
-using Microsoft.Extensions.Logging;
-using Microsoft.Maui.ApplicationModel;
-using Microsoft.Maui.Storage;
 using ShortP2P.Client.Services;
 
 namespace ShortP2P.MauiApp;

@@ -1,6 +1,5 @@
 using System.Runtime.Versioning;
 using Windows.Devices.Bluetooth;
-using Windows.Devices.Enumeration;
 using TransportAddressFmt = ShortP2P.Transport.BluetoothTransportAddress;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
@@ -41,7 +40,6 @@ public static class LocalAdapterBluetoothMac
     private static async Task<BluetoothAdapter?> ResolveAdapterAsync(string? deviceId)
     {
         if (!string.IsNullOrWhiteSpace(deviceId))
-        {
             try
             {
                 return await BluetoothAdapter.FromIdAsync(deviceId).AsTask().ConfigureAwait(false);
@@ -50,7 +48,6 @@ public static class LocalAdapterBluetoothMac
             {
                 // fall through
             }
-        }
 
         return await BluetoothAdapter.GetDefaultAsync().AsTask().ConfigureAwait(false);
     }

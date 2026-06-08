@@ -1,79 +1,77 @@
-using System;
 using System.Security.Cryptography;
 
-namespace ShortP2P.Crypto
+namespace ShortP2P.Crypto;
+
+/// <summary>
+///     RSA-based handshake packaging.
+///     The initiator generates random session keys (AES key + HMAC key) and encrypts them with the peer's RSA public key.
+///     For RSA-1024, the encrypted handshake packet is exactly 128 bytes.
+/// </summary>
+public static class P2PHandshake
 {
+    private const int RsaKeySizeBits = 1024;
+    private const int SessionKeyBytes = 16 + 32; // aesKey(16) + macKey(32)
+    private const int HandshakePacketBytes = RsaKeySizeBits / 8; // 1024 / 8 = 128
+
     /// <summary>
-    ///     RSA-based handshake packaging.
-    ///     The initiator generates random session keys (AES key + HMAC key) and encrypts them with the peer's RSA public key.
-    ///     For RSA-1024, the encrypted handshake packet is exactly 128 bytes.
+    ///     Creates handshake packet for the peer and returns an initiator-side session
+    ///     using the same randomly generated session keys.
     /// </summary>
-    public static class P2PHandshake
+    public static P2PHandshakeResult CreateHandshakeInitiation(RsaPublicKey remotePublicKey)
     {
-        private const int RsaKeySizeBits = 1024;
-        private const int SessionKeyBytes = 16 + 32; // aesKey(16) + macKey(32)
-        private const int HandshakePacketBytes = RsaKeySizeBits / 8; // 1024 / 8 = 128
+        ArgumentNullException.ThrowIfNull(remotePublicKey);
 
-        /// <summary>
-        ///     Creates handshake packet for the peer and returns an initiator-side session
-        ///     using the same randomly generated session keys.
-        /// </summary>
-        public static P2PHandshakeResult CreateHandshakeInitiation(RsaPublicKey remotePublicKey)
+        using var rsa = RSA.Create();
+        rsa.ImportParameters(remotePublicKey.ToParameters());
+
+        var sessionKeys = new byte[SessionKeyBytes];
+        using (var rng = RandomNumberGenerator.Create())
         {
-            ArgumentNullException.ThrowIfNull(remotePublicKey);
+            rng.GetBytes(sessionKeys);
+        }
 
-            using var rsa = RSA.Create();
-            rsa.ImportParameters(remotePublicKey.ToParameters());
+        var encrypted = rsa.Encrypt(sessionKeys, RSAEncryptionPadding.OaepSHA1);
+        if (encrypted.Length != HandshakePacketBytes)
+            throw new CryptographicException(
+                $"Unexpected handshake packet length: {encrypted.Length}. Expected {HandshakePacketBytes}.");
 
-            var sessionKeys = new byte[SessionKeyBytes];
-            using (var rng = RandomNumberGenerator.Create())
-            {
-                rng.GetBytes(sessionKeys);
-            }
+        var aesKey = new byte[16];
+        var macKey = new byte[32];
+        Buffer.BlockCopy(sessionKeys, 0, aesKey, 0, 16);
+        Buffer.BlockCopy(sessionKeys, 16, macKey, 0, 32);
 
-            var encrypted = rsa.Encrypt(sessionKeys, RSAEncryptionPadding.OaepSHA1);
-            if (encrypted.Length != HandshakePacketBytes)
+        var session = new P2PSession(aesKey, macKey);
+        return new P2PHandshakeResult(encrypted, session);
+    }
+
+    /// <summary>
+    ///     Creates handshake packet for the peer: RSA-OAEP(SHA1) encrypts (aesKey||macKey).
+    /// </summary>
+    public static byte[] CreateHandshakePacket(RsaPublicKey remotePublicKey)
+    {
+        return CreateHandshakeInitiation(remotePublicKey).HandshakePacket;
+    }
+
+    /// <summary>
+    ///     Decrypts handshake packet and returns (aesKey||macKey).
+    /// </summary>
+    public static byte[] DecryptHandshakePacket(RsaPrivateKey localPrivateKey, byte[] handshakePacket)
+    {
+        ArgumentNullException.ThrowIfNull(localPrivateKey);
+        ArgumentNullException.ThrowIfNull(handshakePacket);
+        if (handshakePacket.Length != HandshakePacketBytes)
+            throw new ArgumentException($"Handshake packet must be exactly {HandshakePacketBytes} bytes.",
+                nameof(handshakePacket));
+
+        using (var rsa = RSA.Create())
+        {
+            rsa.ImportParameters(localPrivateKey.ToParameters());
+            var decrypted = rsa.Decrypt(handshakePacket, RSAEncryptionPadding.OaepSHA1);
+            if (decrypted.Length != SessionKeyBytes)
                 throw new CryptographicException(
-                    $"Unexpected handshake packet length: {encrypted.Length}. Expected {HandshakePacketBytes}.");
+                    $"Unexpected decrypted session key length: {decrypted.Length}. Expected {SessionKeyBytes}.");
 
-            var aesKey = new byte[16];
-            var macKey = new byte[32];
-            Buffer.BlockCopy(sessionKeys, 0, aesKey, 0, 16);
-            Buffer.BlockCopy(sessionKeys, 16, macKey, 0, 32);
-
-            var session = new P2PSession(aesKey, macKey);
-            return new P2PHandshakeResult(encrypted, session);
-        }
-
-        /// <summary>
-        ///     Creates handshake packet for the peer: RSA-OAEP(SHA1) encrypts (aesKey||macKey).
-        /// </summary>
-        public static byte[] CreateHandshakePacket(RsaPublicKey remotePublicKey)
-        {
-            return CreateHandshakeInitiation(remotePublicKey).HandshakePacket;
-        }
-
-        /// <summary>
-        ///     Decrypts handshake packet and returns (aesKey||macKey).
-        /// </summary>
-        public static byte[] DecryptHandshakePacket(RsaPrivateKey localPrivateKey, byte[] handshakePacket)
-        {
-            ArgumentNullException.ThrowIfNull(localPrivateKey);
-            ArgumentNullException.ThrowIfNull(handshakePacket);
-            if (handshakePacket.Length != HandshakePacketBytes)
-                throw new ArgumentException($"Handshake packet must be exactly {HandshakePacketBytes} bytes.",
-                    nameof(handshakePacket));
-
-            using (var rsa = RSA.Create())
-            {
-                rsa.ImportParameters(localPrivateKey.ToParameters());
-                var decrypted = rsa.Decrypt(handshakePacket, RSAEncryptionPadding.OaepSHA1);
-                if (decrypted.Length != SessionKeyBytes)
-                    throw new CryptographicException(
-                        $"Unexpected decrypted session key length: {decrypted.Length}. Expected {SessionKeyBytes}.");
-
-                return decrypted;
-            }
+            return decrypted;
         }
     }
 }

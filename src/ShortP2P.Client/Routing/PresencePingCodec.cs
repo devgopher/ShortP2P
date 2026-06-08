@@ -13,9 +13,12 @@ namespace ShortP2P.Client.Routing;
 ///     <see cref="Build" /> / <see cref="TryParse" /> и приёмопередатчик <see cref="Transceiver" /> поверх
 ///     <see cref="ITransport" /> (UDP, BLE и т.д.).
 ///     Формат: [0]=frame, [1..12]=network id, [13..14]=длина ника, [15..]=UTF-8 ник, uint16 BE dataUdpPort,
-///     [+1]=<see cref="LinkTechnologyPreset" /> (опционально), [+2]=uint16 BE <see cref="PresencePeerCapabilities" /> (опционально, на будущее).
-///     Совместимость: 13 байт только id; 15+nick — ник без порта; без байта скорости — <see cref="LinkTechnologyPreset.Unlimited" />;
-///     без двух байт маски — считается только Messaging (<see cref="PresencePeerCapabilities.Chat" />) у отправителя legacy-клиента.
+///     [+1]=<see cref="LinkTechnologyPreset" /> (опционально), [+2]=uint16 BE <see cref="PresencePeerCapabilities" />
+///     (опционально, на будущее).
+///     Совместимость: 13 байт только id; 15+nick — ник без порта; без байта скорости —
+///     <see cref="LinkTechnologyPreset.Unlimited" />;
+///     без двух байт маски — считается только Messaging (<see cref="PresencePeerCapabilities.Chat" />) у отправителя
+///     legacy-клиента.
 ///     Полный перечень ролей узла — README ShortP2P.Discovery, раздел «Узел и возможности».
 /// </summary>
 public static class PresencePingCodec
@@ -167,7 +170,6 @@ public static class PresencePingCodec
                 return;
             var packet = BuildPacket(message);
             foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(udpPort))
-            {
                 try
                 {
                     await _transport.SendAsync(packet, UdpTransportAddress.FromIPEndPoint(ep), cancellationToken)
@@ -177,10 +179,12 @@ public static class PresencePingCodec
                 {
                     // best-effort
                 }
-            }
         }
 
-        public ValueTask DisposeAsync() => StopAsync();
+        public ValueTask DisposeAsync()
+        {
+            return StopAsync();
+        }
 
         private static byte[] BuildPacket(PingMessage message)
         {

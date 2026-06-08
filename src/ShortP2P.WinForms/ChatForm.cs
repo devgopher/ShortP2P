@@ -1,10 +1,10 @@
+using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Globalization;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
 using NAudio.Vorbis;
 using NAudio.Wave;
-using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client;
@@ -12,6 +12,7 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
 using ShortP2P.Transport.Bluetooth.Windows;
+using Timer = System.Windows.Forms.Timer;
 
 namespace ShortP2P.WinForms;
 
@@ -20,127 +21,148 @@ public sealed class ChatForm : Form
     private const string FileCaptionNewline = "\r\n";
     private const string FileDownloadHintPrefix = "Двойной щелчок — ";
     private const string FileDownloadHintAction = "Скачать";
-    private static readonly Color FileDownloadActionColor = Color.FromArgb(0, 102, 204);
     private const int MessagesPageSize = 15;
 
-    private readonly ChatEntity _chat;
-    private readonly UserEntity _user;
-    private readonly AuthService _auth;
-    private readonly ChatRepository _repo;
-    private readonly UserP2pRuntime _p2PRuntime;
-    private readonly ChatMediaOptions _media;
+    private const int MaxVoiceRecordSeconds = 120;
+
+    private const int SB_VERT = 1;
+    private const uint SIF_ALL = 0x17;
+    private static readonly Color FileDownloadActionColor = Color.FromArgb(0, 102, 204);
     private readonly AppSettingsStore _appSettings;
-    private readonly ILogger<ChatForm> _logger;
-    private readonly ILogger<UserAction> _userActions;
-    private readonly Label _peerInfoLabel = new()
-    {
-        AutoSize = true,
-        ForeColor = SystemColors.GrayText,
-        Padding = new Padding(0, 0, 0, 2),
-    };
-    private readonly Button _clearChat = new() { Text = "Удалить", AutoSize = true };
-    private readonly Label _deliveryIssueLabel = new()
-    {
-        Dock = DockStyle.Fill,
-        AutoSize = false,
-        Visible = false,
-        ForeColor = Color.DarkRed,
-        Padding = new Padding(8, 2, 8, 4),
-    };
-    private readonly ListBox _messages = new()
-    {
-        Dock = DockStyle.Fill,
-        IntegralHeight = false,
-        ScrollAlwaysVisible = true,
-        Padding = new Padding(8, 5, 8, 4),
-        DrawMode = DrawMode.OwnerDrawVariable,
-    };
-    private readonly RichTextBox _input = new()
-    {
-        Dock = DockStyle.Fill,
-        Multiline = true,
-        AcceptsTab = false,
-        BorderStyle = BorderStyle.FixedSingle,
-        MaxLength = ChatP2pSession.MaxMessageChars,
-    };
-    private readonly Button _attachVoice = new()
-    {
-        Text = "🎤",
-        Dock = DockStyle.Right,
-        Width = 36,
-        Height = 36,
-        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point),
-    };
-    private readonly Button _attachImage = new()
-    {
-        Text = "🖼",
-        Dock = DockStyle.Right,
-        Width = 36,
-        Height = 36,
-        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point),
-    };
-    private readonly Button _attachVideo = new()
-    {
-        Text = "🎬",
-        Dock = DockStyle.Right,
-        Width = 36,
-        Height = 36,
-        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point),
-    };
+
     private readonly Button _attachCamera = new()
     {
         Text = "📹",
         Dock = DockStyle.Right,
         Width = 36,
         Height = 36,
-        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point),
+        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point)
     };
+
     private readonly Button _attachDocument = new()
     {
         Text = "📄",
         Dock = DockStyle.Right,
         Width = 36,
         Height = 36,
-        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point),
+        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point)
     };
+
+    private readonly Button _attachImage = new()
+    {
+        Text = "🖼",
+        Dock = DockStyle.Right,
+        Width = 36,
+        Height = 36,
+        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point)
+    };
+
+    private readonly Button _attachVideo = new()
+    {
+        Text = "🎬",
+        Dock = DockStyle.Right,
+        Width = 36,
+        Height = 36,
+        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point)
+    };
+
+    private readonly Button _attachVoice = new()
+    {
+        Text = "🎤",
+        Dock = DockStyle.Right,
+        Width = 36,
+        Height = 36,
+        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point)
+    };
+
+    private readonly AuthService _auth;
+    private readonly ToolTip _buttonTooltips = new() { ShowAlways = true };
+
+    private readonly ChatEntity _chat;
+    private readonly Button _clearChat = new() { Text = "Удалить", AutoSize = true };
+
+    private readonly Label _deliveryIssueLabel = new()
+    {
+        Dock = DockStyle.Fill,
+        AutoSize = false,
+        Visible = false,
+        ForeColor = Color.DarkRed,
+        Padding = new Padding(8, 2, 8, 4)
+    };
+
+    private readonly RichTextBox _input = new()
+    {
+        Dock = DockStyle.Fill,
+        Multiline = true,
+        AcceptsTab = false,
+        BorderStyle = BorderStyle.FixedSingle,
+        MaxLength = ChatP2pSession.MaxMessageChars
+    };
+
+    private readonly List<ChatMessageEntity> _loadedRows = [];
+    private readonly ILogger<ChatForm> _logger;
+    private readonly ChatMediaOptions _media;
+
+    private readonly ListBox _messages = new()
+    {
+        Dock = DockStyle.Fill,
+        IntegralHeight = false,
+        ScrollAlwaysVisible = true,
+        Padding = new Padding(8, 5, 8, 4),
+        DrawMode = DrawMode.OwnerDrawVariable
+    };
+
+    private readonly UserP2pRuntime _p2PRuntime;
+
+    private readonly Label _peerInfoLabel = new()
+    {
+        AutoSize = true,
+        ForeColor = SystemColors.GrayText,
+        Padding = new Padding(0, 0, 0, 2)
+    };
+
+    private readonly ChatRepository _repo;
+
     private readonly Button _send = new()
     {
         Text = "➤",
         Dock = DockStyle.Right,
         Width = 36,
         Height = 36,
-        Font = new Font("Segoe UI", 10, FontStyle.Bold, GraphicsUnit.Point),
+        Font = new Font("Segoe UI", 10, FontStyle.Bold, GraphicsUnit.Point)
     };
+
     private readonly GroupBox _techGroup = new()
     {
         Text = "TECH",
         Dock = DockStyle.Bottom,
         Height = 52,
         Padding = new Padding(8, 4, 8, 4),
-        TabStop = false,
+        TabStop = false
     };
+
     private readonly Button _techHandshake = new() { Text = "Send handshake", AutoSize = true };
     private readonly Button _techInvite = new() { Text = "Send Invite", AutoSize = true };
     private readonly Button _techPing = new() { Text = "Send ping", AutoSize = true };
-    private readonly ToolTip _buttonTooltips = new() { ShowAlways = true };
-    private ChatP2pSession? _p2PSession;
-    private bool _pairingPromptShown;
-    private readonly List<ChatMessageEntity> _loadedRows = [];
-    private bool _hasMoreRows = true;
-    private bool _isLoadingRows;
+    private readonly UserEntity _user;
+    private readonly ILogger<UserAction> _userActions;
 
     private readonly object _voiceCapLock = new();
-    private WaveInEvent? _voiceWaveIn;
-    private WaveFileWriter? _voiceWaveWriter;
-    private MemoryStream? _voiceWaveMs;
-    private DateTime _voiceRecordStartUtc;
-    private System.Windows.Forms.Timer? _voiceRecordTimer;
+    private bool _hasMoreRows = true;
+    private bool _isLoadingRows;
+    private ChatP2pSession? _p2PSession;
+    private bool _pairingPromptShown;
     private volatile bool _voiceDiscardNextStop;
+    private MemoryStream? _voicePlaybackMem;
 
     private IWavePlayer? _voicePlaybackOut;
     private RawSourceWaveStream? _voicePlaybackRaw;
     private VorbisWaveReader? _voicePlaybackReader;
-    private MemoryStream? _voicePlaybackMem;
+    private DateTime _voiceRecordStartUtc;
+    private Timer? _voiceRecordTimer;
+    private WaveInEvent? _voiceWaveIn;
+    private MemoryStream? _voiceWaveMs;
+    private WaveFileWriter? _voiceWaveWriter;
 
     public ChatForm(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo, UserP2pRuntime p2PRuntime,
         ILogger<ChatForm> logger, ILogger<UserAction> userActions, ChatMediaOptions media, AppSettingsStore appSettings)
@@ -168,7 +190,7 @@ public sealed class ChatForm : Form
             AutoSize = true,
             Padding = new Padding(8, 6, 8, 2),
             ColumnCount = 2,
-            RowCount = 1,
+            RowCount = 1
         };
         top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -178,7 +200,7 @@ public sealed class ChatForm : Form
         var deliveryIssuePanel = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 26,
+            Height = 26
         };
         deliveryIssuePanel.Controls.Add(_deliveryIssueLabel);
 
@@ -201,7 +223,8 @@ public sealed class ChatForm : Form
         _buttonTooltips.SetToolTip(_attachVoice,
             "Голосовое (Ogg Opus, моно ~6 kbps, без ffmpeg): нажмите для начала записи, ещё раз — остановить и отправить.");
         _buttonTooltips.SetToolTip(_attachImage, "Отправить изображение");
-        _buttonTooltips.SetToolTip(_attachVideo, "Отправить видео OGV (обычный: 320x240, экономия: 160x120, до 60 сек)");
+        _buttonTooltips.SetToolTip(_attachVideo,
+            "Отправить видео OGV (обычный: 320x240, экономия: 160x120, до 60 сек)");
         _buttonTooltips.SetToolTip(_attachCamera, "Записать видеосообщение с камеры");
         _buttonTooltips.SetToolTip(_attachDocument, "Отправить документ");
         _buttonTooltips.SetToolTip(_send, "Отправить сообщение");
@@ -217,7 +240,7 @@ public sealed class ChatForm : Form
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = false,
             AutoSize = true,
-            Padding = new Padding(0, 2, 0, 0),
+            Padding = new Padding(0, 2, 0, 0)
         };
         techFlow.Controls.Add(_techHandshake);
         techFlow.Controls.Add(_techInvite);
@@ -259,7 +282,6 @@ public sealed class ChatForm : Form
         _p2PSession = _p2PRuntime.GetSession(fresh, _user, _auth, _repo, uiSync);
         _p2PSession.MessagesChanged += OnP2pMessagesChanged;
         if (!_p2PRuntime.IsChatSessionStarted(_chat.Id))
-        {
             try
             {
                 await _p2PSession.StartAsync().ConfigureAwait(true);
@@ -273,7 +295,6 @@ public sealed class ChatForm : Form
                 MessageBox.Show(this, $"Could not start UDP: {ex.Message}", "P2P", MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
             }
-        }
 
         await ReloadMessagesAsync().ConfigureAwait(true);
         RefreshPeerPresenceLabel();
@@ -292,17 +313,17 @@ public sealed class ChatForm : Form
         }
 
         foreach (var item in _messages.Items)
-        {
             if (item is ChatLine line)
                 line.Dispose();
-        }
 
         _messages.Items.Clear();
         base.OnFormClosed(e);
     }
 
-    private void OnP2pMessagesChanged(object? sender, EventArgs e) =>
+    private void OnP2pMessagesChanged(object? sender, EventArgs e)
+    {
         BeginInvoke(() => _ = ReloadMessagesAsync());
+    }
 
     private async Task ReloadMessagesAsync()
     {
@@ -328,16 +349,11 @@ public sealed class ChatForm : Form
                 return;
             _messages.BeginUpdate();
             foreach (var existing in _messages.Items)
-            {
                 if (existing is ChatLine oldLine)
                     oldLine.Dispose();
-            }
 
             _messages.Items.Clear();
-            foreach (var m in rows)
-            {
-                _messages.Items.Add(BuildChatLine(m));
-            }
+            foreach (var m in rows) _messages.Items.Add(BuildChatLine(m));
             _messages.EndUpdate();
         }
         catch (ObjectDisposedException)
@@ -366,7 +382,8 @@ public sealed class ChatForm : Form
         {
             var kb = (voiceBlob.Length + 1023) / 1024;
             var caption = $"{whoPrefix} [{ts}] · голосовое · Ogg Opus · ~6 kbps mono · {kb} КБ";
-            return new ChatLine(m.Id, caption, color, m.Outgoing, ds, ChatLineKind.Voice, voiceBlob, VoiceRecordHelper.VoiceFileName);
+            return new ChatLine(m.Id, caption, color, m.Outgoing, ds, ChatLineKind.Voice, voiceBlob,
+                VoiceRecordHelper.VoiceFileName);
         }
 
         if (m.PayloadKind == (int)ChatPayloadKind.File && m.ImageBlob is { Length: > 0 } fileBlob)
@@ -404,7 +421,8 @@ public sealed class ChatForm : Form
                 _ => "нажмите для скачивания"
             };
             var name = string.IsNullOrWhiteSpace(m.TransferFileName) ? m.Text : m.TransferFileName;
-            var caption = $"{whoPrefix} [{ts}] · {m.TransferPayloadKind} · {name} · {kb} КБ{FileCaptionNewline}{stateText}";
+            var caption =
+                $"{whoPrefix} [{ts}] · {m.TransferPayloadKind} · {name} · {kb} КБ{FileCaptionNewline}{stateText}";
             return new ChatLine(m.Id, caption, color, m.Outgoing, ds, ChatLineKind.TransferOffer, null, name);
         }
 
@@ -442,7 +460,7 @@ public sealed class ChatForm : Form
                 ? "Видео OGV (160x120, до 60 секунд)"
                 : "Видео OGV (320x240, до 60 секунд)",
             Filter = "Видео OGV|*.ogv|Все файлы|*.*",
-            CheckFileExists = true,
+            CheckFileExists = true
         };
         if (dlg.ShowDialog(this) != DialogResult.OK)
             return;
@@ -457,9 +475,11 @@ public sealed class ChatForm : Form
             }
 
             var prepared = await VideoAttachHelper
-                .TryLoadAndValidateOgvAsync(dlg.FileName, _media.MaxDocumentBytes, _appSettings.Current.TrafficSavingEnabled)
+                .TryLoadAndValidateOgvAsync(dlg.FileName, _media.MaxDocumentBytes,
+                    _appSettings.Current.TrafficSavingEnabled)
                 .ConfigureAwait(true);
-            if (!prepared.Success || prepared.Bytes == null || prepared.OutputFileName == null || prepared.OutputMime == null)
+            if (!prepared.Success || prepared.Bytes == null || prepared.OutputFileName == null ||
+                prepared.OutputMime == null)
             {
                 MessageBox.Show(this, prepared.Error ?? "Видео не прошло валидацию.", "Видео", MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
@@ -468,7 +488,8 @@ public sealed class ChatForm : Form
 
             _media.ValidateDocumentMime(prepared.OutputMime);
             _media.ValidateDocumentSize(prepared.Bytes.Length);
-            await _p2PSession.SendFileAsync(prepared.OutputFileName, prepared.Bytes, prepared.OutputMime).ConfigureAwait(true);
+            await _p2PSession.SendFileAsync(prepared.OutputFileName, prepared.Bytes, prepared.OutputMime)
+                .ConfigureAwait(true);
             _userActions.LogInformation("Chat {Peer}: sent ogv video ({Bytes} bytes, {Mime})",
                 _chat.PeerNickname, prepared.Bytes.Length, prepared.OutputMime);
             ClearDeliveryIssue();
@@ -507,7 +528,8 @@ public sealed class ChatForm : Form
         {
             _media.ValidateDocumentMime(win.Result.MimeType);
             _media.ValidateDocumentSize(win.Result.Bytes.Length);
-            await _p2PSession.SendFileAsync(win.Result.FileName, win.Result.Bytes, win.Result.MimeType).ConfigureAwait(true);
+            await _p2PSession.SendFileAsync(win.Result.FileName, win.Result.Bytes, win.Result.MimeType)
+                .ConfigureAwait(true);
             _userActions.LogInformation("Chat {Peer}: sent camera video ({Bytes} bytes, {Mime})",
                 _chat.PeerNickname, win.Result.Bytes.Length, win.Result.MimeType);
             ClearDeliveryIssue();
@@ -540,7 +562,7 @@ public sealed class ChatForm : Form
         {
             Title = "Изображение (JPEG, PNG, GIF)",
             Filter = "Изображения|*.jpg;*.jpeg;*.png;*.gif|Все файлы|*.*",
-            CheckFileExists = true,
+            CheckFileExists = true
         };
         if (dlg.ShowDialog(this) != DialogResult.OK)
             return;
@@ -629,7 +651,7 @@ public sealed class ChatForm : Form
             Title = "Документ Word / LibreOffice (до 10 МБ)",
             Filter =
                 "Документы|*.doc;*.docx;*.rtf;*.pdf;*.odt;*.ods;*.odp;*.odg;*.xlsx;*.xls;*.pptx;*.ppt|Все файлы|*.*",
-            CheckFileExists = true,
+            CheckFileExists = true
         };
         if (dlg.ShowDialog(this) != DialogResult.OK)
             return;
@@ -654,7 +676,8 @@ public sealed class ChatForm : Form
             var headLen = Math.Min(4096, bytes.Length);
             if (!DocumentAttachHelper.SniffMatchesMime(bytes.AsSpan(0, headLen), mime))
             {
-                MessageBox.Show(this, "Содержимое не совпадает с типом файла (ожидается корректный Office/LibreOffice).",
+                MessageBox.Show(this,
+                    "Содержимое не совпадает с типом файла (ожидается корректный Office/LibreOffice).",
                     "Файл", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -682,7 +705,8 @@ public sealed class ChatForm : Form
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Send document failed in chat {ChatId}", _chat.Id);
-            _userActions.LogInformation("Chat {Peer}: send document failed ({Message})", _chat.PeerNickname, ex.Message);
+            _userActions.LogInformation("Chat {Peer}: send document failed ({Message})", _chat.PeerNickname,
+                ex.Message);
             if (HandleBluetoothUnavailable(ex))
                 return;
             ShowDeliveryIssue(ex.Message);
@@ -774,8 +798,6 @@ public sealed class ChatForm : Form
         }
     }
 
-    private const int MaxVoiceRecordSeconds = 120;
-
     private void OnAttachVoice()
     {
         if (_p2PSession == null)
@@ -805,7 +827,6 @@ public sealed class ChatForm : Form
             _voiceWaveWriter = new WaveFileWriter(_voiceWaveMs, wf);
             var selectedDevice = _appSettings.Current.VoiceInputDeviceNumber;
             if (selectedDevice.HasValue)
-            {
                 if (selectedDevice.Value >= WaveIn.DeviceCount)
                 {
                     MessageBox.Show(this,
@@ -815,12 +836,11 @@ public sealed class ChatForm : Form
                         MessageBoxIcon.Warning);
                     return;
                 }
-            }
 
             _voiceWaveIn = new WaveInEvent
             {
                 WaveFormat = wf,
-                BufferMilliseconds = 100,
+                BufferMilliseconds = 100
             };
             if (selectedDevice.HasValue)
                 _voiceWaveIn.DeviceNumber = selectedDevice.Value;
@@ -830,7 +850,7 @@ public sealed class ChatForm : Form
             _voiceWaveIn.StartRecording();
             _attachVoice.BackColor = Color.MistyRose;
             _voiceRecordTimer?.Dispose();
-            _voiceRecordTimer = new System.Windows.Forms.Timer { Interval = 400 };
+            _voiceRecordTimer = new Timer { Interval = 400 };
             _voiceRecordTimer.Tick += (_, _) =>
             {
                 if (_voiceWaveIn == null)
@@ -977,7 +997,8 @@ public sealed class ChatForm : Form
 
                 _media.ValidateDocumentMime(VoiceRecordHelper.VoiceMessageMime);
                 _media.ValidateDocumentSize(ogg.Length);
-                await _p2PSession!.SendFileAsync(VoiceRecordHelper.VoiceFileName, ogg, VoiceRecordHelper.VoiceMessageMime)
+                await _p2PSession!
+                    .SendFileAsync(VoiceRecordHelper.VoiceFileName, ogg, VoiceRecordHelper.VoiceMessageMime)
                     .ConfigureAwait(true);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1113,7 +1134,7 @@ public sealed class ChatForm : Form
             try
             {
                 var (pcm, sr) = VoiceRecordHelper.DecodeOpusOggToPcm16(ogg);
-                var pcmMs = new MemoryStream(pcm, writable: false);
+                var pcmMs = new MemoryStream(pcm, false);
                 _voicePlaybackRaw = new RawSourceWaveStream(pcmMs, new WaveFormat(sr, 16, 1));
                 _voicePlaybackOut = new WaveOutEvent();
                 _voicePlaybackOut.Init(_voicePlaybackRaw);
@@ -1122,7 +1143,7 @@ public sealed class ChatForm : Form
             {
                 _voicePlaybackRaw?.Dispose();
                 _voicePlaybackRaw = null;
-                _voicePlaybackMem = new MemoryStream(ogg, writable: false);
+                _voicePlaybackMem = new MemoryStream(ogg, false);
                 _voicePlaybackReader = new VorbisWaveReader(_voicePlaybackMem);
                 _voicePlaybackOut = new WaveOutEvent();
                 _voicePlaybackOut.Init(_voicePlaybackReader);
@@ -1157,7 +1178,8 @@ public sealed class ChatForm : Form
 
         StopVoicePlaybackInternal();
         if (e.Exception != null && IsHandleCreated && !IsDisposed)
-            MessageBox.Show(this, e.Exception.Message, "Воспроизведение", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, e.Exception.Message, "Воспроизведение", MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
     }
 
     private void OnMessagesMouseClick(object? sender, MouseEventArgs e)
@@ -1174,6 +1196,7 @@ public sealed class ChatForm : Form
             _ = RetryFailedMessageAsync(line.MessageId);
             return;
         }
+
         if (line.Kind == ChatLineKind.TransferOffer)
         {
             _ = DownloadTransferOfferAsync(line.MessageId);
@@ -1207,7 +1230,7 @@ public sealed class ChatForm : Form
             Title = "Сохранить видео",
             FileName = string.IsNullOrEmpty(line.FileSuggestedName) ? "video.webm" : line.FileSuggestedName,
             Filter = "Все файлы|*.*",
-            OverwritePrompt = true,
+            OverwritePrompt = true
         };
         if (sfd.ShowDialog(this) != DialogResult.OK)
             return;
@@ -1251,7 +1274,10 @@ public sealed class ChatForm : Form
         _deliveryIssueLabel.Visible = false;
     }
 
-    private string PeerInfoText(string statusLine) => $"Id: {_chat.PeerNetworkIdShort}\r\n{statusLine}";
+    private string PeerInfoText(string statusLine)
+    {
+        return $"Id: {_chat.PeerNetworkIdShort}\r\n{statusLine}";
+    }
 
     private bool HandleBluetoothUnavailable(Exception ex)
     {
@@ -1294,6 +1320,7 @@ public sealed class ChatForm : Form
             _ = RetryFailedMessageAsync(line.MessageId);
             return;
         }
+
         if (line.Kind == ChatLineKind.Voice && line.PayloadBytes is { Length: > 0 })
         {
             _userActions.LogInformation("Chat {Peer}: play voice message (double-click)", _chat.PeerNickname);
@@ -1308,7 +1335,7 @@ public sealed class ChatForm : Form
                 Title = "Сохранить файл",
                 FileName = string.IsNullOrEmpty(line.FileSuggestedName) ? "document" : line.FileSuggestedName,
                 Filter = "Все файлы|*.*",
-                OverwritePrompt = true,
+                OverwritePrompt = true
             };
             if (sfd.ShowDialog(this) == DialogResult.OK)
             {
@@ -1371,7 +1398,8 @@ public sealed class ChatForm : Form
                 return;
             }
 
-            _userActions.LogInformation("Chat {Peer}: history cleared (chat id {ChatId})", _chat.PeerNickname, _chat.Id);
+            _userActions.LogInformation("Chat {Peer}: history cleared (chat id {ChatId})", _chat.PeerNickname,
+                _chat.Id);
         }
         catch (Exception ex)
         {
@@ -1478,7 +1506,10 @@ public sealed class ChatForm : Form
             var playRect = new Rectangle(e.Bounds.X + 4, playY, 52, 22);
             line.PlayButtonBounds = playRect;
             using (var br = new SolidBrush(Color.WhiteSmoke))
+            {
                 e.Graphics.FillRectangle(br, playRect);
+            }
+
             using var pen = new Pen(Color.SteelBlue, 1);
             e.Graphics.DrawRectangle(pen, playRect);
             TextRenderer.DrawText(e.Graphics, "Play", font, playRect, Color.SteelBlue,
@@ -1571,14 +1602,16 @@ public sealed class ChatForm : Form
         return si.nPos + (int)si.nPage >= si.nMax;
     }
 
-    private static (string Glyph, Color Color) OutgoingDeliveryDraw(MessageDeliveryStatus status) =>
-        status switch
+    private static (string Glyph, Color Color) OutgoingDeliveryDraw(MessageDeliveryStatus status)
+    {
+        return status switch
         {
             MessageDeliveryStatus.Pending => (OutgoingDeliveryIndicators.Pending, Color.DarkGoldenrod),
             MessageDeliveryStatus.Delivered => (OutgoingDeliveryIndicators.Delivered, Color.ForestGreen),
             MessageDeliveryStatus.Failed => (OutgoingDeliveryIndicators.Failed, Color.Red),
-            _ => (OutgoingDeliveryIndicators.Delivered, Color.ForestGreen),
+            _ => (OutgoingDeliveryIndicators.Delivered, Color.ForestGreen)
         };
+    }
 
     private static Color GetPaletteColor(string key)
     {
@@ -1586,7 +1619,7 @@ public sealed class ChatForm : Form
         const int hueSteps = 12;
         const int lightSteps = 3;
         var h = hash % hueSteps;
-        var lBand = (hash / hueSteps) % lightSteps;
+        var lBand = hash / hueSteps % lightSteps;
         var hue = h * (360.0 / hueSteps);
         var lightness = 0.40 + lBand * 0.06;
         return ColorFromHsl(hue, 0.72, lightness);
@@ -1596,7 +1629,7 @@ public sealed class ChatForm : Form
     {
         hue = hue % 360.0;
         var c = (1.0 - Math.Abs(2.0 * lightness - 1.0)) * saturation;
-        var x = c * (1.0 - Math.Abs((hue / 60.0) % 2.0 - 1.0));
+        var x = c * (1.0 - Math.Abs(hue / 60.0 % 2.0 - 1.0));
         var m = lightness - c / 2.0;
         double r1, g1, b1;
         if (hue < 60) (r1, g1, b1) = (c, x, 0);
@@ -1616,8 +1649,8 @@ public sealed class ChatForm : Form
     {
         try
         {
-            using var ms = new MemoryStream(bytes, writable: false);
-            using var src = Image.FromStream(ms, useEmbeddedColorManagement: false, validateImageData: false);
+            using var ms = new MemoryStream(bytes, false);
+            using var src = Image.FromStream(ms, false, false);
             var w = src.Width;
             var h = src.Height;
             if (w <= 0 || h <= 0)
@@ -1642,8 +1675,9 @@ public sealed class ChatForm : Form
         }
     }
 
-    private const int SB_VERT = 1;
-    private const uint SIF_ALL = 0x17;
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetScrollInfo(IntPtr hWnd, int nBar, ref SCROLLINFO lpScrollInfo);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct SCROLLINFO
@@ -1657,10 +1691,6 @@ public sealed class ChatForm : Form
         public int nTrackPos;
     }
 
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetScrollInfo(IntPtr hWnd, int nBar, ref SCROLLINFO lpScrollInfo);
-
     private enum ChatLineKind
     {
         Text,
@@ -1668,16 +1698,16 @@ public sealed class ChatForm : Form
         File,
         Voice,
         Video,
-        TransferOffer,
+        TransferOffer
     }
 
     private sealed class ChatLine : IDisposable
     {
         private const int ThumbMaxEdge = 240;
         private bool _disposed;
-        private Bitmap? _thumbnail;
 
-        public ChatLine(int messageId, string displayText, Color color, bool outgoing, MessageDeliveryStatus deliveryStatus,
+        public ChatLine(int messageId, string displayText, Color color, bool outgoing,
+            MessageDeliveryStatus deliveryStatus,
             ChatLineKind kind, byte[]? payloadBytes, string? fileSuggestedName)
         {
             MessageId = messageId;
@@ -1690,7 +1720,7 @@ public sealed class ChatForm : Form
             FileSuggestedName = fileSuggestedName;
             PlayButtonBounds = Rectangle.Empty;
             if (kind == ChatLineKind.Image && payloadBytes is { Length: > 0 })
-                _thumbnail = TryCreateThumbnail(payloadBytes, ThumbMaxEdge);
+                Thumbnail = TryCreateThumbnail(payloadBytes, ThumbMaxEdge);
         }
 
         public int MessageId { get; }
@@ -1703,7 +1733,8 @@ public sealed class ChatForm : Form
         public string? FileSuggestedName { get; }
         public Rectangle PlayButtonBounds { get; set; }
         public Rectangle SaveButtonBounds { get; set; }
-        public Bitmap? Thumbnail => _thumbnail;
+        public Bitmap? Thumbnail { get; private set; }
+
         public bool IsRetryable => Outgoing && DeliveryStatus == MessageDeliveryStatus.Failed && MessageId > 0;
 
         public void Dispose()
@@ -1711,10 +1742,13 @@ public sealed class ChatForm : Form
             if (_disposed)
                 return;
             _disposed = true;
-            _thumbnail?.Dispose();
-            _thumbnail = null;
+            Thumbnail?.Dispose();
+            Thumbnail = null;
         }
 
-        public override string ToString() => DisplayText;
+        public override string ToString()
+        {
+            return DisplayText;
+        }
     }
 }

@@ -6,12 +6,6 @@ namespace ShortP2P.Client.Services;
 /// <summary>Потокобезопасный кэш чат-сессий (одна запись на chatId).</summary>
 public sealed class ChatSessionCache
 {
-    private sealed class SessionCacheEntry(ChatP2pSession session, bool isStarted = false)
-    {
-        public ChatP2pSession Session { get; } = session;
-        public int Started = isStarted ? 1 : 0;
-    }
-
     private readonly ConcurrentDictionary<int, SessionCacheEntry> _entries = new();
 
     public ChatP2pSession GetSession(int chatId, Func<ChatP2pSession> createSession, Action<ChatP2pSession> applyChat)
@@ -61,5 +55,11 @@ public sealed class ChatSessionCache
         var list = _entries.Values.Select(x => x.Session).ToList();
         _entries.Clear();
         return list;
+    }
+
+    private sealed class SessionCacheEntry(ChatP2pSession session, bool isStarted = false)
+    {
+        public int Started = isStarted ? 1 : 0;
+        public ChatP2pSession Session { get; } = session;
     }
 }

@@ -8,8 +8,7 @@ namespace ShortP2P.Discovery.RouteTables;
 /// </summary>
 public sealed class PeerChain
 {
-    [Key]
-    public long Id { get; set; }
+    [Key] public long Id { get; set; }
 
     /// <summary>
     ///     RouteId узла, от которого построена цепочка.

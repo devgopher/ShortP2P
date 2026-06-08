@@ -2,10 +2,8 @@ using System.Net;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Data;
-using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Crypto;
-using ShortP2P.Discovery;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
@@ -60,7 +58,8 @@ public static class LanChatStartFromDiscovery
         var dest = peer.TransportKind == TransportKind.Bluetooth
             ? peer.SourceAddress
             : UdpTransportAddress.FromIPEndPoint(
-                new IPEndPoint(UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address, ChatInviteCodec.InviteUdpPort));
+                new IPEndPoint(UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address,
+                    ChatInviteCodec.InviteUdpPort));
 
         var host = InviteHostsBuilder.BuildCommaSeparated(
             inviteListenerCoordinator?.Settings,
@@ -118,7 +117,9 @@ public static class LanChatStartFromDiscovery
                     await bt.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
                 }
                 else
+                {
                     await udp.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
+                }
             }
             finally
             {
@@ -159,7 +160,7 @@ public enum LanChatStartKind
     AlreadyExists,
     Created,
     WaitingForPeer,
-    Failed,
+    Failed
 }
 
 public sealed class LanChatStartResult
@@ -168,28 +169,40 @@ public sealed class LanChatStartResult
     public ChatEntity? Chat { get; private init; }
     public string? Message { get; private init; }
 
-    public static LanChatStartResult AlreadyExists(ChatEntity chat) => new()
+    public static LanChatStartResult AlreadyExists(ChatEntity chat)
     {
-        Kind = LanChatStartKind.AlreadyExists,
-        Chat = chat,
-    };
+        return new LanChatStartResult
+        {
+            Kind = LanChatStartKind.AlreadyExists,
+            Chat = chat
+        };
+    }
 
-    public static LanChatStartResult Created(ChatEntity chat) => new()
+    public static LanChatStartResult Created(ChatEntity chat)
     {
-        Kind = LanChatStartKind.Created,
-        Chat = chat,
-    };
+        return new LanChatStartResult
+        {
+            Kind = LanChatStartKind.Created,
+            Chat = chat
+        };
+    }
 
-    public static LanChatStartResult WaitingForPeer() => new()
+    public static LanChatStartResult WaitingForPeer()
     {
-        Kind = LanChatStartKind.WaitingForPeer,
-        Message =
-            "Приглашение отправлено. Чат появится в списке, когда пир ответит (при необходимости откройте список чатов позже).",
-    };
+        return new LanChatStartResult
+        {
+            Kind = LanChatStartKind.WaitingForPeer,
+            Message =
+                "Приглашение отправлено. Чат появится в списке, когда пир ответит (при необходимости откройте список чатов позже)."
+        };
+    }
 
-    public static LanChatStartResult Failed(string message) => new()
+    public static LanChatStartResult Failed(string message)
     {
-        Kind = LanChatStartKind.Failed,
-        Message = message,
-    };
+        return new LanChatStartResult
+        {
+            Kind = LanChatStartKind.Failed,
+            Message = message
+        };
+    }
 }

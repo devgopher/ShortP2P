@@ -10,24 +10,11 @@ namespace ShortP2P.WinForms;
 
 internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBluetoothTransportProvider
 {
-    private readonly ILogger<WindowsBluetoothTransport> _transportLogger;
+    private readonly IBleDiscoveredPeerStore _bleDiscoveredPeerStore;
     private readonly object _sync = new();
+    private readonly ILogger<WindowsBluetoothTransport> _transportLogger;
     private ITransport? _instance;
     private CompressedNetworkId? _localNetworkId;
-    private readonly IBleDiscoveredPeerStore _bleDiscoveredPeerStore;
-
-    public IBleShortP2PPeripheralScanner PeripheralScanner { get; }
-
-    public ITransport? Current
-    {
-        get
-        {
-            lock (_sync)
-                return _instance;
-        }
-    }
-
-    public ITransport? Instance => Current;
 
     public BluetoothTransportRegistration(ILoggerFactory loggerFactory, IBleDiscoveredPeerStore bleDiscoveredPeerStore)
     {
@@ -45,10 +32,40 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
         }
     }
 
+    public IBleShortP2PPeripheralScanner PeripheralScanner { get; }
+
+    public ITransport? Instance => Current;
+
+    public async ValueTask DisposeAsync()
+    {
+        ITransport? t;
+        lock (_sync)
+        {
+            t = _instance;
+            _instance = null;
+        }
+
+        if (t != null)
+            await t.DisposeAsync().ConfigureAwait(false);
+    }
+
+    public ITransport? Current
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _instance;
+            }
+        }
+    }
+
     public void SetLocalNetworkId(CompressedNetworkId? networkId)
     {
         lock (_sync)
+        {
             _localNetworkId = networkId;
+        }
     }
 
     public void ApplySettings(P2pRoutingSettings settings)
@@ -85,29 +102,16 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
             }
 
             _instance = new WindowsBluetoothTransport(new WindowsBluetoothTransportOptions(
-                GattDiscoverable: true,
-                LocalAdapterBluetoothAddress: localAddr,
-                LocalNetworkId: _localNetworkId,
-                OnPeerNetworkIdReceived: OnPeerNetworkIdReceived,
-                Logger: _transportLogger));
+                true,
+                localAddr,
+                _localNetworkId,
+                OnPeerNetworkIdReceived,
+                _transportLogger));
         }
     }
 
     private void OnPeerNetworkIdReceived(TransportAddress addr, CompressedNetworkId peerNetworkId)
     {
         _ = _bleDiscoveredPeerStore.RecordScanSeenAsync(addr, new BleAdScanResult { NetworkId = peerNetworkId });
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        ITransport? t;
-        lock (_sync)
-        {
-            t = _instance;
-            _instance = null;
-        }
-
-        if (t != null)
-            await t.DisposeAsync().ConfigureAwait(false);
     }
 }

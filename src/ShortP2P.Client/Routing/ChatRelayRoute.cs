@@ -8,13 +8,16 @@ public sealed class ChatRelayRoute
 {
     public TransportAddress Direct { get; init; } = null!;
 
-    /// <summary>Первый получатель (если null — отправляем на <see cref="Direct"/>).</summary>
+    /// <summary>Первый получатель (если null — отправляем на <see cref="Direct" />).</summary>
     public TransportAddress? FirstHop { get; init; }
 
     /// <summary>Адреса для strip-relay после первого хопа (включая финальный адрес пира).</summary>
     public IReadOnlyList<TransportAddress> RelayStrip { get; init; } = [];
 
-    public static ChatRelayRoute DirectOnly(TransportAddress ep) => new() { Direct = ep };
+    public static ChatRelayRoute DirectOnly(TransportAddress ep)
+    {
+        return new ChatRelayRoute { Direct = ep };
+    }
 
     public static string? SerializeBlob(ChatRelayRoute route)
     {

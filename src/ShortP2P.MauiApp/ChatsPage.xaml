@@ -1,4 +1,5 @@
-<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8"?>
+
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="ShortP2P.MauiApp.ChatsPage"
@@ -16,7 +17,8 @@
     <Grid RowDefinitions="Auto,*" Padding="12" RowSpacing="8">
         <VerticalStackLayout Grid.Row="0" Spacing="4">
             <Label x:Name="ProfileLabel" FontSize="12" TextColor="Gray" />
-            <Label Text="P2P chats (UDP). Swipe left on a row and tap Delete to remove the chat on this device only." FontSize="12" TextColor="Gray" />
+            <Label Text="P2P chats (UDP). Swipe left on a row and tap Delete to remove the chat on this device only."
+                   FontSize="12" TextColor="Gray" />
         </VerticalStackLayout>
         <CollectionView x:Name="ChatsCollection" Grid.Row="1" SelectionMode="Single" SelectionChanged="OnChatSelected">
             <CollectionView.ItemTemplate>

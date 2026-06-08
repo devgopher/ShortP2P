@@ -1,32 +1,27 @@
-using System.Drawing;
 using System.Drawing.Imaging;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Auth.Data;
-using ShortP2P.Transport;
 using ShortP2P.Client.Qr;
+using ShortP2P.Transport;
 
 namespace ShortP2P.WinForms;
 
 public sealed class AddChatForm : Form
 {
-    private readonly ILogger<AddChatForm> _logger;
-    private readonly ILogger<UserAction> _userActions;
-    private readonly TextBox _nick = new() { PlaceholderText = "Peer nickname" };
+    private readonly Button _btnCancel = new() { Text = "Cancel", DialogResult = DialogResult.Cancel };
+    private readonly Button _btnOk = new() { Text = "Save" };
+    private readonly TextBox _host = new() { PlaceholderText = "Peer IP / network id / Bluetooth MAC" };
     private readonly TextBox _id = new() { PlaceholderText = "Peer network id" };
+    private readonly ILogger<AddChatForm> _logger;
+    private readonly TextBox _nick = new() { PlaceholderText = "Peer nickname" };
+    private readonly TextBox _port = new() { PlaceholderText = "UDP port" };
+
     private readonly TextBox _pub = new()
     {
         PlaceholderText = "Peer RSA public key JSON", Multiline = true, Height = 80, ScrollBars = ScrollBars.Vertical
     };
-    private readonly TextBox _host = new() { PlaceholderText = "Peer IP / network id / Bluetooth MAC" };
-    private readonly TextBox _port = new() { PlaceholderText = "UDP port" };
-    private readonly Button _btnOk = new() { Text = "Save" };
-    private readonly Button _btnCancel = new() { Text = "Cancel", DialogResult = DialogResult.Cancel };
 
-    public string PeerNickname => _nick.Text.Trim();
-    public string PeerNetworkIdShort => _id.Text.Trim();
-    public string PeerPublicKeyJson => _pub.Text.Trim();
-    public string PeerHosts => _host.Text.Trim();
-    public int PeerPort => int.TryParse(_port.Text, out var p) ? p : 0;
+    private readonly ILogger<UserAction> _userActions;
 
     public AddChatForm(ILogger<AddChatForm> logger, ILogger<UserAction> userActions)
     {
@@ -78,6 +73,12 @@ public sealed class AddChatForm : Form
         _btnOk.Click += OnOkClicked;
         CancelButton = _btnCancel;
     }
+
+    public string PeerNickname => _nick.Text.Trim();
+    public string PeerNetworkIdShort => _id.Text.Trim();
+    public string PeerPublicKeyJson => _pub.Text.Trim();
+    public string PeerHosts => _host.Text.Trim();
+    public int PeerPort => int.TryParse(_port.Text, out var p) ? p : 0;
 
     private void ApplyPayload(PeerQrPayload payload)
     {

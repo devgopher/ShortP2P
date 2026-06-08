@@ -1,5 +1,4 @@
 using ShortP2P.Auth.Data;
-using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport.Tests;
@@ -64,7 +63,7 @@ public sealed class BleAdvertisementIdentityParserTests
         var entries = new[]
         {
             new BleManufacturerDataEntry(0x0001, [0x01, 0x02]),
-            new BleManufacturerDataEntry(BleShortP2PGattProtocol.ManufacturerCompanyId, valid),
+            new BleManufacturerDataEntry(BleShortP2PGattProtocol.ManufacturerCompanyId, valid)
         };
 
         var parsed = BleAdvertisementIdentityParser.ParseManufacturerEntries(entries);
@@ -75,7 +74,7 @@ public sealed class BleAdvertisementIdentityParserTests
     [Fact]
     public void IsShortP2P_detects_service_uuid_or_manufacturer_company()
     {
-        Assert.True(BleAdvertisementIdentityParser.IsShortP2P(advertisesShortP2PServiceUuid: true, null));
+        Assert.True(BleAdvertisementIdentityParser.IsShortP2P(true, null));
         Assert.True(BleAdvertisementIdentityParser.IsShortP2P(false,
             [BleShortP2PGattProtocol.ManufacturerCompanyId]));
         Assert.False(BleAdvertisementIdentityParser.IsShortP2P(false, [0x1234]));

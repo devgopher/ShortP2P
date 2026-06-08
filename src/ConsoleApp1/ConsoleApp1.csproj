@@ -8,7 +8,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\ShortP2P.Transport\ShortP2P.Transport.csproj" />
+        <ProjectReference Include="..\ShortP2P.Transport\ShortP2P.Transport.csproj"/>
     </ItemGroup>
 
 </Project>

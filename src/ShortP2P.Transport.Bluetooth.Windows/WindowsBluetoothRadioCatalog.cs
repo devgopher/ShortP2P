@@ -1,5 +1,4 @@
 using System.Runtime.Versioning;
-using ShortP2P.Transport;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Enumeration;
 using TransportAddressFmt = ShortP2P.Transport.BluetoothTransportAddress;
@@ -9,7 +8,8 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 [SupportedOSPlatform("windows10.0.17763.0")]
 public sealed class WindowsBluetoothRadioCatalog : IBluetoothRadioCatalog
 {
-    public async ValueTask<IReadOnlyList<BluetoothRadioInfo>> ListRadiosAsync(CancellationToken cancellationToken = default)
+    public async ValueTask<IReadOnlyList<BluetoothRadioInfo>> ListRadiosAsync(
+        CancellationToken cancellationToken = default)
     {
         var list = new List<BluetoothRadioInfo>();
         string? defaultId = null;
@@ -55,7 +55,6 @@ public sealed class WindowsBluetoothRadioCatalog : IBluetoothRadioCatalog
         }
 
         if (list.Count == 0 && defaultId != null)
-        {
             try
             {
                 var def = await BluetoothAdapter.GetDefaultAsync().AsTask(cancellationToken).ConfigureAwait(false);
@@ -70,7 +69,6 @@ public sealed class WindowsBluetoothRadioCatalog : IBluetoothRadioCatalog
             {
                 // ignore
             }
-        }
 
         return list;
     }
@@ -80,7 +78,7 @@ public sealed class WindowsBluetoothRadioCatalog : IBluetoothRadioCatalog
     {
         var radios = await ListRadiosAsync(cancellationToken).ConfigureAwait(false);
         if (radios.Count == 0)
-            return await LocalAdapterBluetoothMac.TryGetAdapterMacStringAsync(null).ConfigureAwait(false);
+            return await LocalAdapterBluetoothMac.TryGetAdapterMacStringAsync().ConfigureAwait(false);
 
         BluetoothRadioInfo? pick = null;
         if (!string.IsNullOrWhiteSpace(deviceId))

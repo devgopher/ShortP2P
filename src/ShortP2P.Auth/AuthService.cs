@@ -6,9 +6,9 @@ namespace ShortP2P.Auth;
 public sealed class AuthService
 {
     private const string SessionUserIdKey = "shortp2p_session_user_id";
+    private readonly ISessionStorage _sessionStorage;
 
     private readonly IUserAuthRepository _users;
-    private readonly ISessionStorage _sessionStorage;
 
     public AuthService(IUserAuthRepository users, ISessionStorage sessionStorage)
     {
@@ -40,7 +40,7 @@ public sealed class AuthService
             RsaPrivateJson = RsaKeySerializer.SerializePrivate(keys.PrivateKey),
             RsaPublicJson = RsaKeySerializer.SerializePublic(keys.PublicKey),
             DataUdpPort = 17500,
-            CreatedUtcTicks = DateTime.UtcNow.Ticks,
+            CreatedUtcTicks = DateTime.UtcNow.Ticks
         };
 
         await _users.InsertUserAsync(user).ConfigureAwait(false);
@@ -83,8 +83,10 @@ public sealed class AuthService
         return true;
     }
 
-    private Task PersistSessionAsync(int userId) =>
-        _sessionStorage.SetAsync(SessionUserIdKey, userId.ToString());
+    private Task PersistSessionAsync(int userId)
+    {
+        return _sessionStorage.SetAsync(SessionUserIdKey, userId.ToString());
+    }
 
     public RsaPrivateKey GetCurrentPrivateKey()
     {

@@ -4,20 +4,24 @@ using System.Text.Json;
 
 namespace ShortP2P.Client.ChatMedia;
 
-/// <summary>Бинарный формат полезной нагрузки внутри шифрованного messenger-кадра (совместимость со старыми клиентами: без префикса = UTF-8 текст).</summary>
+/// <summary>
+///     Бинарный формат полезной нагрузки внутри шифрованного messenger-кадра (совместимость со старыми клиентами: без
+///     префикса = UTF-8 текст).
+/// </summary>
 public static class ChatWireCodec
 {
-    private static ReadOnlySpan<byte> Magic => "S2P1"u8;
-
     private const byte KindText = 0x01;
     private const byte KindImage = 0x02;
     private const byte KindFile = 0x03;
     private const byte KindTransferOffer = 0x04;
     private const byte KindTransferControl = 0x05;
+    private static ReadOnlySpan<byte> Magic => "S2P1"u8;
 
     /// <summary>Магия S2P1 без успешного разбора вида — чтобы не показывать мусор как текст UTF-8.</summary>
-    public static bool LooksLikeFramedWire(ReadOnlySpan<byte> payload) =>
-        payload.Length >= Magic.Length && payload.StartsWith(Magic);
+    public static bool LooksLikeFramedWire(ReadOnlySpan<byte> payload)
+    {
+        return payload.Length >= Magic.Length && payload.StartsWith(Magic);
+    }
 
     public static byte[] EncodeText(string text)
     {
@@ -75,11 +79,15 @@ public static class ChatWireCodec
         return buf;
     }
 
-    public static byte[] EncodeTransferOffer(ChatWireTransferOffer offer) =>
-        EncodeJsonFrame(KindTransferOffer, JsonSerializer.SerializeToUtf8Bytes(offer));
+    public static byte[] EncodeTransferOffer(ChatWireTransferOffer offer)
+    {
+        return EncodeJsonFrame(KindTransferOffer, JsonSerializer.SerializeToUtf8Bytes(offer));
+    }
 
-    public static byte[] EncodeTransferControl(ChatWireTransferControl control) =>
-        EncodeJsonFrame(KindTransferControl, JsonSerializer.SerializeToUtf8Bytes(control));
+    public static byte[] EncodeTransferControl(ChatWireTransferControl control)
+    {
+        return EncodeJsonFrame(KindTransferControl, JsonSerializer.SerializeToUtf8Bytes(control));
+    }
 
     private static byte[] EncodeJsonFrame(byte kind, byte[] jsonUtf8)
     {
@@ -91,7 +99,7 @@ public static class ChatWireCodec
         return buf;
     }
 
-    static string NormalizeWireFileName(string fileName)
+    private static string NormalizeWireFileName(string fileName)
     {
         var n = Path.GetFileName(fileName.Trim());
         return string.IsNullOrEmpty(n) ? "file" : n;

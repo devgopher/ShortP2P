@@ -1,9 +1,8 @@
 using System.Collections.Concurrent;
+using Windows.Devices.Bluetooth.Advertisement;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Auth.Data;
-using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
-using Windows.Devices.Bluetooth.Advertisement;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
 
@@ -12,8 +11,8 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 /// </summary>
 internal sealed class BleAdvertisementMergeCache
 {
-    private readonly ILogger? _logger;
     private readonly ConcurrentDictionary<ulong, BleAdScanResult> _identityByAddress = new();
+    private readonly ILogger? _logger;
 
     public BleAdvertisementMergeCache(ILogger? logger = null)
     {
@@ -40,7 +39,10 @@ internal sealed class BleAdvertisementMergeCache
 
 internal static class BleWindowsAdvertisementHelper
 {
-    public static bool IsShortP2P(BluetoothLEAdvertisement advertisement) => advertisement.ServiceUuids.Contains(BleShortP2PGattProtocol.ServiceUuid);
+    public static bool IsShortP2P(BluetoothLEAdvertisement advertisement)
+    {
+        return advertisement.ServiceUuids.Contains(BleShortP2PGattProtocol.ServiceUuid);
+    }
 
     public static bool IdentityImproved(BleAdScanResult previous, BleAdScanResult current)
     {

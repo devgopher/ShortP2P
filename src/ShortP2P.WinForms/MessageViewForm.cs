@@ -16,7 +16,7 @@ internal sealed class MessageViewForm : Form
             ReadOnly = true,
             ScrollBars = ScrollBars.Both,
             WordWrap = true,
-            Text = messageText,
+            Text = messageText
         };
 
         Controls.Add(viewer);

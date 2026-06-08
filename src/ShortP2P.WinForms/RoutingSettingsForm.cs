@@ -1,52 +1,62 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
 using ShortP2P.Transport;
-using System.Diagnostics;
 
 namespace ShortP2P.WinForms;
 
 internal sealed class RoutingSettingsForm : Form
 {
-    private readonly P2pRoutingSettingsStore _store;
-    private readonly UserP2pRuntime _runtime;
-    private readonly IBluetoothRadioCatalog _bluetoothCatalog;
-    private readonly IBluetoothTransportProvider _bluetoothTransport;
-    private readonly ILogger<RoutingSettingsForm> _logger;
-    private readonly ILogger<UserAction> _userActions;
-    private readonly NumericUpDown _maxHops = new() { Minimum = 1, Maximum = 3, Width = 80 };
-    private readonly NumericUpDown _attempts = new() { Minimum = 1, Maximum = 20, Width = 80 };
-    private readonly NumericUpDown _delayMs = new() { Minimum = 0, Maximum = 120_000, Width = 100 };
-    private readonly NumericUpDown _searchTimeoutMs = new() { Minimum = 500, Maximum = 120_000, Width = 100 };
-    private readonly ComboBox _linkTechnology = new()
-    {
-        DropDownStyle = ComboBoxStyle.DropDownList,
-        Width = 360,
-        Anchor = AnchorStyles.Left,
-    };
-    private readonly ComboBox _bluetoothAdapter = new()
-    {
-        DropDownStyle = ComboBoxStyle.DropDownList,
-        Width = 360,
-        Anchor = AnchorStyles.Left,
-    };
-    private readonly CheckBox _suggestBluetoothPairing = new()
-    {
-        AutoSize = true,
-        Text = "Предлагать сопряжение по Bluetooth",
-        Anchor = AnchorStyles.Left,
-    };
-    private readonly CheckBox _enableUdpTransport = new() { AutoSize = true, Text = "UDP", Anchor = AnchorStyles.Left };
-    private readonly CheckBox _enableBluetoothTransport = new()
-        { AutoSize = true, Text = "Bluetooth", Anchor = AnchorStyles.Left };
+    private readonly List<BluetoothRadioInfo> _adapterRadios = [];
+
     private readonly CheckBox _advertisePeerSearch = new()
     {
         AutoSize = true,
         Text = "Discovery: отдавать маршрутную таблицу по UDP (PeerSearch)",
-        Anchor = AnchorStyles.Left,
+        Anchor = AnchorStyles.Left
     };
-    private readonly List<BluetoothRadioInfo> _adapterRadios = [];
+
+    private readonly NumericUpDown _attempts = new() { Minimum = 1, Maximum = 20, Width = 80 };
+
+    private readonly ComboBox _bluetoothAdapter = new()
+    {
+        DropDownStyle = ComboBoxStyle.DropDownList,
+        Width = 360,
+        Anchor = AnchorStyles.Left
+    };
+
+    private readonly IBluetoothRadioCatalog _bluetoothCatalog;
+    private readonly IBluetoothTransportProvider _bluetoothTransport;
+    private readonly NumericUpDown _delayMs = new() { Minimum = 0, Maximum = 120_000, Width = 100 };
+
+    private readonly CheckBox _enableBluetoothTransport = new()
+        { AutoSize = true, Text = "Bluetooth", Anchor = AnchorStyles.Left };
+
+    private readonly CheckBox _enableUdpTransport = new() { AutoSize = true, Text = "UDP", Anchor = AnchorStyles.Left };
+
+    private readonly ComboBox _linkTechnology = new()
+    {
+        DropDownStyle = ComboBoxStyle.DropDownList,
+        Width = 360,
+        Anchor = AnchorStyles.Left
+    };
+
+    private readonly ILogger<RoutingSettingsForm> _logger;
+    private readonly NumericUpDown _maxHops = new() { Minimum = 1, Maximum = 3, Width = 80 };
+    private readonly UserP2pRuntime _runtime;
+    private readonly NumericUpDown _searchTimeoutMs = new() { Minimum = 500, Maximum = 120_000, Width = 100 };
+    private readonly P2pRoutingSettingsStore _store;
+
+    private readonly CheckBox _suggestBluetoothPairing = new()
+    {
+        AutoSize = true,
+        Text = "Предлагать сопряжение по Bluetooth",
+        Anchor = AnchorStyles.Left
+    };
+
+    private readonly ILogger<UserAction> _userActions;
     private bool _trafficSavingEnabled;
 
     public RoutingSettingsForm(P2pRoutingSettingsStore store, UserP2pRuntime runtime,
@@ -75,7 +85,7 @@ internal sealed class RoutingSettingsForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 2,
             RowCount = 10,
-            Padding = new Padding(12),
+            Padding = new Padding(12)
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
@@ -96,7 +106,7 @@ internal sealed class RoutingSettingsForm : Form
         {
             AutoSize = true,
             FlowDirection = FlowDirection.LeftToRight,
-            Anchor = AnchorStyles.Left,
+            Anchor = AnchorStyles.Left
         };
         transportPanel.Controls.Add(_enableUdpTransport);
         transportPanel.Controls.Add(_enableBluetoothTransport);
@@ -108,12 +118,12 @@ internal sealed class RoutingSettingsForm : Form
         {
             AutoSize = true,
             FlowDirection = FlowDirection.LeftToRight,
-            Anchor = AnchorStyles.Left,
+            Anchor = AnchorStyles.Left
         };
         var openBluetoothSettings = new Button
         {
             AutoSize = true,
-            Text = "Открыть Bluetooth настройки",
+            Text = "Открыть Bluetooth настройки"
         };
         openBluetoothSettings.Click += (_, _) => OpenBluetoothSettings();
         bluetoothTools.Controls.Add(openBluetoothSettings);
@@ -124,7 +134,7 @@ internal sealed class RoutingSettingsForm : Form
             FlowDirection = FlowDirection.RightToLeft,
             AutoSize = true,
             Dock = DockStyle.Bottom,
-            Padding = new Padding(0, 8, 0, 0),
+            Padding = new Padding(0, 8, 0, 0)
         };
         var ok = new Button { Text = "Save", AutoSize = true };
         var cancel = new Button { Text = "Cancel", AutoSize = true };
@@ -254,7 +264,7 @@ internal sealed class RoutingSettingsForm : Form
             EnableBluetoothTransport = _enableBluetoothTransport.Checked,
             SuggestBluetoothPairing = _suggestBluetoothPairing.Checked,
             TrafficSavingEnabled = _trafficSavingEnabled,
-            AdvertisedPeerCapabilities = cap,
+            AdvertisedPeerCapabilities = cap
         };
         ApplySelectedAdapter(s);
         await _store.SaveAsync(s).ConfigureAwait(true);

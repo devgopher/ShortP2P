@@ -1,31 +1,29 @@
-using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
-using ShortP2P.Transport;
 
 namespace ShortP2P.MauiApp;
 
 public class RoutingSettingsPage : ContentPage
 {
     private const string ErrorHeader = "Error";
+    private readonly List<BluetoothRadioInfo> _adapterRadios = [];
+    private readonly Switch _advertisePeerSearch = new();
     private readonly Entry _attempts = new() { Keyboard = Keyboard.Numeric };
+    private readonly Picker _bluetoothAdapter = new();
+    private readonly IBluetoothRadioCatalog _bluetoothCatalog;
+    private readonly IBluetoothTransportProvider _bluetoothTransport;
     private readonly Entry _delayMs = new() { Keyboard = Keyboard.Numeric };
+    private readonly Switch _enableBluetoothTransport = new();
+    private readonly Switch _enableUdpTransport = new();
     private readonly Picker _linkTechnology = new();
+    private readonly ILogger<RoutingSettingsPage> _logger;
     private readonly Entry _maxHops = new() { Keyboard = Keyboard.Numeric, Placeholder = "1–3" };
     private readonly UserP2pRuntime _runtime;
     private readonly Entry _searchTimeoutMs = new() { Keyboard = Keyboard.Numeric };
     private readonly P2pRoutingSettingsStore _store;
-    private readonly IBluetoothRadioCatalog _bluetoothCatalog;
-    private readonly IBluetoothTransportProvider _bluetoothTransport;
-    private readonly ILogger<RoutingSettingsPage> _logger;
-    private readonly Picker _bluetoothAdapter = new();
-    private readonly List<BluetoothRadioInfo> _adapterRadios = [];
-    private bool _trafficSavingEnabled;
-    private readonly Switch _advertisePeerSearch = new();
-    private readonly Switch _enableUdpTransport = new();
-    private readonly Switch _enableBluetoothTransport = new();
     private readonly Switch _suggestBluetoothPairing = new();
+    private bool _trafficSavingEnabled;
 
     public RoutingSettingsPage(P2pRoutingSettingsStore store, UserP2pRuntime runtime,
         IBluetoothRadioCatalog bluetoothCatalog, IBluetoothTransportProvider bluetoothTransport,
@@ -198,7 +196,7 @@ public class RoutingSettingsPage : ContentPage
             EnableUdpTransport = _enableUdpTransport.IsToggled,
             EnableBluetoothTransport = _enableBluetoothTransport.IsToggled,
             SuggestBluetoothPairing = _suggestBluetoothPairing.IsToggled,
-            AdvertisedPeerCapabilities = cap,
+            AdvertisedPeerCapabilities = cap
         };
         ApplySelectedAdapter(settings);
         await _store.SaveAsync(settings).ConfigureAwait(true);

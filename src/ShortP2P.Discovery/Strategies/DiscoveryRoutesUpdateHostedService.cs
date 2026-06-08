@@ -14,7 +14,6 @@ internal sealed class DiscoveryRoutesUpdateHostedService(
         while (!stoppingToken.IsCancellationRequested)
         {
             foreach (var strategy in strategies)
-            {
                 try
                 {
                     await strategy.UpdateRoutesAsync(cancellationToken: stoppingToken).ConfigureAwait(false);
@@ -27,7 +26,6 @@ internal sealed class DiscoveryRoutesUpdateHostedService(
                 {
                     logger.LogError(ex, "Routes update failed for discovery strategy {StrategyName}", strategy.Name);
                 }
-            }
 
             await Task.Delay(UpdatePeriod, stoppingToken).ConfigureAwait(false);
         }

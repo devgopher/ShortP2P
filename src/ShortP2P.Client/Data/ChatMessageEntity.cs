@@ -5,11 +5,9 @@ namespace ShortP2P.Client.Data;
 [Table("messages")]
 public class ChatMessageEntity
 {
-    [PrimaryKey, AutoIncrement]
-    public int Id { get; set; }
+    [PrimaryKey] [AutoIncrement] public int Id { get; set; }
 
-    [Indexed]
-    public int ChatId { get; set; }
+    [Indexed] public int ChatId { get; set; }
 
     public bool Outgoing { get; set; }
 
@@ -17,10 +15,10 @@ public class ChatMessageEntity
 
     public long SentUtcTicks { get; set; }
 
-    /// <summary>Значение <see cref="MessageDeliveryStatus"/>; для входящих — NotApplicable.</summary>
+    /// <summary>Значение <see cref="MessageDeliveryStatus" />; для входящих — NotApplicable.</summary>
     public int DeliveryStatus { get; set; }
 
-    /// <summary><see cref="ChatPayloadKind"/>.</summary>
+    /// <summary><see cref="ChatPayloadKind" />.</summary>
     public int PayloadKind { get; set; }
 
     public string MimeType { get; set; } = "";
@@ -43,6 +41,6 @@ public class ChatMessageEntity
 
     public long TransferExpiresUtcTicks { get; set; }
 
-    /// <summary>Значение <see cref="ChatTransferState"/>.</summary>
+    /// <summary>Значение <see cref="ChatTransferState" />.</summary>
     public int TransferState { get; set; }
 }

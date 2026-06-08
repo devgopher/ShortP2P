@@ -1,21 +1,20 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
-using ShortP2P.Client.Services;
 
 namespace ShortP2P.WinForms;
 
 public sealed class LoginForm : Form
 {
     private readonly AuthService _auth;
-    private readonly IServiceProvider _services;
-    private readonly ILogger<LoginForm> _logger;
-    private readonly ILogger<UserAction> _userActions;
-    private readonly TextBox _nick = new() { PlaceholderText = "Nickname" };
-    private readonly TextBox _pass = new() { PlaceholderText = "Password", UseSystemPasswordChar = true };
+    private readonly Button _btnCancel = new() { Text = "Exit", DialogResult = DialogResult.Cancel };
     private readonly Button _btnLogin = new() { Text = "Login", DialogResult = DialogResult.None };
     private readonly Button _btnRegister = new() { Text = "Register" };
-    private readonly Button _btnCancel = new() { Text = "Exit", DialogResult = DialogResult.Cancel };
+    private readonly ILogger<LoginForm> _logger;
+    private readonly TextBox _nick = new() { PlaceholderText = "Nickname" };
+    private readonly TextBox _pass = new() { PlaceholderText = "Password", UseSystemPasswordChar = true };
+    private readonly IServiceProvider _services;
+    private readonly ILogger<UserAction> _userActions;
 
     public LoginForm(AuthService auth, IServiceProvider services, ILogger<LoginForm> logger,
         ILogger<UserAction> userActions)
@@ -39,7 +38,7 @@ public sealed class LoginForm : Form
         {
             ColumnCount = 1,
             AutoSize = true,
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Fill
         };
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));

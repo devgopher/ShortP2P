@@ -6,30 +6,32 @@ using Windows.Media.Capture;
 using Windows.Media.Capture.Frames;
 using Windows.Media.MediaProperties;
 using Windows.Storage;
+using Timer = System.Windows.Forms.Timer;
 
 namespace ShortP2P.WinForms;
 
 internal sealed class CameraRecordForm : Form
 {
-    private readonly bool _trafficSavingEnabled;
-    private readonly int _captureWidth;
     private readonly int _captureHeight;
-    private readonly string? _videoDeviceId;
-    private readonly PictureBox _preview = new() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom };
-    private readonly Label _status = new() { Dock = DockStyle.Top, Height = 26, TextAlign = ContentAlignment.MiddleLeft };
-    private readonly Button _record = new() { Text = "Record", AutoSize = true };
+    private readonly int _captureWidth;
     private readonly Button _close = new() { Text = "Close", AutoSize = true };
-    private readonly System.Windows.Forms.Timer _recordTimer = new() { Interval = 200 };
+    private readonly PictureBox _preview = new() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom };
+    private readonly Button _record = new() { Text = "Record", AutoSize = true };
+    private readonly Timer _recordTimer = new() { Interval = 200 };
+
+    private readonly Label _status = new()
+        { Dock = DockStyle.Top, Height = 26, TextAlign = ContentAlignment.MiddleLeft };
+
+    private readonly bool _trafficSavingEnabled;
+    private readonly string? _videoDeviceId;
     private MediaCapture? _capture;
     private MediaFrameReader? _frameReader;
-    private StorageFile? _recordFile;
-    private DateTime _recordStartedUtc;
-    private bool _recording;
     private bool _ready;
-    private bool _stopping;
+    private StorageFile? _recordFile;
+    private bool _recording;
+    private DateTime _recordStartedUtc;
     private string? _recordTempPath;
-
-    public CameraRecordedVideo? Result { get; private set; }
+    private bool _stopping;
 
     public CameraRecordForm(bool trafficSavingEnabled, string? videoDeviceId)
     {
@@ -48,7 +50,7 @@ internal sealed class CameraRecordForm : Form
             Dock = DockStyle.Bottom,
             AutoSize = true,
             FlowDirection = FlowDirection.RightToLeft,
-            Padding = new Padding(8),
+            Padding = new Padding(8)
         };
         buttons.Controls.Add(_close);
         buttons.Controls.Add(_record);
@@ -63,6 +65,8 @@ internal sealed class CameraRecordForm : Form
         Shown += async (_, _) => await StartPreviewAsync().ConfigureAwait(true);
     }
 
+    public CameraRecordedVideo? Result { get; private set; }
+
     private async Task StartPreviewAsync()
     {
         try
@@ -72,7 +76,7 @@ internal sealed class CameraRecordForm : Form
             {
                 StreamingCaptureMode = StreamingCaptureMode.AudioAndVideo,
                 MediaCategory = MediaCategory.Communications,
-                MemoryPreference = MediaCaptureMemoryPreference.Cpu,
+                MemoryPreference = MediaCaptureMemoryPreference.Cpu
             };
             if (!string.IsNullOrWhiteSpace(_videoDeviceId))
                 settings.VideoDeviceId = _videoDeviceId;
@@ -88,7 +92,9 @@ internal sealed class CameraRecordForm : Form
             await _frameReader.StartAsync().AsTask().ConfigureAwait(true);
 
             _ready = true;
-            var audioKbps = (_trafficSavingEnabled ? VoiceRecordHelper.TrafficSavingBitrate : VoiceRecordHelper.DefaultBitrate) / 1000;
+            var audioKbps = (_trafficSavingEnabled
+                ? VoiceRecordHelper.TrafficSavingBitrate
+                : VoiceRecordHelper.DefaultBitrate) / 1000;
             _status.Text =
                 $"Готово: {_captureWidth}x{_captureHeight}, audio ~{audioKbps} kbit/s (MP4). Нажмите Record.";
         }
@@ -102,22 +108,16 @@ internal sealed class CameraRecordForm : Form
     private static MediaFrameSource? FindPreviewFrameSource(MediaCapture capture)
     {
         foreach (var source in capture.FrameSources.Values)
-        {
             if (source.Info.MediaStreamType == MediaStreamType.VideoPreview)
                 return source;
-        }
 
         foreach (var source in capture.FrameSources.Values)
-        {
             if (source.Info.MediaStreamType == MediaStreamType.VideoRecord)
                 return source;
-        }
 
         foreach (var source in capture.FrameSources.Values)
-        {
             if (source.Info.SourceKind == MediaFrameSourceKind.Color)
                 return source;
-        }
 
         return capture.FrameSources.Values.FirstOrDefault();
     }
@@ -152,7 +152,8 @@ internal sealed class CameraRecordForm : Form
 
     private static Bitmap SoftwareBitmapToBitmap(SoftwareBitmap softwareBitmap)
     {
-        using var converted = SoftwareBitmap.Convert(softwareBitmap, BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied);
+        using var converted =
+            SoftwareBitmap.Convert(softwareBitmap, BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied);
         var bytes = new byte[converted.PixelWidth * converted.PixelHeight * 4];
         converted.CopyToBuffer(bytes.AsBuffer());
         var bitmap = new Bitmap(converted.PixelWidth, converted.PixelHeight, PixelFormat.Format32bppArgb);
@@ -213,7 +214,7 @@ internal sealed class CameraRecordForm : Form
         {
             Audio = AudioEncodingProperties.CreateAac(audioBitrate, 1, 48_000),
             Video = VideoEncodingProperties.CreateH264(),
-            Container = template.Container,
+            Container = template.Container
         };
         profile.Video.Width = (uint)_captureWidth;
         profile.Video.Height = (uint)_captureHeight;
@@ -306,7 +307,6 @@ internal sealed class CameraRecordForm : Form
         _preview.Image?.Dispose();
 
         if (!string.IsNullOrWhiteSpace(_recordTempPath))
-        {
             try
             {
                 File.Delete(_recordTempPath);
@@ -315,7 +315,6 @@ internal sealed class CameraRecordForm : Form
             {
                 // ignore
             }
-        }
 
         base.OnFormClosed(e);
     }

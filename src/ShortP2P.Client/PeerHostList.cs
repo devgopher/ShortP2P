@@ -29,11 +29,10 @@ public static class PeerHostList
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var list = new List<string>();
-        foreach (var part in peerHost.Split(Separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
+        foreach (var part in peerHost.Split(Separators,
+                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             if (TryNormalizeEndpointToken(part, out var norm) && seen.Add(norm))
                 list.Add(norm);
-        }
 
         return list;
     }
@@ -75,10 +74,8 @@ public static class PeerHostList
                 continue;
             foreach (var part in raw.Split(Separators,
                          StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
                 if (TryNormalizeEndpointToken(part, out var token) && seen.Add(token))
                     list.Add(token);
-            }
         }
 
         return string.Join(", ", list);

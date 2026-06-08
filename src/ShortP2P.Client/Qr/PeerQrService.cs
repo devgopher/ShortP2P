@@ -1,8 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Linq;
 using QRCoder;
 using ShortP2P.Auth.Data;
-using ShortP2P.Client;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using ZXing;
@@ -12,7 +10,10 @@ namespace ShortP2P.Client.Qr;
 
 public static class PeerQrService
 {
-    /// <summary>Собирает v1 пейлоад: IPv4 в <see cref="PeerQrPayload.H"/> / <see cref="PeerQrPayload.Ha"/>, network id в <see cref="PeerQrPayload.Id"/>.</summary>
+    /// <summary>
+    ///     Собирает v1 пейлоад: IPv4 в <see cref="PeerQrPayload.H" /> / <see cref="PeerQrPayload.Ha" />, network id в
+    ///     <see cref="PeerQrPayload.Id" />.
+    /// </summary>
     public static PeerQrPayload BuildPayload(UserEntity user, string rsaPublicKeyJson, string? hostOverride = null)
     {
         List<string> hosts;
@@ -29,7 +30,7 @@ public static class PeerQrService
             Ha = hosts.Count > 1 ? hosts.Skip(1).ToList() : null,
             P = user.DataUdpPort,
             Id = user.NetworkIdShort.Trim(),
-            K = rsaPublicKeyJson.Trim(),
+            K = rsaPublicKeyJson.Trim()
         };
     }
 
@@ -63,8 +64,8 @@ public static class PeerQrService
                 Options = new DecodingOptions
                 {
                     PossibleFormats = new List<BarcodeFormat> { BarcodeFormat.QR_CODE },
-                    TryHarder = true,
-                },
+                    TryHarder = true
+                }
             };
             var r = reader.Decode(image);
             text = r?.Text;

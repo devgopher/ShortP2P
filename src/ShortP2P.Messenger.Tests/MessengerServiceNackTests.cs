@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using ShortP2P.Crypto;
 using ShortP2P.Transport.Abstractions;
 
@@ -107,7 +108,8 @@ public class MessengerServiceNackTests
         }
     }
 
-    private static bool ChunkCodecTryParse(byte[] plaintext, out Guid messageId, out int chunkIndex, out int totalChunks,
+    private static bool ChunkCodecTryParse(byte[] plaintext, out Guid messageId, out int chunkIndex,
+        out int totalChunks,
         out ReadOnlySpan<byte> payload)
     {
         const int headerBytes = 24;
@@ -131,7 +133,7 @@ public class MessengerServiceNackTests
     private static byte[] RandomBytes(int len)
     {
         var data = new byte[len];
-        using var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
+        using var rng = RandomNumberGenerator.Create();
         rng.GetBytes(data);
         return data;
     }

@@ -1,40 +1,40 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>$(NetCoreTargetFramework)</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
+    <PropertyGroup>
+        <TargetFramework>$(NetCoreTargetFramework)</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="System.IO.Ports" Version="10.0.0" />
-    <PackageReference Include="Polly" Version="8.6.6" />
-    <PackageReference Include="QRCoder" Version="1.6.0" />
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
-    <PackageReference Include="sqlite-net-pcl" Version="1.9.172" />
-    <PackageReference Include="SQLitePCLRaw.bundle_green" Version="2.1.10" />
-    <PackageReference Include="ZXing.Net" Version="0.16.10" />
-    <PackageReference Include="ZXing.Net.Bindings.ImageSharp.V3" Version="0.16.17" />
-  </ItemGroup>
+    <ItemGroup>
+        <PackageReference Include="System.IO.Ports" Version="10.0.0"/>
+        <PackageReference Include="Polly" Version="8.6.6"/>
+        <PackageReference Include="QRCoder" Version="1.6.0"/>
+        <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11"/>
+        <PackageReference Include="sqlite-net-pcl" Version="1.9.172"/>
+        <PackageReference Include="SQLitePCLRaw.bundle_green" Version="2.1.10"/>
+        <PackageReference Include="ZXing.Net" Version="0.16.10"/>
+        <PackageReference Include="ZXing.Net.Bindings.ImageSharp.V3" Version="0.16.17"/>
+    </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\..\ShortP2P.Crypto\ShortP2P.Crypto.csproj" />
-    <ProjectReference Include="..\ShortP2P.Auth\ShortP2P.Auth.csproj" />
-    <ProjectReference Include="..\ShortP2P.Transport\ShortP2P.Transport.csproj" />
-    <ProjectReference Include="..\ShortP2P.Messenger\ShortP2P.Messenger.csproj" />
-    <ProjectReference Include="..\ShortP2P.Discovery\ShortP2P.Discovery.csproj" />
-  </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\..\ShortP2P.Crypto\ShortP2P.Crypto.csproj"/>
+        <ProjectReference Include="..\ShortP2P.Auth\ShortP2P.Auth.csproj"/>
+        <ProjectReference Include="..\ShortP2P.Transport\ShortP2P.Transport.csproj"/>
+        <ProjectReference Include="..\ShortP2P.Messenger\ShortP2P.Messenger.csproj"/>
+        <ProjectReference Include="..\ShortP2P.Discovery\ShortP2P.Discovery.csproj"/>
+    </ItemGroup>
 
-  <ItemGroup>
-    <Compile Remove="LocalNetwork\LocalNetworkScanner.cs" />
-    <Compile Remove="LocalNetwork\LanBroadcastHelper.cs" />
-    <Compile Remove="Qr\LocalIPv4Resolver.cs" />
-    <Compile Remove="Routing\P2pRoutingSettings.cs" />
-    <Compile Remove="Routing\LinkTechnologyPreset.cs" />
-    <Compile Remove="Routing\PresencePeerCapabilities.cs" />
-    <Compile Remove="Routing\PresencePingCodec.cs" />
-    <Compile Remove="Routing\DiscoveredLocalPeer.cs" />
-    <Compile Remove="Routing\LocalEndpointHelper.cs" />
-  </ItemGroup>
+    <ItemGroup>
+        <Compile Remove="LocalNetwork\LocalNetworkScanner.cs"/>
+        <Compile Remove="LocalNetwork\LanBroadcastHelper.cs"/>
+        <Compile Remove="Qr\LocalIPv4Resolver.cs"/>
+        <Compile Remove="Routing\P2pRoutingSettings.cs"/>
+        <Compile Remove="Routing\LinkTechnologyPreset.cs"/>
+        <Compile Remove="Routing\PresencePeerCapabilities.cs"/>
+        <Compile Remove="Routing\PresencePingCodec.cs"/>
+        <Compile Remove="Routing\DiscoveredLocalPeer.cs"/>
+        <Compile Remove="Routing\LocalEndpointHelper.cs"/>
+    </ItemGroup>
 
 </Project>

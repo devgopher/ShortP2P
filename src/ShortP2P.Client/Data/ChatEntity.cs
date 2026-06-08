@@ -5,11 +5,9 @@ namespace ShortP2P.Client.Data;
 [Table("chats")]
 public class ChatEntity
 {
-    [PrimaryKey, AutoIncrement]
-    public int Id { get; set; }
+    [PrimaryKey] [AutoIncrement] public int Id { get; set; }
 
-    [Indexed]
-    public int UserId { get; set; }
+    [Indexed] public int UserId { get; set; }
 
     public string PeerNickname { get; set; } = "";
 
@@ -17,7 +15,10 @@ public class ChatEntity
 
     public string PeerRsaPublicJson { get; set; } = "";
 
-    /// <summary>Один или несколько IPv4/IPv6 через запятую; пополняется при новых контактах с пиром (приглашение, поиск, ручной ввод).</summary>
+    /// <summary>
+    ///     Один или несколько IPv4/IPv6 через запятую; пополняется при новых контактах с пиром (приглашение, поиск,
+    ///     ручной ввод).
+    /// </summary>
     public string PeerHost { get; set; } = "127.0.0.1";
 
     public int PeerPort { get; set; } = 17201;

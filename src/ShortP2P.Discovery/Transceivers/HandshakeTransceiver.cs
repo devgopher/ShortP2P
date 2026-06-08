@@ -46,7 +46,10 @@ public sealed class HandshakeTransceiver : IUnicastTransceiver<HandshakeMessage>
         await _sendRaw(packet, destination, cancellationToken).ConfigureAwait(false);
     }
 
-    public ValueTask DisposeAsync() => StopAsync();
+    public ValueTask DisposeAsync()
+    {
+        return StopAsync();
+    }
 
     /// <summary>Вызывается из <see cref="DataPortMultiplexer" /> при разборе входящей датаграммы.</summary>
     internal void HandleIncoming(HandshakeKind kind, ReadOnlyMemory<byte> body, TransportAddress remoteAddress)

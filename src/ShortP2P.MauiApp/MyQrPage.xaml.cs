@@ -1,9 +1,6 @@
-using Microsoft.Extensions.Logging;
-using Microsoft.Maui.ApplicationModel.DataTransfer;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Qr;
-using ShortP2P.Crypto;
 
 namespace ShortP2P.MauiApp;
 
@@ -58,7 +55,7 @@ public partial class MyQrPage : ContentPage
             await Share.Default.RequestAsync(new ShareFileRequest
             {
                 Title = "Поделиться QR-кодом",
-                File = new ShareFile(path),
+                File = new ShareFile(path)
             }).ConfigureAwait(true);
         }
         catch (Exception ex)

@@ -13,7 +13,8 @@ public static class RoutePeerRoutesExpiryCleanup
     ///     Удаляет строки, у которых срок годности истёк относительно текущего UTC:
     ///     <see cref="PeerIdentityAddress.LastSeen" /> и <see cref="PeerChain.UpdatedAtUtc" />.
     /// </summary>
-    public static async Task RunOnceAsync(RouteDbContext db, TimeSpan staleAfter, CancellationToken cancellationToken = default)
+    public static async Task RunOnceAsync(RouteDbContext db, TimeSpan staleAfter,
+        CancellationToken cancellationToken = default)
     {
         var cutoff = DateTime.UtcNow - staleAfter;
         await db.Routes
@@ -26,7 +27,8 @@ public static class RoutePeerRoutesExpiryCleanup
     }
 
     /// <summary>
-    ///     Цикл: очистка, затем ожидание <see cref="RoutePeerRoutesExpiryOptions.CleanupPeriod" />. Первая очистка сразу после старта.
+    ///     Цикл: очистка, затем ожидание <see cref="RoutePeerRoutesExpiryOptions.CleanupPeriod" />. Первая очистка сразу после
+    ///     старта.
     /// </summary>
     public static async Task RunPeriodicAsync(
         IServiceScopeFactory scopeFactory,

@@ -5,7 +5,8 @@ namespace ShortP2P.Client.Routing;
 ///     (<see cref="PresencePingCodec" />): 16 бит BE после байта <see cref="LinkTechnologyPreset" />.
 ///     Продуктовые имена ролей (Messaging, Discovery, …) и таблица соответствия — в README слоя
 ///     ShortP2P.Discovery, раздел «Узел и возможности». При приёме неизвестные биты отбрасывать через
-///     <see cref="AllDefined" />; бит <see cref="Chat" /> (Messaging) кодек всегда принудительно включает при сборке/разборе.
+///     <see cref="AllDefined" />; бит <see cref="Chat" /> (Messaging) кодек всегда принудительно включает при
+///     сборке/разборе.
 /// </summary>
 [Flags]
 public enum PresencePeerCapabilities : ushort
@@ -23,7 +24,10 @@ public enum PresencePeerCapabilities : ushort
     /// <summary>Retranslation — ретрансляция трафика для других узлов.</summary>
     Relay = 1 << 2,
 
-    /// <summary>Зашифрованное временное хранилище — зарезервировано в wire (бит 3); вне текущего перечня продуктовых ролей узла.</summary>
+    /// <summary>
+    ///     Зашифрованное временное хранилище — зарезервировано в wire (бит 3); вне текущего перечня продуктовых ролей
+    ///     узла.
+    /// </summary>
     EncryptedTemporaryStorage = 1 << 3,
 
     /// <summary>
@@ -33,5 +37,5 @@ public enum PresencePeerCapabilities : ushort
     BotHosting = 1 << 4,
 
     /// <summary>Все биты, определённые в текущей версии wire-формата (остальные игнорировать при приёме).</summary>
-    AllDefined = Chat | PeerSearch | Relay | EncryptedTemporaryStorage | BotHosting,
+    AllDefined = Chat | PeerSearch | Relay | EncryptedTemporaryStorage | BotHosting
 }

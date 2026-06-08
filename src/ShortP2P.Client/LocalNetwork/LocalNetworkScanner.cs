@@ -1,14 +1,14 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
-using System.Threading;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
+using ShortP2P.Discovery.Ble;
 using ShortP2P.Discovery.Gossip;
 using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
 using ShortP2P.Discovery.Transceivers;
-using ShortP2P.Discovery.Ble;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
@@ -36,48 +36,49 @@ public sealed class LocalNetworkScanner(
     IBleDiscoveredPeerStore? bleDiscoveredPeerStore = null,
     IBluetoothPresencePingTargetsProvider? bluetoothPresencePingTargetsProvider = null) : IAsyncDisposable
 {
+    /// <summary>Длительность приёма пингов при ручном сканировании по умолчанию.</summary>
+    public static readonly TimeSpan DefaultScanListenDuration = TimeSpan.FromSeconds(45);
+
+    private readonly IEnumerable<ITransport>? _additionalDiscoveryTransports = additionalDiscoveryTransports;
+    private readonly ConcurrentDictionary<string, TransportAddress> _bluetoothTargets = new();
+
+    private readonly ConcurrentDictionary<CompressedNetworkId, DiscoveredLocalPeer> _entries = new();
+    private readonly Func<ITransport?>? _getBluetoothTransport = getBluetoothTransport;
+    private readonly List<PresencePingCodec.Transceiver> _secondaryPingTransceivers = [];
+    private readonly List<Task> _secondaryPresenceReceiveTasks = [];
+    private readonly object _snapshotSync = new();
+    private readonly ConcurrentDictionary<string, string> _udpPresenceTargets = new(StringComparer.OrdinalIgnoreCase);
+
+    private CancellationTokenSource? _cts;
+    private Task? _discoveryWireReceiveTask;
+    private DiscoveryWireTransceiver? _discoveryWireTransceiver;
+    private UdpTransport? _discoveryWireUdp;
+    private long _lastGossipBroadcastNonce;
+    private PeerIdentity? _localPeer;
+    private DateTimeOffset _nextPublicIpv4PresenceLookupUtc = DateTimeOffset.MinValue;
+    private Task? _periodicScanLoop;
+    private PresencePingCodec.Transceiver? _presencePingTransceiver;
+
+    /// <summary>Глубина вложенности раундов TX discovery; &gt;0 — приём пингов не обрабатывается.</summary>
+    private int _presencePingTransmitDepth;
+
+    private Task? _presenceReceiveTask;
+    private UdpTransport? _presenceUdp;
+
+    /// <summary>Два последних nonce gossip-зонда: поздние Ack после смены раунда всё ещё принимаются.</summary>
+    private long _priorGossipBroadcastNonce;
+
+    private volatile bool _scanSessionActive;
+    private List<ITransport> _secondaryPresenceTransports = [];
+    private IReadOnlyList<DiscoveredLocalPeer> _snapshot = [];
+    private Task? _staleLoop;
     public bool IsUdpListening => _presenceUdp != null;
-    public bool IsBluetoothListening => _isBluetoothListening;
+    public bool IsBluetoothListening { get; private set; }
 
     /// <summary>Удалять пира из списка, если не было пинга дольше этого (несколько периодов рассылки).</summary>
     private TimeSpan DiscoveryStaleAfter =>
         TimeSpan.FromTicks(Math.Max(TimeSpan.FromSeconds(45).Ticks,
             routingSettings.LinkTechnology.GetPresencePingPeriod(routingSettings.TrafficSavingEnabled).Ticks * 6));
-
-    /// <summary>Длительность приёма пингов при ручном сканировании по умолчанию.</summary>
-    public static readonly TimeSpan DefaultScanListenDuration = TimeSpan.FromSeconds(45);
-
-    private volatile bool _scanSessionActive;
-
-    private readonly ConcurrentDictionary<CompressedNetworkId, DiscoveredLocalPeer> _entries = new();
-    private readonly object _snapshotSync = new();
-    private IReadOnlyList<DiscoveredLocalPeer> _snapshot = [];
-
-    private CancellationTokenSource? _cts;
-    private UdpTransport? _presenceUdp;
-    private UdpTransport? _discoveryWireUdp;
-    private readonly Func<ITransport?>? _getBluetoothTransport = getBluetoothTransport;
-    private readonly IEnumerable<ITransport>? _additionalDiscoveryTransports = additionalDiscoveryTransports;
-    private List<ITransport> _secondaryPresenceTransports = [];
-    private readonly ConcurrentDictionary<string, TransportAddress> _bluetoothTargets = new();
-    private readonly ConcurrentDictionary<string, string> _udpPresenceTargets = new(StringComparer.OrdinalIgnoreCase);
-    private PresencePingCodec.Transceiver? _presencePingTransceiver;
-    private DiscoveryWireTransceiver? _discoveryWireTransceiver;
-    private readonly List<PresencePingCodec.Transceiver> _secondaryPingTransceivers = [];
-    private Task? _presenceReceiveTask;
-    private Task? _discoveryWireReceiveTask;
-    private readonly List<Task> _secondaryPresenceReceiveTasks = [];
-    private Task? _periodicScanLoop;
-    private Task? _staleLoop;
-    private PeerIdentity? _localPeer;
-    private bool _isBluetoothListening;
-    /// <summary>Глубина вложенности раундов TX discovery; &gt;0 — приём пингов не обрабатывается.</summary>
-    private int _presencePingTransmitDepth;
-    private DateTimeOffset _nextPublicIpv4PresenceLookupUtc = DateTimeOffset.MinValue;
-
-    /// <summary>Два последних nonce gossip-зонда: поздние Ack после смены раунда всё ещё принимаются.</summary>
-    private long _priorGossipBroadcastNonce;
-    private long _lastGossipBroadcastNonce;
 
     /// <summary>Снимок последних найденных пиров (кроме текущего пользователя).</summary>
     public IReadOnlyList<DiscoveredLocalPeer> Clients
@@ -85,8 +86,15 @@ public sealed class LocalNetworkScanner(
         get
         {
             lock (_snapshotSync)
+            {
                 return _snapshot;
+            }
         }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync().ConfigureAwait(false);
     }
 
     /// <summary>
@@ -112,7 +120,10 @@ public sealed class LocalNetworkScanner(
 
     public event EventHandler? ClientsChanged;
 
-    /// <summary>Принят чужой presence/discovery-пинг (не свой network id); обработчик не должен долго блокировать поток приёма.</summary>
+    /// <summary>
+    ///     Принят чужой presence/discovery-пинг (не свой network id); обработчик не должен долго блокировать поток
+    ///     приёма.
+    /// </summary>
     public event EventHandler<DiscoveryPingReceivedEventArgs>? DiscoveryPingReceived;
 
     public async Task StartAsync(PeerIdentity localPeer, CancellationToken cancellationToken = default)
@@ -124,9 +135,9 @@ public sealed class LocalNetworkScanner(
         _secondaryPresenceTransports = BuildSecondaryPresenceTransports(_getBluetoothTransport?.Invoke(),
             _additionalDiscoveryTransports);
         EnsurePublicIpv4InPresenceTargets();
-        _presenceUdp = udpTransportFactory.Acquire(IPAddress.Any, PresencePingCodec.UdpPort, enableBroadcast: true);
+        _presenceUdp = udpTransportFactory.Acquire(IPAddress.Any, PresencePingCodec.UdpPort, true);
         _discoveryWireUdp = udpTransportFactory.Acquire(IPAddress.Any,
-            UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort, enableBroadcast: true);
+            UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort, true);
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _cts.Token;
         await _presenceUdp.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -135,13 +146,14 @@ public sealed class LocalNetworkScanner(
         {
             await transport.StartAsync(cancellationToken).ConfigureAwait(false);
             if (transport.Kind == TransportKind.Bluetooth)
-                _isBluetoothListening = true;
+                IsBluetoothListening = true;
         }
 
         _presencePingTransceiver = new PresencePingCodec.Transceiver(_presenceUdp);
         _presencePingTransceiver.GotData += OnPresencePingReceived;
         await _presencePingTransceiver.StartAsync(token).ConfigureAwait(false);
-        _presenceReceiveTask = Task.Run(() => PresenceReceiveLoopAsync(_presenceUdp, _presencePingTransceiver, token), token);
+        _presenceReceiveTask = Task.Run(() => PresenceReceiveLoopAsync(_presenceUdp, _presencePingTransceiver, token),
+            token);
 
         _discoveryWireTransceiver = new DiscoveryWireTransceiver(_discoveryWireUdp);
         _discoveryWireTransceiver.GotData += OnDiscoveryWireReceived;
@@ -236,7 +248,6 @@ public sealed class LocalNetworkScanner(
         _periodicScanLoop = null;
         _staleLoop = null;
         if (toWait.Length > 0)
-        {
             try
             {
                 await Task.WhenAll(toWait!).ConfigureAwait(false);
@@ -245,7 +256,6 @@ public sealed class LocalNetworkScanner(
             {
                 // ignore
             }
-        }
 
         if (_presenceUdp != null)
         {
@@ -281,12 +291,13 @@ public sealed class LocalNetworkScanner(
         _entries.Clear();
         _bluetoothTargets.Clear();
         _udpPresenceTargets.Clear();
-        _isBluetoothListening = false;
+        IsBluetoothListening = false;
         lock (_snapshotSync)
+        {
             _snapshot = [];
+        }
 
         foreach (var transport in _secondaryPresenceTransports)
-        {
             try
             {
                 await transport.StopAsync(cancellationToken).ConfigureAwait(false);
@@ -295,10 +306,7 @@ public sealed class LocalNetworkScanner(
             {
                 // ignore
             }
-        }
     }
-
-    public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
 
     public void RememberBluetoothPeer(TransportAddress address)
     {
@@ -323,21 +331,28 @@ public sealed class LocalNetworkScanner(
         _udpPresenceTargets[normalized] = normalized;
     }
 
-    private bool ShouldRunBleDiscoveryScan() =>
-        blePeripheralScanner != null
-        && IsTransportEnabled(TransportKind.Bluetooth)
-        && _secondaryPresenceTransports.Any(t => t.Kind == TransportKind.Bluetooth);
-
-    private bool IsTransportEnabled(TransportKind kind) => kind switch
+    private bool ShouldRunBleDiscoveryScan()
     {
-        TransportKind.Udp => routingSettings.EnableUdpTransport,
-        TransportKind.Bluetooth => routingSettings.EnableBluetoothTransport,
-        _ => true
-    };
+        return blePeripheralScanner != null
+               && IsTransportEnabled(TransportKind.Bluetooth)
+               && _secondaryPresenceTransports.Any(t => t.Kind == TransportKind.Bluetooth);
+    }
+
+    private bool IsTransportEnabled(TransportKind kind)
+    {
+        return kind switch
+        {
+            TransportKind.Udp => routingSettings.EnableUdpTransport,
+            TransportKind.Bluetooth => routingSettings.EnableBluetoothTransport,
+            _ => true
+        };
+    }
 
     /// <summary>Один раунд discovery: UDP broadcast по каждой подсети (+ limited broadcast).</summary>
-    public Task TriggerScanAsync(CancellationToken cancellationToken = default) =>
-        SendDiscoveryBroadcastRoundAsync(cancellationToken);
+    public Task TriggerScanAsync(CancellationToken cancellationToken = default)
+    {
+        return SendDiscoveryBroadcastRoundAsync(cancellationToken);
+    }
 
     /// <summary>
     ///     Ручное сканирование: очистка списка, раунд broadcast discovery, приём пингов <paramref name="listenDuration" />,
@@ -354,7 +369,7 @@ public sealed class LocalNetworkScanner(
             RebuildSnapshot();
             ClientsChanged?.Invoke(this, EventArgs.Empty);
 
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var sw = Stopwatch.StartNew();
             if (ShouldRunBleDiscoveryScan())
             {
                 var blePart = TimeSpan.FromSeconds(
@@ -531,7 +546,7 @@ public sealed class LocalNetworkScanner(
         var dataAddr = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(remoteEp.Address, dataPort));
         nick = string.IsNullOrWhiteSpace(nick) ? "?" : nick.Trim();
         var peer = new DiscoveredLocalPeer(responderId, nick, dataAddr, TransportKind.Udp, DateTimeOffset.UtcNow,
-            dataPort, LinkTechnologyPreset.Unlimited, PresencePeerCapabilities.Chat);
+            dataPort);
         OnDiscoveryPingReceived(peer);
         DiscoveryPingReceived?.Invoke(this, new DiscoveryPingReceivedEventArgs(peer));
         return true;
@@ -543,8 +558,10 @@ public sealed class LocalNetworkScanner(
         Volatile.Write(ref _priorGossipBroadcastNonce, prev);
     }
 
-    private bool IsRecentGossipBroadcastNonce(long n) =>
-        n == Volatile.Read(ref _lastGossipBroadcastNonce) || n == Volatile.Read(ref _priorGossipBroadcastNonce);
+    private bool IsRecentGossipBroadcastNonce(long n)
+    {
+        return n == Volatile.Read(ref _lastGossipBroadcastNonce) || n == Volatile.Read(ref _priorGossipBroadcastNonce);
+    }
 
     private async Task<bool> TryReplyToGossipProbeAsync(ITransport replyTransport, byte[] buf,
         TransportAddress remote, CancellationToken cancellationToken)
@@ -592,7 +609,6 @@ public sealed class LocalNetworkScanner(
 
         IReadOnlyList<Route> routes = Array.Empty<Route>();
         if (routeTableSnapshotSource != null)
-        {
             try
             {
                 routes = await routeTableSnapshotSource.GetRoutesAsync(cancellationToken).ConfigureAwait(false);
@@ -601,7 +617,6 @@ public sealed class LocalNetworkScanner(
             {
                 routes = Array.Empty<Route>();
             }
-        }
 
         var reply = RouteTableWireCodec.BuildReply(nonce, myId, routes);
         await replyTransport.SendAsync(reply, remote, cancellationToken).ConfigureAwait(false);
@@ -627,7 +642,9 @@ public sealed class LocalNetworkScanner(
             .ThenBy(p => p.NetworkId)
             .ToList();
         lock (_snapshotSync)
+        {
             _snapshot = list;
+        }
     }
 
     /// <summary>
@@ -673,7 +690,6 @@ public sealed class LocalNetworkScanner(
             {
                 var broadcastEps = LanBroadcastHelper.GetIpv4BroadcastEndpoints(PresencePingCodec.UdpPort);
                 foreach (var ep in broadcastEps)
-                {
                     try
                     {
                         var addr = UdpTransportAddress.FromIPEndPoint(ep);
@@ -683,10 +699,8 @@ public sealed class LocalNetworkScanner(
                     {
                         // один broadcast может быть недоступен
                     }
-                }
 
                 foreach (var host in _udpPresenceTargets.Values)
-                {
                     try
                     {
                         if (!IPAddress.TryParse(host, out var ip))
@@ -698,7 +712,6 @@ public sealed class LocalNetworkScanner(
                     {
                         // peer может быть офлайн / IP устарел
                     }
-                }
             }
 
             var bt = _secondaryPresenceTransports.FirstOrDefault(t => t.Kind == TransportKind.Bluetooth);
@@ -724,10 +737,10 @@ public sealed class LocalNetworkScanner(
                 }
 
                 if (_bluetoothTargets.IsEmpty)
-                {
                     try
                     {
-                        var paired = await TryGetPairedBluetoothAddressesAsync(bt, cancellationToken).ConfigureAwait(false);
+                        var paired = await TryGetPairedBluetoothAddressesAsync(bt, cancellationToken)
+                            .ConfigureAwait(false);
                         foreach (var addr in paired)
                             RememberBluetoothPeer(addr);
                     }
@@ -735,10 +748,8 @@ public sealed class LocalNetworkScanner(
                     {
                         // bluetooth subsystem unavailable
                     }
-                }
 
                 foreach (var target in _bluetoothTargets.Values)
-                {
                     try
                     {
                         await bt.SendAsync(payload, target, cancellationToken).ConfigureAwait(false);
@@ -747,7 +758,6 @@ public sealed class LocalNetworkScanner(
                     {
                         // устройство выключено/вне зоны/не сопряжено
                     }
-                }
             }
 
             foreach (var transport in _secondaryPresenceTransports.Where(t => t.Kind != TransportKind.Bluetooth))
@@ -792,7 +802,6 @@ public sealed class LocalNetworkScanner(
         var probe = GossipWireCodec.BuildProbe(nonce, localPeer.NetworkId, CompressedNetworkId.Empty);
 
         foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(GossipWireCodec.UdpPort))
-        {
             try
             {
                 var addr = UdpTransportAddress.FromIPEndPoint(ep);
@@ -802,10 +811,8 @@ public sealed class LocalNetworkScanner(
             {
                 // один broadcast может быть недоступен
             }
-        }
 
         foreach (var host in _udpPresenceTargets.Values)
-        {
             try
             {
                 if (!IPAddress.TryParse(host, out var ip))
@@ -819,7 +826,6 @@ public sealed class LocalNetworkScanner(
             {
                 // узел недоступен или фильтрация
             }
-        }
     }
 
     private static async Task<IReadOnlyList<TransportAddress>> TryGetPairedBluetoothAddressesAsync(
@@ -853,7 +859,7 @@ public sealed class LocalNetworkScanner(
                 try
                 {
                     await Task.Delay(period, cancellationToken).ConfigureAwait(false);
-                }  
+                }
                 catch (OperationCanceledException)
                 {
                     break;

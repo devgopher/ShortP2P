@@ -1,12 +1,3 @@
-using System.Collections.Concurrent;
-using System.IO;
-using System.Threading.Channels;
-using Android.Bluetooth;
-using Android.Bluetooth.LE;
-using Android.Content;
-using Android.OS;
-using Java.Util;
-using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport.Bluetooth.Android;
@@ -20,11 +11,15 @@ public sealed class AndroidBluetoothTransport : ITransport
     private const int MinApiForGattServerWrite = 31;
 
     private static readonly UUID ServiceUuidJava = UUID.FromString(BleShortP2PGattProtocol.ServiceUuid.ToString("D"));
-    private static readonly UUID RxUuidJava = UUID.FromString(BleShortP2PGattProtocol.PeerRxCharacteristicUuid.ToString("D"));
-    private static readonly UUID TxUuidJava = UUID.FromString(BleShortP2PGattProtocol.PeerTxCharacteristicUuid.ToString("D"));
+
+    private static readonly UUID RxUuidJava =
+        UUID.FromString(BleShortP2PGattProtocol.PeerRxCharacteristicUuid.ToString("D"));
+
+    private static readonly UUID TxUuidJava =
+        UUID.FromString(BleShortP2PGattProtocol.PeerTxCharacteristicUuid.ToString("D"));
 
     private readonly Context _context;
-    private readonly AndroidBluetoothTransportOptions _options;
+
     private readonly Channel<TransportReceiveMessage> _inbound = Channel.CreateBounded<TransportReceiveMessage>(
         new BoundedChannelOptions(DefaultChannelCapacity)
         {
@@ -33,18 +28,23 @@ public sealed class AndroidBluetoothTransport : ITransport
             SingleWriter = false
         });
 
-    private readonly ConcurrentDictionary<string, OutboundPeerState> _outbound = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> _networkIdOfferedToMac = new(StringComparer.OrdinalIgnoreCase);
-    private BluetoothManager? _btManager;
+    private readonly AndroidBluetoothTransportOptions _options;
+
+    private readonly ConcurrentDictionary<string, OutboundPeerState> _outbound = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly TaskCompletionSource<bool> _serviceAddedTcs =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private BluetoothAdapter? _adapter;
-    private BluetoothLeAdvertiser? _advertiser;
-    private BluetoothGattServer? _gattServer;
     private AdvertiseCallbackImpl? _advertiseCallback;
-    private readonly TaskCompletionSource<bool> _serviceAddedTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private BluetoothLeAdvertiser? _advertiser;
+    private BluetoothManager? _btManager;
+    private bool _disposed;
+    private BluetoothGattServer? _gattServer;
 
     private CancellationTokenSource? _runCts;
     private volatile bool _started;
-    private bool _disposed;
 
     public AndroidBluetoothTransport(Context context, AndroidBluetoothTransportOptions options = default)
     {
@@ -52,9 +52,9 @@ public sealed class AndroidBluetoothTransport : ITransport
         _options = options;
     }
 
-    public TransportKind Kind => TransportKind.Bluetooth;
-
     public ChannelReader<TransportReceiveMessage> Inbound => _inbound.Reader;
+
+    public TransportKind Kind => TransportKind.Bluetooth;
 
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
@@ -274,15 +274,14 @@ public sealed class AndroidBluetoothTransport : ITransport
         if (bonded == null)
             return list;
         foreach (var device in bonded)
-        {
             if (DeviceToTransportAddress(device, out var addr))
                 list.Add(addr);
-        }
 
         return list;
     }
 
-    public Task<IReadOnlyList<TransportAddress>> GetPairedDeviceAddressesAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<TransportAddress>> GetPairedDeviceAddressesAsync(
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult<IReadOnlyList<TransportAddress>>(GetBondedDeviceAddresses());
@@ -307,7 +306,10 @@ public sealed class AndroidBluetoothTransport : ITransport
         }
     }
 
-    internal void OnServiceAdded(bool success) => _serviceAddedTcs.TrySetResult(success);
+    internal void OnServiceAdded(bool success)
+    {
+        _serviceAddedTcs.TrySetResult(success);
+    }
 
     private static bool DeviceToTransportAddress(BluetoothDevice device, out TransportAddress addr)
     {
@@ -335,7 +337,6 @@ public sealed class AndroidBluetoothTransport : ITransport
         }
 
         if (_advertiser != null && _advertiseCallback != null)
-        {
             try
             {
                 _advertiser.StopAdvertising(_advertiseCallback);
@@ -344,7 +345,6 @@ public sealed class AndroidBluetoothTransport : ITransport
             {
                 // ignore
             }
-        }
 
         _advertiseCallback = null;
         _networkIdOfferedToMac.Clear();
@@ -418,10 +418,10 @@ public sealed class AndroidBluetoothTransport : ITransport
     private sealed class OutboundPeerState
     {
         public readonly SemaphoreSlim Gate = new(1, 1);
+        public TaskCompletionSource<bool>? DiscoveryTcs;
         public BluetoothGatt? Gatt;
         public BluetoothGattCharacteristic? PeerRx;
         public BluetoothGattCharacteristic? PeerTx;
-        public TaskCompletionSource<bool>? DiscoveryTcs;
     }
 
     private sealed class AdvertiseCallbackImpl : AdvertiseCallback
@@ -436,7 +436,10 @@ public sealed class AndroidBluetoothTransport : ITransport
     {
         private readonly AndroidBluetoothTransport _owner;
 
-        public ShortP2PGattServerCallback(AndroidBluetoothTransport owner) => _owner = owner;
+        public ShortP2PGattServerCallback(AndroidBluetoothTransport owner)
+        {
+            _owner = owner;
+        }
 
         public override void OnServiceAdded(GattStatus status, BluetoothGattService? service)
         {

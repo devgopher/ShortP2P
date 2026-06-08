@@ -1,7 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
 using ShortP2P.Auth.Data;
-using ShortP2P.Discovery;
 
 namespace ShortP2P.Client.Routing;
 
@@ -10,11 +9,15 @@ public static class ChatInviteCodec
 {
     public const byte FrameChatInvite = 0x30;
 
-    /// <summary>UDP-порт только для приглашений в чат; data/handshake/сообщения — <see cref="PresencePingCodec.DefaultDataUdpPort" />.</summary>
+    /// <summary>
+    ///     UDP-порт только для приглашений в чат; data/handshake/сообщения —
+    ///     <see cref="PresencePingCodec.DefaultDataUdpPort" />.
+    /// </summary>
     public const int InviteUdpPort = 17502;
 
-    private static ReadOnlySpan<byte> Magic => "SP2I"u8;
     private const byte WireVersion = 1;
+
+    private static ReadOnlySpan<byte> Magic => "SP2I"u8;
 
     /// <param name="dataPort">Порт в пакете для ответного invite (обычно <see cref="InviteUdpPort" />), не порт data-чата.</param>
     public static byte[] Build(string nickname, CompressedNetworkId networkId, string rsaPublicKeyJson,
@@ -54,7 +57,8 @@ public static class ChatInviteCodec
         return buf;
     }
 
-    public static bool TryParse(ReadOnlySpan<byte> datagram, out CompressedNetworkId initiatorNetworkId, out string nickname,
+    public static bool TryParse(ReadOnlySpan<byte> datagram, out CompressedNetworkId initiatorNetworkId,
+        out string nickname,
         out string rsaPublicKeyJson, out string dataHost, out int dataPort)
     {
         initiatorNetworkId = CompressedNetworkId.Empty;

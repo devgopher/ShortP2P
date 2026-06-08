@@ -1,19 +1,16 @@
-using System;
+namespace ShortP2P.Crypto;
 
-namespace ShortP2P.Crypto
+/// <summary>
+///     RSA key pair for handshake.
+/// </summary>
+public sealed class RsaKeyPair
 {
-    /// <summary>
-    ///     RSA key pair for handshake.
-    /// </summary>
-    public sealed class RsaKeyPair
+    internal RsaKeyPair(RsaPublicKey publicKey, RsaPrivateKey privateKey)
     {
-        internal RsaKeyPair(RsaPublicKey publicKey, RsaPrivateKey privateKey)
-        {
-            PublicKey = publicKey ?? throw new ArgumentNullException(nameof(publicKey));
-            PrivateKey = privateKey ?? throw new ArgumentNullException(nameof(privateKey));
-        }
-
-        public RsaPublicKey PublicKey { get; }
-        public RsaPrivateKey PrivateKey { get; }
+        PublicKey = publicKey ?? throw new ArgumentNullException(nameof(publicKey));
+        PrivateKey = privateKey ?? throw new ArgumentNullException(nameof(privateKey));
     }
+
+    public RsaPublicKey PublicKey { get; }
+    public RsaPrivateKey PrivateKey { get; }
 }

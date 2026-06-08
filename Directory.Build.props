@@ -1,20 +1,20 @@
 <Project>
-	<!--
-	  Android / MAUI (CLI): https://aka.ms/dotnet-android-install-sdk
-	  - AndroidSdkDirectory: -p:AndroidSdkDirectory → ANDROID_SDK_ROOT → ANDROID_HOME → %LocalAppData%\Android\Sdk
-	  - JavaSdkDirectory:    -p:JavaSdkDirectory → JAVA_HOME (must be a JDK with bin\jar, e.g. 17; not a JRE 8)
-	-->
-	<PropertyGroup>
-		<NetCoreTargetFramework>net10.0</NetCoreTargetFramework>
-		<WindowsDesktopTargetFramework>net10.0-windows10.0.17763.0</WindowsDesktopTargetFramework>
-		<MicrosoftExtensionsVersion>10.0.0</MicrosoftExtensionsVersion>
-		<MicrosoftEntityFrameworkCoreVersion>10.0.0</MicrosoftEntityFrameworkCoreVersion>
+    <!--
+      Android / MAUI (CLI): https://aka.ms/dotnet-android-install-sdk
+      - AndroidSdkDirectory: -p:AndroidSdkDirectory → ANDROID_SDK_ROOT → ANDROID_HOME → %LocalAppData%\Android\Sdk
+      - JavaSdkDirectory:    -p:JavaSdkDirectory → JAVA_HOME (must be a JDK with bin\jar, e.g. 17; not a JRE 8)
+    -->
+    <PropertyGroup>
+        <NetCoreTargetFramework>net10.0</NetCoreTargetFramework>
+        <WindowsDesktopTargetFramework>net10.0-windows10.0.17763.0</WindowsDesktopTargetFramework>
+        <MicrosoftExtensionsVersion>10.0.0</MicrosoftExtensionsVersion>
+        <MicrosoftEntityFrameworkCoreVersion>10.0.0</MicrosoftEntityFrameworkCoreVersion>
 
-		<AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' and '$(ANDROID_SDK_ROOT)' != '' and Exists('$(ANDROID_SDK_ROOT)')">$(ANDROID_SDK_ROOT)</AndroidSdkDirectory>
-		<AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' and '$(ANDROID_HOME)' != '' and Exists('$(ANDROID_HOME)')">$(ANDROID_HOME)</AndroidSdkDirectory>
-		<AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' and Exists('$(LOCALAPPDATA)\Android\Sdk')">$(LOCALAPPDATA)\Android\Sdk</AndroidSdkDirectory>
+        <AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' and '$(ANDROID_SDK_ROOT)' != '' and Exists('$(ANDROID_SDK_ROOT)')">$(ANDROID_SDK_ROOT)</AndroidSdkDirectory>
+        <AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' and '$(ANDROID_HOME)' != '' and Exists('$(ANDROID_HOME)')">$(ANDROID_HOME)</AndroidSdkDirectory>
+        <AndroidSdkDirectory Condition="'$(AndroidSdkDirectory)' == '' and Exists('$(LOCALAPPDATA)\Android\Sdk')">$(LOCALAPPDATA)\Android\Sdk</AndroidSdkDirectory>
 
-		<JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and '$(JAVA_HOME)' != '' and $([MSBuild]::IsOSPlatform('windows')) and Exists('$(JAVA_HOME)\bin\jar.exe')">$(JAVA_HOME)</JavaSdkDirectory>
-		<JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and '$(JAVA_HOME)' != '' and !$([MSBuild]::IsOSPlatform('windows')) and Exists('$(JAVA_HOME)/bin/jar')">$(JAVA_HOME)</JavaSdkDirectory>
-	</PropertyGroup>
+        <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and '$(JAVA_HOME)' != '' and $([MSBuild]::IsOSPlatform('windows')) and Exists('$(JAVA_HOME)\bin\jar.exe')">$(JAVA_HOME)</JavaSdkDirectory>
+        <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and '$(JAVA_HOME)' != '' and !$([MSBuild]::IsOSPlatform('windows')) and Exists('$(JAVA_HOME)/bin/jar')">$(JAVA_HOME)</JavaSdkDirectory>
+    </PropertyGroup>
 </Project>

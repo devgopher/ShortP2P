@@ -1,28 +1,14 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Microsoft.Maui.Storage;
-using NLog.Extensions.Logging;
-using NLog;
-using NLog.Config;
-using NLog.Targets;
-using NLog.Targets.Wrappers;
 using ShortP2P.Auth;
-using ShortP2P.Client;
+using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
-using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
-using ShortP2P.Discovery;
-using ShortP2P.Discovery.Ble;
-using ShortP2P.Discovery.Pings;
-using ShortP2P.Discovery.RouteTables;
 using ShortP2P.MauiApp.Services;
-using ShortP2P.Transport;
-using ShortP2P.Transport.Abstractions;
 #if ANDROID
 using ShortP2P.Transport.Bluetooth.Android;
 #endif
+
 #if WINDOWS
 using ShortP2P.Transport.Bluetooth.Windows;
 #endif
@@ -31,16 +17,16 @@ namespace ShortP2P.MauiApp;
 
 public static class MauiProgram
 {
-    public static IServiceProvider Services { get; private set; } = null!;
     private static bool _globalExceptionHandlersInstalled;
+    public static IServiceProvider Services { get; private set; } = null!;
 
-    public static global::Microsoft.Maui.Hosting.MauiApp CreateMauiApp()
+    public static Microsoft.Maui.Hosting.MauiApp CreateMauiApp()
     {
         SQLitePCL.Batteries_V2.Init();
         ConfigureNLog();
         ConfigureGlobalExceptionHandlers();
 
-        var builder = global::Microsoft.Maui.Hosting.MauiApp.CreateBuilder();
+        var builder = Microsoft.Maui.Hosting.MauiApp.CreateBuilder();
         builder
             .UseMauiApp<App>()
             .ConfigureFonts(fonts =>
@@ -150,7 +136,8 @@ public static class MauiProgram
         var fileTarget = new FileTarget("gui-logfile")
         {
             FileName = Path.Combine(logsDir, "${date:format=yyyy-MM-dd}.log"),
-            Layout = "${longdate}|${uppercase:${level}}|${logger}|${message}${onexception:inner=|${exception:format=tostring}}",
+            Layout =
+                "${longdate}|${uppercase:${level}}|${logger}|${message}${onexception:inner=|${exception:format=tostring}}",
             Encoding = System.Text.Encoding.UTF8,
             KeepFileOpen = false,
             ConcurrentWrites = true,
@@ -167,10 +154,7 @@ public static class MauiProgram
 
     private static void ConfigureGlobalExceptionHandlers()
     {
-        if (_globalExceptionHandlersInstalled)
-        {
-            return;
-        }
+        if (_globalExceptionHandlersInstalled) return;
 
         _globalExceptionHandlersInstalled = true;
         var logger = LogManager.GetLogger("GlobalExceptions");

@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Logging;
-
 namespace ShortP2P.MauiApp;
 
 internal static class AppPermissionsBootstrapper

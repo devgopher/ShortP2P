@@ -1,5 +1,5 @@
+using System.Net;
 using ShortP2P.Client.Data;
-using ShortP2P.Client;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
@@ -13,8 +13,8 @@ public sealed class ChatMessageAppendedEventArgs(int chatId, bool outgoing) : Ev
 
 public sealed class ChatRepository
 {
-    private readonly AppDatabase _db;
     private readonly SemaphoreSlim _addChatGate = new(1, 1);
+    private readonly AppDatabase _db;
 
     public ChatRepository(AppDatabase db)
     {
@@ -27,7 +27,10 @@ public sealed class ChatRepository
     /// <summary>Новое сообщение записано в БД (входящее или исходящее).</summary>
     public event EventHandler<ChatMessageAppendedEventArgs>? ChatMessageAppended;
 
-    public void NotifyChatListChanged() => ChatListChanged?.Invoke(this, EventArgs.Empty);
+    public void NotifyChatListChanged()
+    {
+        ChatListChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     public async Task<IReadOnlyList<ChatEntity>> ListChatsAsync(int userId)
     {
@@ -60,7 +63,7 @@ public sealed class ChatRepository
             {
                 var mergedHost = PeerHostList.MergeAppend(existing.PeerHost, peerHost);
                 var mergedEndpoints = MergePeerEndpoints(existing, peerHost, peerPort);
-                await UpdateChatP2pRouteAsync(existing.Id, mergedHost, peerPort, relayRouteBlob: null, peerRsaPublicJson)
+                await UpdateChatP2pRouteAsync(existing.Id, mergedHost, peerPort, null, peerRsaPublicJson)
                     .ConfigureAwait(false);
                 existing.PeerHost = mergedHost;
                 existing.PeerPort = peerPort;
@@ -83,7 +86,7 @@ public sealed class ChatRepository
                 PeerHost = peerHost.Trim(),
                 PeerPort = peerPort,
                 PeerEndpointsJson = MergePeerEndpoints(null, peerHost, peerPort),
-                UpdatedUtcTicks = DateTime.UtcNow.Ticks,
+                UpdatedUtcTicks = DateTime.UtcNow.Ticks
             };
             await conn.InsertAsync(chat);
             NotifyChatListChanged();
@@ -128,12 +131,10 @@ public sealed class ChatRepository
             merged.AddRange(PeerTransportEndpoints.Parse(existing));
         foreach (var host in (peerHost ?? string.Empty).Split([',', ';', '|', ' ', '\n', '\r', '\t'],
                      StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (System.Net.IPAddress.TryParse(host, out var ip) && peerPort is >= 1 and <= 65535)
-                merged.Add(UdpTransportAddress.FromIPEndPoint(new System.Net.IPEndPoint(ip, peerPort)));
+            if (IPAddress.TryParse(host, out var ip) && peerPort is >= 1 and <= 65535)
+                merged.Add(UdpTransportAddress.FromIPEndPoint(new IPEndPoint(ip, peerPort)));
             else if (BluetoothTransportAddress.TryParseMac(host, out var mac))
                 merged.Add(BluetoothTransportAddress.FromMac(mac));
-        }
 
         var dedup = new Dictionary<string, TransportAddress>(StringComparer.Ordinal);
         foreach (var x in merged)
@@ -190,7 +191,7 @@ public sealed class ChatRepository
             TransferHost = "",
             TransferPort = 0,
             TransferExpiresUtcTicks = 0,
-            TransferState = (int)ChatTransferState.None,
+            TransferState = (int)ChatTransferState.None
         };
         await conn.InsertAsync(msg);
 
@@ -231,7 +232,7 @@ public sealed class ChatRepository
             TransferHost = "",
             TransferPort = 0,
             TransferExpiresUtcTicks = 0,
-            TransferState = (int)ChatTransferState.None,
+            TransferState = (int)ChatTransferState.None
         };
         await conn.InsertAsync(msg);
 
@@ -272,7 +273,7 @@ public sealed class ChatRepository
             TransferHost = "",
             TransferPort = 0,
             TransferExpiresUtcTicks = 0,
-            TransferState = (int)ChatTransferState.None,
+            TransferState = (int)ChatTransferState.None
         };
         await conn.InsertAsync(msg);
 
@@ -314,7 +315,8 @@ public sealed class ChatRepository
     }
 
     public async Task UpdateMessageTransferMetadataAsync(int messageId, string transferId, string transferToken,
-        string transferPayloadKind, string transferFileName, long transferSizeBytes, string transferHost, int transferPort,
+        string transferPayloadKind, string transferFileName, long transferSizeBytes, string transferHost,
+        int transferPort,
         long transferExpiresUtcTicks, ChatTransferState transferState)
     {
         var conn = await _db.GetConnectionAsync();
@@ -333,7 +335,8 @@ public sealed class ChatRepository
         await conn.UpdateAsync(m);
     }
 
-    public async Task UpdateMessagePayloadAsync(int messageId, ChatPayloadKind payloadKind, string text, string mimeType,
+    public async Task UpdateMessagePayloadAsync(int messageId, ChatPayloadKind payloadKind, string text,
+        string mimeType,
         byte[] payloadBytes)
     {
         var conn = await _db.GetConnectionAsync();
@@ -347,7 +350,10 @@ public sealed class ChatRepository
         await conn.UpdateAsync(m);
     }
 
-    /// <summary>Удаляет все сообщения чата локально. Чат остаётся. Возвращает false, если чат не найден или не принадлежит userId.</summary>
+    /// <summary>
+    ///     Удаляет все сообщения чата локально. Чат остаётся. Возвращает false, если чат не найден или не принадлежит
+    ///     userId.
+    /// </summary>
     public async Task<bool> ClearMessagesAsync(int chatId, int userId, CancellationToken cancellationToken = default)
     {
         var conn = await _db.GetConnectionAsync().ConfigureAwait(false);

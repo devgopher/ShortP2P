@@ -5,8 +5,7 @@ namespace ShortP2P.Auth.Data;
 [Table("users")]
 public class UserEntity
 {
-    [PrimaryKey, AutoIncrement]
-    public int Id { get; set; }
+    [PrimaryKey] [AutoIncrement] public int Id { get; set; }
 
     public string Nickname { get; set; } = "";
 

@@ -1,4 +1,3 @@
-using ShortP2P.Auth.Data;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport.Bluetooth.Android;

@@ -1,7 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
 using ShortP2P.Auth.Data;
-using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Client.Routing;
@@ -12,11 +11,11 @@ public static class LanRoutingCodec
     public const byte FrameFind = 0x10;
     public const byte FrameFound = 0x11;
     public const byte FrameRelay = 0x22;
-
-    private static ReadOnlySpan<byte> Magic => "SP2F"u8;
     private const byte WireVersion = 1;
     private const byte MsgFind = 1;
     private const byte MsgFound = 2;
+
+    private static ReadOnlySpan<byte> Magic => "SP2F"u8;
 
     public static byte[] BuildFind(Guid searchId, CompressedNetworkId targetNetworkId, string targetNickname, byte ttl,
         IReadOnlyList<CompressedNetworkId> visited, IReadOnlyList<TransportAddress> pathDataHops)
@@ -31,10 +30,8 @@ public static class LanRoutingCodec
         if (pathDataHops.Count > 3)
             throw new ArgumentOutOfRangeException(nameof(pathDataHops));
         foreach (var a in pathDataHops)
-        {
             if (a.Kind != TransportKind.Udp)
                 throw new ArgumentException("Path must be UDP.", nameof(pathDataHops));
-        }
 
         var pathBytes = 0;
         foreach (var a in pathDataHops)
@@ -79,8 +76,10 @@ public static class LanRoutingCodec
         return buf;
     }
 
-    public static bool TryParseFind(ReadOnlySpan<byte> datagram, out Guid searchId, out CompressedNetworkId targetNetworkId,
-        out string targetNickname, out byte ttl, out List<CompressedNetworkId> visited, out List<TransportAddress> pathDataHops)
+    public static bool TryParseFind(ReadOnlySpan<byte> datagram, out Guid searchId,
+        out CompressedNetworkId targetNetworkId,
+        out string targetNickname, out byte ttl, out List<CompressedNetworkId> visited,
+        out List<TransportAddress> pathDataHops)
     {
         searchId = default;
         targetNetworkId = CompressedNetworkId.Empty;
@@ -131,7 +130,8 @@ public static class LanRoutingCodec
 
     /// <param name="firstRelayHop">Первый UDP-получатель от инициатора; null — прямой адрес peerHost/peerPort.</param>
     /// <param name="relayStripPath">Адреса для вложенного RELAY после первого хопа (длина ≤ 3).</param>
-    public static byte[] BuildFound(Guid searchId, CompressedNetworkId targetNetworkId, string nickname, string rsaPublicKeyJson,
+    public static byte[] BuildFound(Guid searchId, CompressedNetworkId targetNetworkId, string nickname,
+        string rsaPublicKeyJson,
         string peerHost, int peerPort, TransportAddress? firstRelayHop, IReadOnlyList<TransportAddress> relayStripPath)
     {
         var nick = Encoding.UTF8.GetBytes(nickname.Trim());
@@ -146,10 +146,8 @@ public static class LanRoutingCodec
         if (firstRelayHop != null && firstRelayHop.Kind != TransportKind.Udp)
             throw new ArgumentException("Only UDP relay addresses supported.");
         foreach (var a in relayStripPath)
-        {
             if (a.Kind != TransportKind.Udp)
                 throw new ArgumentException("Only UDP relay addresses supported.");
-        }
 
         var relayBytes = 0;
         if (firstRelayHop != null)
@@ -157,7 +155,8 @@ public static class LanRoutingCodec
         foreach (var a in relayStripPath)
             relayBytes += 2 + a.Data.Length;
 
-        var bodyLen = 4 + 1 + 1 + 16 + CompressedNetworkId.WireLength + 2 + nick.Length + 4 + pub.Length + 2 + host.Length + 2 + 1 + 1 + relayBytes;
+        var bodyLen = 4 + 1 + 1 + 16 + CompressedNetworkId.WireLength + 2 + nick.Length + 4 + pub.Length + 2 +
+                      host.Length + 2 + 1 + 1 + relayBytes;
         var buf = new byte[1 + bodyLen];
         buf[0] = FrameFound;
         var o = 1;
@@ -205,7 +204,8 @@ public static class LanRoutingCodec
         return buf;
     }
 
-    public static bool TryParseFound(ReadOnlySpan<byte> datagram, out Guid searchId, out CompressedNetworkId targetNetworkId,
+    public static bool TryParseFound(ReadOnlySpan<byte> datagram, out Guid searchId,
+        out CompressedNetworkId targetNetworkId,
         out string nickname, out string rsaPublicKeyJson, out string peerHost, out int peerPort,
         out TransportAddress? firstRelayHop, out List<TransportAddress> relayStripPath)
     {
@@ -303,7 +303,8 @@ public static class LanRoutingCodec
         return buf;
     }
 
-    public static bool TryParseRelay(ReadOnlySpan<byte> datagram, out byte hopCount, out ReadOnlySpan<byte> innerPayload)
+    public static bool TryParseRelay(ReadOnlySpan<byte> datagram, out byte hopCount,
+        out ReadOnlySpan<byte> innerPayload)
     {
         hopCount = 0;
         innerPayload = ReadOnlySpan<byte>.Empty;
@@ -352,6 +353,8 @@ public static class LanRoutingCodec
         return true;
     }
 
-    public static bool RelayDeliversLocally(ReadOnlySpan<byte> datagram) =>
-        TryParseRelay(datagram, out var hc, out _) && hc == 0;
+    public static bool RelayDeliversLocally(ReadOnlySpan<byte> datagram)
+    {
+        return TryParseRelay(datagram, out var hc, out _) && hc == 0;
+    }
 }

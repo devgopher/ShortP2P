@@ -1,4 +1,3 @@
-using Microsoft.Maui.Controls;
 using ShortP2P.Client.Data;
 
 namespace ShortP2P.MauiApp;
@@ -8,12 +7,16 @@ public sealed class MessageRowVm
 {
     public required string CaptionLine { get; init; }
     public required string TextBody { get; init; }
+
     /// <summary>Текст вложения с выделением «Скачать» цветом ссылки.</summary>
     public FormattedString? FileBodyFormatted { get; init; }
+
     public bool ShowTextBody { get; init; }
     public bool IsImage { get; init; }
+
     /// <summary>Вложение-документ; для сохранения используйте <see cref="MessageId" />.</summary>
     public bool IsFile { get; init; }
+
     public bool IsTransferOffer { get; init; }
     public int MessageId { get; init; }
     public ImageSource? ImagePreview { get; init; }

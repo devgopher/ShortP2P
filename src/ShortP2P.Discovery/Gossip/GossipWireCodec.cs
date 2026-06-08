@@ -5,7 +5,8 @@ using ShortP2P.Auth.Data;
 namespace ShortP2P.Discovery.Gossip;
 
 /// <summary>
-///     Запрос-ответ по UDP на <see cref="UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort" /> (как <see cref="UdpPeerDiscoveryOptions.DiscoveryPort" />).
+///     Запрос-ответ по UDP на <see cref="UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort" /> (как
+///     <see cref="UdpPeerDiscoveryOptions.DiscoveryPort" />).
 /// </summary>
 public static class GossipWireCodec
 {
@@ -20,7 +21,8 @@ public static class GossipWireCodec
     public const int ProbeLength = 1 + 8 + CompressedNetworkId.WireLength + CompressedNetworkId.WireLength;
     public const int AckHeaderLength = 1 + 8 + CompressedNetworkId.WireLength + 2 + 2;
 
-    public static byte[] BuildProbe(long nonce, CompressedNetworkId senderNetworkId, CompressedNetworkId targetNetworkId)
+    public static byte[] BuildProbe(long nonce, CompressedNetworkId senderNetworkId,
+        CompressedNetworkId targetNetworkId)
     {
         var buf = new byte[ProbeLength];
         buf[0] = FrameProbe;
@@ -32,7 +34,8 @@ public static class GossipWireCodec
         return buf;
     }
 
-    public static bool TryParseProbe(ReadOnlySpan<byte> datagram, out long nonce, out CompressedNetworkId senderNetworkId,
+    public static bool TryParseProbe(ReadOnlySpan<byte> datagram, out long nonce,
+        out CompressedNetworkId senderNetworkId,
         out CompressedNetworkId targetNetworkId)
     {
         nonce = 0;
@@ -69,7 +72,8 @@ public static class GossipWireCodec
         return buf;
     }
 
-    public static bool TryParseAck(ReadOnlySpan<byte> datagram, out long nonce, out CompressedNetworkId responderNetworkId,
+    public static bool TryParseAck(ReadOnlySpan<byte> datagram, out long nonce,
+        out CompressedNetworkId responderNetworkId,
         out int dataUdpPort, out string nickname)
     {
         nonce = 0;

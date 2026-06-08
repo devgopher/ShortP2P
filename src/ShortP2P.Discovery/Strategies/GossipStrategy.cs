@@ -21,6 +21,7 @@ public sealed class GossipStrategy(
     AuthService authService) : IDiscoveryStrategy
 {
     private const int MaxPeerChainDepth = 5;
+
     private readonly IDbContextFactory<RouteDbContext> _dbContextFactory =
         dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
 
@@ -48,15 +49,15 @@ public sealed class GossipStrategy(
 
         if (localPeer == null)
             return [];
-        
+
         var localSenderId = CompressedNetworkId.FromShortString(localPeer.NetworkIdShort);
-        
+
         foreach (var remoteEndpoint in allKnownAddresses.SelectMany(kv => kv.Value))
         {
             var routes = await RouteTableWireClient.QueryRoutesAsync(
                     remoteEndpoint,
                     localSenderId,
-                    waitTimeout: TimeSpan.FromSeconds(2),
+                    TimeSpan.FromSeconds(2),
                     cancellationToken)
                 .ConfigureAwait(false);
             if (routes.Count == 0)
@@ -73,13 +74,6 @@ public sealed class GossipStrategy(
             .Include(r => r.PeerRoutes.OrderByDescending(pr => pr.LastSeen))
             .ToArrayAsync(cancellationToken)
             .ConfigureAwait(false);
-    }
-
-    private UserEntity? GetLocalPeer()
-    {
-        var localPeer = authService.CurrentUser;
-
-        return localPeer;
     }
 
     public async Task<PeerChain[]> FindAsync(CompressedNetworkId networkId, int deepness = 5,
@@ -102,13 +96,23 @@ public sealed class GossipStrategy(
             .ToArray();
     }
 
-    private static PeerIdentityAddress Clone(PeerIdentityAddress source) => new()
+    private UserEntity? GetLocalPeer()
     {
-        RouteId = source.RouteId,
-        PeerIdentity = source.PeerIdentity,
-        PeerAddress = source.PeerAddress,
-        LastSeen = source.LastSeen
-    };
+        var localPeer = authService.CurrentUser;
+
+        return localPeer;
+    }
+
+    private static PeerIdentityAddress Clone(PeerIdentityAddress source)
+    {
+        return new PeerIdentityAddress
+        {
+            RouteId = source.RouteId,
+            PeerIdentity = source.PeerIdentity,
+            PeerAddress = source.PeerAddress,
+            LastSeen = source.LastSeen
+        };
+    }
 
     private static PeerChain? TrimByTarget(PeerChain chain, CompressedNetworkId targetNetworkId, int maxDepth)
     {
@@ -132,7 +136,7 @@ public sealed class GossipStrategy(
             .Take(targetIndex + 1)
             .Select(Clone)
             .ToList();
-        
+
         return new PeerChain
         {
             SourceRouteId = chain.SourceRouteId,
@@ -153,7 +157,7 @@ public sealed class GossipStrategy(
             .Select(p => p.Identity.NetworkId.ToShortString())
             .Distinct()
             .ToArray();
-        
+
         var existingRoutes = await db.Routes
             .Include(r => r.PeerRoutes)
             .Where(r => routeIds.Contains(r.RouteId))
@@ -200,15 +204,13 @@ public sealed class GossipStrategy(
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<Dictionary<CompressedNetworkId, HashSet<IPEndPoint>>> CollectAddressesByPeerAsync(RouteDbContext db,
+    private static async Task<Dictionary<CompressedNetworkId, HashSet<IPEndPoint>>> CollectAddressesByPeerAsync(
+        RouteDbContext db,
         IReadOnlyCollection<DiscoveryPingEntry> pings, CancellationToken cancellationToken)
     {
         var result = new Dictionary<CompressedNetworkId, HashSet<IPEndPoint>>();
         var targetIds = pings.Select(p => p.Identity.NetworkId).ToHashSet();
-        foreach (var ping in pings)
-        {
-            AddUdpEndpoint(result, ping.Identity.NetworkId, ping.Address);
-        }
+        foreach (var ping in pings) AddUdpEndpoint(result, ping.Identity.NetworkId, ping.Address);
 
         if (targetIds.Count == 0)
             return result;
@@ -220,7 +222,7 @@ public sealed class GossipStrategy(
             .ConfigureAwait(false);
 
         var knownAddresses = routes.Where(pr => targetIds.Contains(pr.PeerIdentity.NetworkId)).ToList();
-        
+
         foreach (var address in knownAddresses)
         {
             if (!IPAddress.TryParse(address.PeerAddress, out var ip))
@@ -231,7 +233,8 @@ public sealed class GossipStrategy(
         return result;
     }
 
-    private static void AddUdpEndpoint(IDictionary<CompressedNetworkId, HashSet<IPEndPoint>> byPeer, CompressedNetworkId peerId, TransportAddress address)
+    private static void AddUdpEndpoint(IDictionary<CompressedNetworkId, HashSet<IPEndPoint>> byPeer,
+        CompressedNetworkId peerId, TransportAddress address)
     {
         try
         {
@@ -244,7 +247,8 @@ public sealed class GossipStrategy(
         }
     }
 
-    private static void AddEndpoint(IDictionary<CompressedNetworkId, HashSet<IPEndPoint>> byPeer, CompressedNetworkId peerId, IPEndPoint endpoint)
+    private static void AddEndpoint(IDictionary<CompressedNetworkId, HashSet<IPEndPoint>> byPeer,
+        CompressedNetworkId peerId, IPEndPoint endpoint)
     {
         if (!byPeer.TryGetValue(peerId, out var set))
         {
@@ -345,7 +349,7 @@ public sealed class GossipStrategy(
         var localPeer = GetLocalPeer();
         if (localPeer == null)
             return [];
-        
+
         var sourceRouteId = localPeer?.NetworkIdShort ?? "local";
         var result = new Dictionary<string, PeerChain>(StringComparer.Ordinal);
         foreach (var ping in pings)

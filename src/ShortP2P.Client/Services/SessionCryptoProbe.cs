@@ -5,11 +5,15 @@ internal static class SessionCryptoProbe
 {
     public const string Prefix = "CHAT ";
 
-    public static string FormatAck(string sourcePeerIdShort, string targetPeerIdShort) =>
-        $"{Prefix}{sourcePeerIdShort.Trim()} {targetPeerIdShort.Trim()} ACK";
+    public static string FormatAck(string sourcePeerIdShort, string targetPeerIdShort)
+    {
+        return $"{Prefix}{sourcePeerIdShort.Trim()} {targetPeerIdShort.Trim()} ACK";
+    }
 
-    public static string FormatOk(string sourcePeerIdShort, string targetPeerIdShort) =>
-        $"{Prefix}{sourcePeerIdShort.Trim()} {targetPeerIdShort.Trim()} OK";
+    public static string FormatOk(string sourcePeerIdShort, string targetPeerIdShort)
+    {
+        return $"{Prefix}{sourcePeerIdShort.Trim()} {targetPeerIdShort.Trim()} OK";
+    }
 
     public static bool TryParse(string text, out SessionCryptoProbeKind kind, out string src, out string tgt)
     {

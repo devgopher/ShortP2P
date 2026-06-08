@@ -1,27 +1,20 @@
-using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Threading;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
-using ShortP2P.Transport;
-using ShortP2P.Crypto;
 
 namespace ShortP2P.MauiApp;
 
 public partial class ChatsPage : ContentPage
 {
     private readonly AuthService _auth;
-    private readonly ChatRepository _chats;
-    private readonly UserP2pRuntime _p2p;
     private readonly IBluetoothRadioCatalog _bluetoothCatalog;
-    private readonly ILogger<ChatsPage> _logger;
     private readonly ObservableCollection<ChatListRowVm> _chatRows = [];
+    private readonly ChatRepository _chats;
+    private readonly ILogger<ChatsPage> _logger;
+    private readonly UserP2pRuntime _p2p;
     private IDispatcherTimer? _presenceRefreshTimer;
 
     public ChatsPage(AuthService auth, ChatRepository chats, UserP2pRuntime p2p,
@@ -36,8 +29,10 @@ public partial class ChatsPage : ContentPage
         ChatsCollection.ItemsSource = _chatRows;
     }
 
-    private void OnChatListChangedFromInvite(object? sender, EventArgs e) =>
+    private void OnChatListChangedFromInvite(object? sender, EventArgs e)
+    {
         MainThread.BeginInvokeOnMainThread(() => _ = OnChatListChangedAsync());
+    }
 
     private async Task OnChatListChangedAsync()
     {
@@ -84,7 +79,6 @@ public partial class ChatsPage : ContentPage
         EnsurePresenceRefreshTimerStarted();
         var u = _auth.CurrentUser;
         if (u != null)
-        {
             try
             {
                 await _p2p.EnsureStartedAsync(u).ConfigureAwait(true);
@@ -95,7 +89,6 @@ public partial class ChatsPage : ContentPage
             {
                 _logger.LogWarning(ex, "Ensure P2P on chats page appearing");
             }
-        }
 
         await RefreshAsync().ConfigureAwait(true);
     }
@@ -108,8 +101,10 @@ public partial class ChatsPage : ContentPage
         base.OnDisappearing();
     }
 
-    private void OnLanPresenceChanged(object? sender, EventArgs e) =>
+    private void OnLanPresenceChanged(object? sender, EventArgs e)
+    {
         MainThread.BeginInvokeOnMainThread(UpdatePeerOnlineFlags);
+    }
 
     private void UpdatePeerOnlineFlags()
     {
@@ -127,7 +122,10 @@ public partial class ChatsPage : ContentPage
             _presenceRefreshTimer.Start();
     }
 
-    private void OnPresenceRefreshTimerTick(object? sender, EventArgs e) => UpdatePeerOnlineFlags();
+    private void OnPresenceRefreshTimerTick(object? sender, EventArgs e)
+    {
+        UpdatePeerOnlineFlags();
+    }
 
     private async Task RefreshAsync()
     {
@@ -197,13 +195,11 @@ public partial class ChatsPage : ContentPage
     {
         ChatEntity? chat = null;
         for (var p = sender as Element; p != null; p = p.Parent)
-        {
             if (p is SwipeView sw && sw.BindingContext is ChatListRowVm row)
             {
                 chat = row.Chat;
                 break;
             }
-        }
 
         if (chat == null)
             return;
@@ -257,8 +253,6 @@ public partial class ChatsPage : ContentPage
 
 public sealed class ChatListRowVm : INotifyPropertyChanged
 {
-    public ChatEntity Chat { get; }
-
     private bool _isPeerOnline;
 
     public ChatListRowVm(ChatEntity chat, bool isPeerOnline)
@@ -266,6 +260,8 @@ public sealed class ChatListRowVm : INotifyPropertyChanged
         Chat = chat;
         _isPeerOnline = isPeerOnline;
     }
+
+    public ChatEntity Chat { get; }
 
     public string PeerNickname => Chat.PeerNickname;
 

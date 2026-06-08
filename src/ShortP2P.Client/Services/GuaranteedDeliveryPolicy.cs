@@ -37,7 +37,8 @@ public sealed class GuaranteedDeliveryPolicy
         };
 
         var pipeline = new ResiliencePipelineBuilder().AddRetry(retryOptions).Build();
-        await pipeline.ExecuteAsync(async ct => { await sendAttemptAsync(ct).ConfigureAwait(false); }, cancellationToken)
+        await pipeline.ExecuteAsync(async ct => { await sendAttemptAsync(ct).ConfigureAwait(false); },
+                cancellationToken)
             .ConfigureAwait(false);
     }
 }

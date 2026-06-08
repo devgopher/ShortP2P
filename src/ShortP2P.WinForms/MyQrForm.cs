@@ -1,4 +1,3 @@
-using System.Drawing;
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
@@ -9,8 +8,8 @@ namespace ShortP2P.WinForms;
 
 public sealed class MyQrForm : Form
 {
-    private readonly byte[]? _qrPng;
     private readonly string _qrPayloadJson = string.Empty;
+    private readonly byte[]? _qrPng;
 
     public MyQrForm(AuthService auth, ILogger<MyQrForm> log, ILogger<UserAction> userActions)
     {
@@ -37,7 +36,7 @@ public sealed class MyQrForm : Form
                 "Show this code to a peer so they can add you. All detected IPv4 addresses on this PC are included (best first); the peer can edit the list after scanning if needed.",
             AutoSize = true,
             MaximumSize = new Size(360, 0),
-            Dock = DockStyle.Top,
+            Dock = DockStyle.Top
         };
 
         var pub = RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey());
@@ -50,7 +49,7 @@ public sealed class MyQrForm : Form
             Size = new Size(280, 280),
             SizeMode = PictureBoxSizeMode.Zoom,
             BorderStyle = BorderStyle.FixedSingle,
-            Image = new Bitmap(new MemoryStream(_qrPng)),
+            Image = new Bitmap(new MemoryStream(_qrPng))
         };
         var btnShare = new Button { Text = "Поделиться", AutoSize = true };
         btnShare.Click += (_, _) => OnShareClicked();
@@ -60,7 +59,7 @@ public sealed class MyQrForm : Form
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
-            AutoScroll = true,
+            AutoScroll = true
         };
         panel.Controls.Add(hint);
         panel.Controls.Add(picture);

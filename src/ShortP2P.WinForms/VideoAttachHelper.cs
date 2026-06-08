@@ -1,5 +1,3 @@
-using TagLib;
-
 namespace ShortP2P.WinForms;
 
 internal static class VideoAttachHelper
@@ -24,7 +22,7 @@ internal static class VideoAttachHelper
         TryLoadAndValidateOgvAsync(string inputPath, int maxBytes, bool trafficSavingEnabled,
             CancellationToken cancellationToken = default)
     {
-        if (!System.IO.File.Exists(inputPath))
+        if (!File.Exists(inputPath))
             return (false, null, null, null, "Файл не найден.");
 
         if (!TryGetMimeFromExtension(inputPath, out var mime))
@@ -46,7 +44,7 @@ internal static class VideoAttachHelper
         if (meta.Width != expectedW || meta.Height != expectedH)
             return (false, null, null, null, $"Разрешение должно быть ровно {expectedW}x{expectedH}.");
 
-        var bytes = await System.IO.File.ReadAllBytesAsync(inputPath, cancellationToken).ConfigureAwait(false);
+        var bytes = await File.ReadAllBytesAsync(inputPath, cancellationToken).ConfigureAwait(false);
         if (bytes.Length <= 0)
             return (false, null, null, null, "Файл пустой.");
         if (bytes.Length > maxBytes)
@@ -54,10 +52,12 @@ internal static class VideoAttachHelper
         return (true, bytes, Path.GetFileName(inputPath), mime, null);
     }
 
-    public static (int Width, int Height) GetRequiredResolution(bool trafficSavingEnabled) =>
-        trafficSavingEnabled
+    public static (int Width, int Height) GetRequiredResolution(bool trafficSavingEnabled)
+    {
+        return trafficSavingEnabled
             ? (TrafficSavingVideoWidth, TrafficSavingVideoHeight)
             : (NormalVideoWidth, NormalVideoHeight);
+    }
 
     private static VideoMeta ReadMeta(string filePath)
     {

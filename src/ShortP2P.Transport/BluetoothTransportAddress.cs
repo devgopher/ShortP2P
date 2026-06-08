@@ -1,5 +1,5 @@
-using ShortP2P.Transport.Abstractions;
 using System.Globalization;
+using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport;
 
@@ -12,7 +12,9 @@ public static class BluetoothTransportAddress
 
     public static TransportAddress FromMac(ReadOnlySpan<byte> mac6)
     {
-        return mac6.Length != MacLength ? throw new ArgumentException($"MAC must be {MacLength} bytes.", nameof(mac6)) : new TransportAddress(TransportKind.Bluetooth, mac6.ToArray());
+        return mac6.Length != MacLength
+            ? throw new ArgumentException($"MAC must be {MacLength} bytes.", nameof(mac6))
+            : new TransportAddress(TransportKind.Bluetooth, mac6.ToArray());
     }
 
     public static bool TryParseMac(string text, out byte[] mac6)
@@ -26,11 +28,9 @@ public static class BluetoothTransportAddress
             return false;
         var bytes = new byte[MacLength];
         for (var i = 0; i < MacLength; i++)
-        {
             if (!byte.TryParse(clean.AsSpan(i * 2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture,
                     out bytes[i]))
                 return false;
-        }
 
         mac6 = bytes;
         return true;
@@ -51,7 +51,10 @@ public static class BluetoothTransportAddress
                 span[pos++] = GetHex((byte)(b & 0x0F));
             }
 
-            static char GetHex(byte v) => (char)(v < 10 ? ('0' + v) : ('A' + (v - 10)));
+            static char GetHex(byte v)
+            {
+                return (char)(v < 10 ? '0' + v : 'A' + (v - 10));
+            }
         });
     }
 }

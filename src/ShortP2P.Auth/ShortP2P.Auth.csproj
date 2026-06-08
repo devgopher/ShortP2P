@@ -1,18 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>$(NetCoreTargetFramework)</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <RootNamespace>ShortP2P.Auth</RootNamespace>
-  </PropertyGroup>
+    <PropertyGroup>
+        <TargetFramework>$(NetCoreTargetFramework)</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <RootNamespace>ShortP2P.Auth</RootNamespace>
+    </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="sqlite-net-pcl" Version="1.9.172" />
-  </ItemGroup>
+    <ItemGroup>
+        <PackageReference Include="sqlite-net-pcl" Version="1.9.172"/>
+    </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\..\ShortP2P.Crypto\ShortP2P.Crypto.csproj" />
-  </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\..\ShortP2P.Crypto\ShortP2P.Crypto.csproj"/>
+    </ItemGroup>
 
 </Project>

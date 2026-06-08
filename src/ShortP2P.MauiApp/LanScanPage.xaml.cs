@@ -1,13 +1,5 @@
-using System.Collections.ObjectModel;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
-using ShortP2P.Auth.Data;
-using ShortP2P.Client.Data;
-using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
-using ShortP2P.Discovery;
-using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.MauiApp;
 
@@ -27,7 +19,7 @@ public sealed class LanScanRow
             TransportKind.Udp => "UDP",
             TransportKind.Bluetooth => "Bluetooth",
             TransportKind.Infrared => "IrDA",
-            _ => p.TransportKind.ToString(),
+            _ => p.TransportKind.ToString()
         };
         var seen = p.LastSeenUtc.ToLocalTime().ToString("g");
         return new LanScanRow
@@ -36,7 +28,7 @@ public sealed class LanScanRow
             IsPeerOnline = isPeerOnline,
             Nickname = string.IsNullOrEmpty(p.Nickname) ? "—" : p.Nickname,
             NetworkIdShort = idShort,
-            DetailLine = $"{transport} · last ping {seen}",
+            DetailLine = $"{transport} · last ping {seen}"
         };
     }
 }
@@ -45,8 +37,8 @@ public partial class LanScanPage : ContentPage
 {
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
-    private readonly UserP2pRuntime _p2p;
     private readonly ILogger<LanScanPage> _logger;
+    private readonly UserP2pRuntime _p2p;
     private readonly ObservableCollection<LanScanRow> _rows = [];
 
     public LanScanPage(AuthService auth, ChatRepository chats, UserP2pRuntime p2p, ILogger<LanScanPage> logger)
@@ -72,8 +64,10 @@ public partial class LanScanPage : ContentPage
         base.OnDisappearing();
     }
 
-    private void OnClientsChanged(object? sender, EventArgs e) =>
+    private void OnClientsChanged(object? sender, EventArgs e)
+    {
         MainThread.BeginInvokeOnMainThread(RefreshRows);
+    }
 
     private void RefreshRows()
     {

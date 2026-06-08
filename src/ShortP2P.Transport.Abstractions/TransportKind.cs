@@ -7,7 +7,8 @@ public enum TransportKind : byte
 {
     Udp = 1,
     Bluetooth = 2,
-    Infrared = 3,
+
+    Infrared = 3
     // Tcp,
     // 
 }

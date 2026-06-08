@@ -1,4 +1,3 @@
-using ShortP2P.Auth.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Discovery;
 using ShortP2P.Discovery.Transceivers;
@@ -47,7 +46,6 @@ public sealed class InviteTransceiver(ITransport transport, int udpPort = ChatIn
             return;
         var packet = BuildPacket(message);
         foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(udpPort))
-        {
             try
             {
                 await _transport.SendAsync(packet, UdpTransportAddress.FromIPEndPoint(ep), cancellationToken)
@@ -57,10 +55,12 @@ public sealed class InviteTransceiver(ITransport transport, int udpPort = ChatIn
             {
                 // best-effort broadcast: одна интерфейсная подсеть может быть недоступна
             }
-        }
     }
 
-    public ValueTask DisposeAsync() => StopAsync();
+    public ValueTask DisposeAsync()
+    {
+        return StopAsync();
+    }
 
     private static byte[] BuildPacket(InviteMessage message)
     {

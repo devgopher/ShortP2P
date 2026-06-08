@@ -46,8 +46,10 @@ public static class RouteInfrastructureServiceCollectionExtensions
 
     /// <param name="sqliteDatabasePath"></param>
     /// <param name="enableDiscovery">
-    ///     <see langword="true" /> — зарегистрировать фоновый сервис (см. <see cref="IHostedService" />) для MAUI / generic host.
-    ///     <see langword="false" /> — только контекст и опции; затем вызовите <see cref="StartRoutePeerRoutesExpiryCleanupDetached" />.
+    ///     <see langword="true" /> — зарегистрировать фоновый сервис (см. <see cref="IHostedService" />) для MAUI / generic
+    ///     host.
+    ///     <see langword="false" /> — только контекст и опции; затем вызовите
+    ///     <see cref="StartRoutePeerRoutesExpiryCleanupDetached" />.
     /// </param>
     /// <param name="services"></param>
     public static IServiceCollection AddRouteDbContextWithPeerExpiryCleanup(
@@ -58,7 +60,7 @@ public static class RouteInfrastructureServiceCollectionExtensions
     {
         var dbPath = $"Data Source={sqliteDatabasePath}";
         services.AddDbContext<RouteDbContext>(o => o.UseSqlite(dbPath));
-        services.AddDbContextFactory<RouteDbContext>(o => o.UseSqlite(dbPath), ServiceLifetime.Singleton);
+        services.AddDbContextFactory<RouteDbContext>(o => o.UseSqlite(dbPath));
         services.AddSingleton<IRouteTableSnapshotSource, EfRouteTableSnapshotSource>();
         services.AddSingleton<IDiscoveryPingStore, InMemoryDiscoveryPingStore>();
         services.AddSingleton<IDiscoveryStrategy, GossipStrategy>();
@@ -70,10 +72,8 @@ public static class RouteInfrastructureServiceCollectionExtensions
         });
 
         if (enableDiscovery)
-        {
             //services.AddHostedService<RoutePeerRoutesExpiryCleanupHostedService>();
             services.AddHostedService<DiscoveryRoutesUpdateHostedService>();
-        }
 
         return services;
     }
@@ -87,7 +87,7 @@ public static class RouteInfrastructureServiceCollectionExtensions
         var loggerFactory = rootProvider.GetRequiredService<ILoggerFactory>();
         var logger = loggerFactory.CreateLogger("ShortP2P.RoutePeerRoutesExpiry");
         var routeSyncLogger = loggerFactory.CreateLogger("ShortP2P.RouteSync");
-        
+
         var cts = new CancellationTokenSource();
         AppDomain.CurrentDomain.ProcessExit += (_, _) => cts.Cancel();
         RoutePeerRoutesExpiryCleanup.StartDetached(rootProvider, options, logger, cts.Token);

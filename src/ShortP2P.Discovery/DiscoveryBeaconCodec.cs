@@ -13,7 +13,9 @@ internal static class DiscoveryBeaconCodec
 
     private const byte MsgAnnounce = 1;
 
-    private const int HeaderBytes = 4 + 1 + 1 + 2 + CompressedNetworkId.WireLength + 2; // magic + ver + type + res + id + nicklen
+    private const int
+        HeaderBytes = 4 + 1 + 1 + 2 + CompressedNetworkId.WireLength + 2; // magic + ver + type + res + id + nicklen
+
     private static ReadOnlySpan<byte> Magic => "SP2D"u8;
 
     internal static byte[] EncodeAnnounce(PeerIdentity peer, int maxNicknameUtf8Bytes)

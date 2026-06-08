@@ -1,10 +1,9 @@
 using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
-using ShortP2P.Auth.Data;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
-using ShortP2P.Discovery;
 using ShortP2P.Client.Services;
+using ShortP2P.Discovery;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.WinForms;
@@ -12,25 +11,27 @@ namespace ShortP2P.WinForms;
 /// <summary>Ручное сканирование LAN: presence UDP 17501; discovery wire — UdpPeerDiscoveryOptions (17890).</summary>
 public sealed class LocalNetworkScanForm : Form
 {
-    private readonly UserP2pRuntime _p2P;
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
-    private readonly ILogger<LocalNetworkScanForm> _logger;
-    private readonly ILogger<UserAction> _userActions;
-    private readonly Action<ChatEntity, IWin32Window> _openChat;
-    private readonly Func<Task>? _refreshMainChatsAsync;
+    private readonly Button _close = new() { Text = "Закрыть", DialogResult = DialogResult.OK };
+
     private readonly ListView _list = new()
     {
         View = View.Details,
         FullRowSelect = true,
         GridLines = true,
         Dock = DockStyle.Fill,
-        MultiSelect = false,
+        MultiSelect = false
     };
 
-    private readonly Label _status = new() { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "" };
+    private readonly ILogger<LocalNetworkScanForm> _logger;
+    private readonly Action<ChatEntity, IWin32Window> _openChat;
+    private readonly UserP2pRuntime _p2P;
+    private readonly Func<Task>? _refreshMainChatsAsync;
     private readonly Button _scan = new() { Text = "Сканировать", AutoSize = true };
-    private readonly Button _close = new() { Text = "Закрыть", DialogResult = DialogResult.OK };
+
+    private readonly Label _status = new() { AutoSize = true, ForeColor = SystemColors.GrayText, Text = "" };
+    private readonly ILogger<UserAction> _userActions;
 
     public LocalNetworkScanForm(UserP2pRuntime p2P, AuthService auth, ChatRepository chats,
         ILogger<LocalNetworkScanForm> logger, ILogger<UserAction> userActions,
@@ -59,7 +60,7 @@ public sealed class LocalNetworkScanForm : Form
             AutoSize = true,
             FlowDirection = FlowDirection.LeftToRight,
             Dock = DockStyle.Bottom,
-            Padding = new Padding(0, 8, 0, 0),
+            Padding = new Padding(0, 8, 0, 0)
         };
         bottom.Controls.Add(_scan);
         bottom.Controls.Add(_close);
@@ -69,7 +70,7 @@ public sealed class LocalNetworkScanForm : Form
             AutoSize = true,
             ForeColor = SystemColors.GrayText,
             Text =
-                "Двойной щелчок по строке (или Enter) — открыть чат или создать новый; список на главном экране обновится сам.",
+                "Двойной щелчок по строке (или Enter) — открыть чат или создать новый; список на главном экране обновится сам."
         };
 
         var root = new TableLayoutPanel
@@ -77,7 +78,7 @@ public sealed class LocalNetworkScanForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 4,
-            Padding = new Padding(12),
+            Padding = new Padding(12)
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -125,7 +126,7 @@ public sealed class LocalNetworkScanForm : Form
                 var idShort = p.NetworkId.ToShortString();
                 var row = new ListViewItem(string.IsNullOrEmpty(p.Nickname) ? "—" : p.Nickname)
                 {
-                    Tag = p,
+                    Tag = p
                 };
                 row.SubItems.Add(idShort);
                 row.SubItems.Add(FormatTransport(p.TransportKind));
@@ -139,14 +140,16 @@ public sealed class LocalNetworkScanForm : Form
         }
     }
 
-    private static string FormatTransport(TransportKind k) =>
-        k switch
+    private static string FormatTransport(TransportKind k)
+    {
+        return k switch
         {
             TransportKind.Udp => "UDP",
             TransportKind.Bluetooth => "Bluetooth",
             TransportKind.Infrared => "IrDA",
-            _ => k.ToString(),
+            _ => k.ToString()
         };
+    }
 
     private async Task OnListItemActivateAsync()
     {
@@ -159,7 +162,7 @@ public sealed class LocalNetworkScanForm : Form
         {
             var result = await LanChatStartFromDiscovery
                 .TryStartAsync(peer, _auth, _chats, _p2P, CancellationToken.None).ConfigureAwait(true);
-            
+
             switch (result.Kind)
             {
                 case LanChatStartKind.AlreadyExists:
@@ -176,13 +179,15 @@ public sealed class LocalNetworkScanForm : Form
                     _userActions.LogInformation(
                         "LAN scan: waiting for peer {Nickname} (network id {NetworkId})",
                         peer.Nickname, peer.NetworkId.ToShortString());
-                    MessageBox.Show(this, result.Message ?? "", "LAN", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(this, result.Message ?? "", "LAN", MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
                     break;
                 case LanChatStartKind.Failed:
                     _userActions.LogInformation(
                         "LAN scan: start chat failed for {Nickname} ({Message})",
                         peer.Nickname, result.Message ?? "unknown");
-                    MessageBox.Show(this, result.Message ?? "Ошибка", "LAN", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(this, result.Message ?? "Ошибка", "LAN", MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
                     break;
             }
         }

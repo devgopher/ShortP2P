@@ -1,19 +1,14 @@
-using System;
 using System.Collections.Concurrent;
-using System.IO;
 using System.Runtime.Versioning;
 using System.Threading.Channels;
-using Microsoft.Extensions.Logging;
-using ShortP2P.Auth.Data;
-using ShortP2P.Transport;
-using ShortP2P.Transport.Abstractions;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Devices.Enumeration;
-using Windows.Foundation;
 using Windows.Storage.Streams;
-using Buffer = Windows.Storage.Streams.Buffer;
+using Microsoft.Extensions.Logging;
+using ShortP2P.Auth.Data;
+using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
 
@@ -27,9 +22,13 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private const int DefaultChannelCapacity = 256;
     private const uint BluetoothUnavailableHResult = 0x800710DF;
 
-    private readonly WindowsBluetoothTransportOptions _options = options;
-    private readonly ILogger? _logger = options.Logger;
+    private static readonly StringComparer MacKeyComparer = StringComparer.OrdinalIgnoreCase;
+    private readonly ConcurrentDictionary<string, BluetoothLEDevice> _bleAdvertisementDeviceCache = new(MacKeyComparer);
     private readonly BleAdvertisementMergeCache _bleAdvertisementMergeCache = new(options.Logger);
+
+    private readonly ConcurrentDictionary<string, GattCharacteristic> _bleOutboundPeerRx = new(MacKeyComparer);
+    private readonly ConcurrentDictionary<string, GattCharacteristic> _bleOutboundPeerTx = new(MacKeyComparer);
+    private readonly ConcurrentDictionary<string, BluetoothLEDevice> _blePeerDevices = new(MacKeyComparer);
 
     private readonly Channel<TransportReceiveMessage> _inbound =
         Channel.CreateBounded<TransportReceiveMessage>(new BoundedChannelOptions(DefaultChannelCapacity)
@@ -39,48 +38,26 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             SingleWriter = false
         });
 
-    private static readonly StringComparer MacKeyComparer = StringComparer.OrdinalIgnoreCase;
-
-    private readonly ConcurrentDictionary<string, GattCharacteristic> _bleOutboundPeerRx = new(MacKeyComparer);
-    private readonly ConcurrentDictionary<string, GattCharacteristic> _bleOutboundPeerTx = new(MacKeyComparer);
-    private readonly ConcurrentDictionary<string, BluetoothLEDevice> _blePeerDevices = new(MacKeyComparer);
-    private readonly ConcurrentDictionary<string, BluetoothLEDevice> _bleAdvertisementDeviceCache = new(MacKeyComparer);
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _sendLocks = new(MacKeyComparer);
-    private CancellationTokenSource? _runCts;
-    private GattServiceProvider? _bleServiceProvider;
-    private GattLocalCharacteristic? _bleRxCharacteristic;
-    private GattLocalCharacteristic? _bleTxCharacteristic;
-    private BluetoothLEAdvertisementWatcher? _bleShortP2PAdvertisementWatcher;
+    private readonly ILogger? _logger = options.Logger;
     private readonly ConcurrentDictionary<string, byte> _networkIdOfferedToMac = new(MacKeyComparer);
-    private volatile string? _myBluetoothMac;
-    private ulong _myBluetoothAddr;
-    
-    public TransportKind Kind => TransportKind.Bluetooth;
 
-    public ChannelReader<TransportReceiveMessage> Inbound => _inbound.Reader;
+    private readonly WindowsBluetoothTransportOptions _options = options;
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _sendLocks = new(MacKeyComparer);
+    private GattLocalCharacteristic? _bleRxCharacteristic;
+    private GattServiceProvider? _bleServiceProvider;
+    private BluetoothLEAdvertisementWatcher? _bleShortP2PAdvertisementWatcher;
+    private GattLocalCharacteristic? _bleTxCharacteristic;
+
+    private bool _disposed;
+    private ulong _myBluetoothAddr;
+    private volatile string? _myBluetoothMac;
+    private CancellationTokenSource? _runCts;
 
     public bool IsRunning => _bleServiceProvider != null;
 
-    public static bool IsUnavailableError(Exception ex)
-    {
-        for (var cur = ex; cur != null; cur = cur.InnerException)
-        {
-            if ((uint)cur.HResult == BluetoothUnavailableHResult)
-                return true;
-            if (cur is InvalidOperationException &&
-                (cur.Message.Contains("Bluetooth LE device not found", StringComparison.OrdinalIgnoreCase) ||
-                 cur.Message.Contains("Bluetooth LE device is not paired", StringComparison.OrdinalIgnoreCase) ||
-                 cur.Message.Contains("Bluetooth LE pairing", StringComparison.OrdinalIgnoreCase) ||
-                 cur.Message.Contains("Bluetooth LE PairAsync", StringComparison.OrdinalIgnoreCase) ||
-                 cur.Message.Contains("automatic pairing is not available", StringComparison.OrdinalIgnoreCase) ||
-                 cur.Message.Contains("BLE service not found", StringComparison.OrdinalIgnoreCase) ||
-                 cur.Message.Contains("BLE RX characteristic not found", StringComparison.OrdinalIgnoreCase) ||
-                 cur.Message.Contains("BLE TX characteristic not found", StringComparison.OrdinalIgnoreCase)))
-                return true;
-        }
+    public TransportKind Kind => TransportKind.Bluetooth;
 
-        return false;
-    }
+    public ChannelReader<TransportReceiveMessage> Inbound => _inbound.Reader;
 
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
@@ -92,7 +69,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
 
         try
         {
-           await StartBleGattAsync(ct).ConfigureAwait(false);
+            await StartBleGattAsync(ct).ConfigureAwait(false);
         }
         catch (Exception ex) when ((uint)ex.HResult == BluetoothUnavailableHResult)
         {
@@ -115,6 +92,141 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         }
     }
 
+    public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, TransportAddress destination,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (destination.Kind != TransportKind.Bluetooth)
+            throw new ArgumentException("Destination must be Bluetooth transport.", nameof(destination));
+        var data = destination.Data;
+        if (data.Length != BluetoothMacAddress.MacLength)
+            throw new ArgumentException($"Bluetooth address must be {BluetoothMacAddress.MacLength} bytes (MAC).",
+                nameof(destination));
+
+        var macKey = MacCacheKey(data);
+        // var sendLock = _sendLocks.GetOrAdd(macKey, _ => new SemaphoreSlim(1, 1));
+        // await sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await SendViaBleAsync(macKey, data, payload, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // ignore
+        }
+    }
+
+    public async ValueTask StopAsync(CancellationToken cancellationToken = default)
+    {
+        if (_bleServiceProvider == null && _bleRxCharacteristic == null && _bleTxCharacteristic == null &&
+            _blePeerDevices.Count == 0 &&
+            _bleOutboundPeerRx.Count == 0 && _bleOutboundPeerTx.Count == 0 && _runCts == null &&
+            _bleShortP2PAdvertisementWatcher == null &&
+            _bleAdvertisementDeviceCache.IsEmpty)
+            return;
+
+        if (_runCts != null)
+            try
+            {
+                await _runCts.CancelAsync();
+            }
+            catch (ObjectDisposedException)
+            {
+                // ignore
+            }
+
+        StopBleShortP2PAdvertisementWatcher();
+        _networkIdOfferedToMac.Clear();
+
+        foreach (var kv in _bleOutboundPeerTx)
+            try
+            {
+                kv.Value.ValueChanged -= OnPeerTxValueChanged;
+            }
+            catch
+            {
+                // ignore
+            }
+
+        _bleOutboundPeerRx.Clear();
+        _bleOutboundPeerTx.Clear();
+
+        foreach (var kv in _blePeerDevices)
+            kv.Value.Dispose();
+
+        _blePeerDevices.Clear();
+
+        foreach (var kv in _bleAdvertisementDeviceCache)
+            try
+            {
+                kv.Value.Dispose();
+            }
+            catch
+            {
+                // ignore
+            }
+
+        _bleAdvertisementDeviceCache.Clear();
+
+        if (_bleRxCharacteristic != null)
+        {
+            _bleRxCharacteristic.WriteRequested -= OnBleRxWriteRequested;
+            _bleRxCharacteristic = null;
+        }
+
+        _bleTxCharacteristic = null;
+
+        if (_bleServiceProvider != null)
+        {
+            try
+            {
+                _bleServiceProvider.StopAdvertising();
+            }
+            catch
+            {
+                // ignore
+            }
+
+            _bleServiceProvider = null;
+        }
+
+        _runCts?.Dispose();
+        _runCts = null;
+
+        await Task.CompletedTask.ConfigureAwait(false);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        await StopAsync().ConfigureAwait(false);
+        _inbound.Writer.TryComplete();
+        foreach (var s in _sendLocks.Values) s.Dispose();
+        _sendLocks.Clear();
+    }
+
+    public static bool IsUnavailableError(Exception ex)
+    {
+        for (var cur = ex; cur != null; cur = cur.InnerException)
+        {
+            if ((uint)cur.HResult == BluetoothUnavailableHResult)
+                return true;
+            if (cur is InvalidOperationException &&
+                (cur.Message.Contains("Bluetooth LE device not found", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("Bluetooth LE device is not paired", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("Bluetooth LE pairing", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("Bluetooth LE PairAsync", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("automatic pairing is not available", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("BLE service not found", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("BLE RX characteristic not found", StringComparison.OrdinalIgnoreCase) ||
+                 cur.Message.Contains("BLE TX characteristic not found", StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
+
+        return false;
+    }
+
     private async Task StartBleGattAsync(CancellationToken ct)
     {
         var create = await GattServiceProvider.CreateAsync(BleShortP2PGattProtocol.ServiceUuid).AsTask(ct)
@@ -122,7 +234,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         if (create.Error != BluetoothError.Success || create.ServiceProvider == null)
             return;
         _bleServiceProvider = create.ServiceProvider;
-        
+
         var rxParameters = new GattLocalCharacteristicParameters
         {
             CharacteristicProperties = GattCharacteristicProperties.Write
@@ -132,7 +244,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             ReadProtectionLevel = GattProtectionLevel.Plain,
             UserDescription = "ShortP2P BLE RX"
         };
-        
+
         var rxResult = await _bleServiceProvider.Service
             .CreateCharacteristicAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid, rxParameters)
             .AsTask(ct).ConfigureAwait(false);
@@ -140,7 +252,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             return;
         _bleRxCharacteristic = rxResult.Characteristic;
         _bleRxCharacteristic.WriteRequested += OnBleRxWriteRequested;
-        
+
         var txParameters = new GattLocalCharacteristicParameters
         {
             CharacteristicProperties = GattCharacteristicProperties.Notify | GattCharacteristicProperties.Read,
@@ -158,11 +270,11 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
                 BluetoothMacAddress.FromBluetoothAddress(preferred));
         else
             _myBluetoothMac = await LocalAdapterBluetoothMac.TryGetAdapterMacStringAsync().ConfigureAwait(false)
-                               ?? "none";
-        
+                              ?? "none";
+
         _myBluetoothAddr = await LocalAdapterBluetoothMac.TryGetAdapterAddressAsync().ConfigureAwait(false)
                            ?? 0;
-        
+
         StartBleGattProviderAdvertising(_bleServiceProvider, _options.GattDiscoverable, _logger);
         StartBleShortP2PAdvertisementWatcher();
         _ = PushNetworkIdToPairedPeersAsync(ct);
@@ -239,12 +351,13 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         }
     }
 
-    private static void StartBleGattProviderAdvertising(GattServiceProvider provider, bool discoverable, ILogger? logger)
+    private static void StartBleGattProviderAdvertising(GattServiceProvider provider, bool discoverable,
+        ILogger? logger)
     {
         var advertising = new GattServiceProviderAdvertisingParameters
         {
             IsDiscoverable = discoverable,
-            IsConnectable = true,
+            IsConnectable = true
         };
         BleWindowsAdvertisementLog.LogGattAdvertisingStarted(logger, discoverable);
         provider.StartAdvertising(advertising);
@@ -328,7 +441,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     {
         if (!_options.LocalNetworkId.HasValue)
             return;
-        
+
         if (!_networkIdOfferedToMac.TryAdd(macKey, 0))
             return;
 
@@ -346,7 +459,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
                 _networkIdOfferedToMac.TryRemove(macKey, out _);
                 return;
             }
-            
+
             var packet = BleShortP2PGattProtocol.BuildNetworkIdAnnouncePacket(_options.LocalNetworkId.Value);
             await SendViaBleAsync(macKey, mac6, packet, ct).ConfigureAwait(false);
             _logger?.LogInformation("BLE NetworkId announce sent to paired peer {Mac}", macKey);
@@ -419,34 +532,6 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         return new TransportAddress(TransportKind.Bluetooth, new byte[BluetoothMacAddress.MacLength]);
     }
 
-    public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, TransportAddress destination,
-        CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (destination.Kind != TransportKind.Bluetooth)
-            throw new ArgumentException("Destination must be Bluetooth transport.", nameof(destination));
-        var data = destination.Data;
-        if (data.Length != BluetoothMacAddress.MacLength)
-            throw new ArgumentException($"Bluetooth address must be {BluetoothMacAddress.MacLength} bytes (MAC).",
-                nameof(destination));
-
-        var macKey = MacCacheKey(data);
-        // var sendLock = _sendLocks.GetOrAdd(macKey, _ => new SemaphoreSlim(1, 1));
-        // await sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await SendViaBleAsync(macKey, data, payload, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // ignore
-        }
-        finally
-        {
-            //sendLock.Release();
-        }
-    }
-
     private async Task SendViaBleAsync(string macKey, byte[] mac6, ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
         var rx = await GetOrConnectBleRxCharacteristicAsync(macKey, mac6, ct).ConfigureAwait(false);
@@ -482,7 +567,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         DevicePairingResult result;
         try
         {
-            result = await custom.PairAsync(kinds, DevicePairingProtectionLevel.Default).AsTask(ct).ConfigureAwait(false);
+            result = await custom.PairAsync(kinds, DevicePairingProtectionLevel.Default).AsTask(ct)
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -569,8 +655,9 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         return rxExisting;
     }
 
-    private async Task<(GattCharacteristic rx, GattCharacteristic? tx)> DiscoverBlePeerCharacteristicsWithOptionalPairingAsync(
-        string macKey, BluetoothLEDevice device, CancellationToken ct)
+    private async Task<(GattCharacteristic rx, GattCharacteristic? tx)>
+        DiscoverBlePeerCharacteristicsWithOptionalPairingAsync(
+            string macKey, BluetoothLEDevice device, CancellationToken ct)
     {
         var first = await TryDiscoverBlePeerCharacteristicsAsync(device, ct).ConfigureAwait(false);
         if (first.rx != null)
@@ -599,7 +686,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private static async Task<(GattCharacteristic? rx, GattCharacteristic? tx, GattCommunicationStatus status)>
         TryDiscoverBlePeerCharacteristicsAsync(BluetoothLEDevice device, CancellationToken ct)
     {
-        var serviceResult = await device.GetGattServicesForUuidAsync(BleShortP2PGattProtocol.ServiceUuid, BluetoothCacheMode.Uncached).AsTask(ct)
+        var serviceResult = await device
+            .GetGattServicesForUuidAsync(BleShortP2PGattProtocol.ServiceUuid, BluetoothCacheMode.Uncached).AsTask(ct)
             .ConfigureAwait(false);
         if (serviceResult.Status != GattCommunicationStatus.Success || serviceResult.Services.Count == 0)
             return (null, null, serviceResult.Status);
@@ -658,7 +746,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     }
 
     /// <summary>
-    ///     WinRT часто возвращает null из <see cref="BluetoothLEDevice.FromBluetoothAddressAsync"/>, если пир не в кэше
+    ///     WinRT часто возвращает null из <see cref="BluetoothLEDevice.FromBluetoothAddressAsync" />, если пир не в кэше
     ///     и не сопряжён. Пробуем несколько API и оба порядка байт MAC (ошибка при ручном вводе / чужой формат QR).
     /// </summary>
     private async Task<BluetoothLEDevice?> TryOpenBluetoothLeDeviceAsync(byte[] mac6, CancellationToken ct)
@@ -677,7 +765,10 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         return null;
     }
 
-    private static string MacCacheKey(ReadOnlySpan<byte> mac6) => BluetoothTransportAddress.ToMacString(mac6);
+    private static string MacCacheKey(ReadOnlySpan<byte> mac6)
+    {
+        return BluetoothTransportAddress.ToMacString(mac6);
+    }
 
     private static ulong[] AlternateBluetoothAddresses(byte[] mac6)
     {
@@ -691,7 +782,8 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         return reversed != primary ? [primary, reversed] : [primary];
     }
 
-    private async Task<BluetoothLEDevice?> TryOpenBluetoothLeDeviceOneAddressAsync(ulong bluetoothAddress, string macKey,
+    private async Task<BluetoothLEDevice?> TryOpenBluetoothLeDeviceOneAddressAsync(ulong bluetoothAddress,
+        string macKey,
         CancellationToken ct)
     {
         if (_bleAdvertisementDeviceCache.TryGetValue(macKey, out var warmed))
@@ -728,103 +820,5 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         if (dev != null)
             _bleAdvertisementDeviceCache.TryAdd(macKey, dev);
         return dev;
-    }
-
-    public async ValueTask StopAsync(CancellationToken cancellationToken = default)
-    {
-        if (_bleServiceProvider == null && _bleRxCharacteristic == null && _bleTxCharacteristic == null &&
-            _blePeerDevices.Count == 0 &&
-            _bleOutboundPeerRx.Count == 0 && _bleOutboundPeerTx.Count == 0 && _runCts == null &&
-            _bleShortP2PAdvertisementWatcher == null &&
-            _bleAdvertisementDeviceCache.IsEmpty)
-            return;
-
-        if (_runCts != null)
-        {
-            try
-            {
-                await _runCts.CancelAsync();
-            }
-            catch (ObjectDisposedException)
-            {
-                // ignore
-            }
-        }
-
-        StopBleShortP2PAdvertisementWatcher();
-        _networkIdOfferedToMac.Clear();
-
-        foreach (var kv in _bleOutboundPeerTx)
-        {
-            try
-            {
-                kv.Value.ValueChanged -= OnPeerTxValueChanged;
-            }
-            catch
-            {
-                // ignore
-            }
-        }
-
-        _bleOutboundPeerRx.Clear();
-        _bleOutboundPeerTx.Clear();
-
-        foreach (var kv in _blePeerDevices)
-            kv.Value.Dispose();
-
-        _blePeerDevices.Clear();
-
-        foreach (var kv in _bleAdvertisementDeviceCache)
-        {
-            try
-            {
-                kv.Value.Dispose();
-            }
-            catch
-            {
-                // ignore
-            }
-        }
-
-        _bleAdvertisementDeviceCache.Clear();
-
-        if (_bleRxCharacteristic != null)
-        {
-            _bleRxCharacteristic.WriteRequested -= OnBleRxWriteRequested;
-            _bleRxCharacteristic = null;
-        }
-
-        _bleTxCharacteristic = null;
-
-        if (_bleServiceProvider != null)
-        {
-            try
-            {
-                _bleServiceProvider.StopAdvertising();
-            }
-            catch
-            {
-                // ignore
-            }
-
-            _bleServiceProvider = null;
-        }
-
-        _runCts?.Dispose();
-        _runCts = null;
-
-        await Task.CompletedTask.ConfigureAwait(false);
-    }
-
-    private bool _disposed;
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        await StopAsync().ConfigureAwait(false);
-        _inbound.Writer.TryComplete();
-        foreach (var s in _sendLocks.Values) s.Dispose();
-        _sendLocks.Clear();
     }
 }

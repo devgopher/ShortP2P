@@ -1,11 +1,10 @@
 using System.Collections.Concurrent;
 using System.Net;
-using System.Threading;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
+using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
-using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Transceivers;
@@ -22,57 +21,32 @@ namespace ShortP2P.Client.Services;
 /// <summary>Настройки маршрутизации и LAN discovery для сессии пользователя.</summary>
 public sealed class UserP2pRuntime : IAsyncDisposable
 {
-    private readonly P2pRoutingSettingsStore _store;
     private readonly AuthService _auth;
-    private readonly ChatRepository _chats;
-    private readonly ChatMediaOptions _chatMedia;
-    private readonly IUdpTransportFactory _udpTransportFactory;
     private readonly IBluetoothTransportProvider? _bluetooth;
+    private readonly ChatMediaOptions _chatMedia;
+    private readonly ChatRepository _chats;
     private readonly P2pCryptoSessionCache _cryptoSessionCache;
 
-    private readonly ChatSessionCache _sessionCache;
-    /// <summary>Сериализация старта сессии по discovery-пингу для одного чата (без await внутри lock).</summary>
-    private readonly ConcurrentDictionary<int, SemaphoreSlim> _discoverySessionStartGates = new();
-    private readonly HashSet<string> _selfUdpAddresses = new(StringComparer.OrdinalIgnoreCase);
-
-    private volatile bool _discoveryHooked;
-    private CancellationTokenSource? _presencePingWorkCts;
-
-    private readonly SemaphoreSlim _inviteListenerGate = new(1, 1);
-    private CancellationTokenSource? _inviteCts;
-    private UdpTransport? _inviteUdp;
-    private InviteTransceiver? _inviteTransceiver;
-    private Task? _inviteReceiveTask;
-
     private readonly SemaphoreSlim _dataPortGate = new(1, 1);
-    private CancellationTokenSource? _dataCts;
-    private UdpTransport? _dataUdp;
-    private DataPortMultiplexer? _dataPortMultiplexer;
-    private UserEntity? _currentDataPortUser;
     private readonly List<Task> _dataReceiveTasks = [];
 
-    /// <summary>Глобальный invite-транспивер (порт 17502). Поднимается в <see cref="EnsureInviteListenerRunningAsync" />.</summary>
-    public InviteTransceiver? Invite => _inviteTransceiver;
+    /// <summary>Сериализация старта сессии по discovery-пингу для одного чата (без await внутри lock).</summary>
+    private readonly ConcurrentDictionary<int, SemaphoreSlim> _discoverySessionStartGates = new();
 
-    /// <summary>Handshake-транспивер на data UDP-порту пользователя.</summary>
-    public HandshakeTransceiver? Handshake => _dataPortMultiplexer?.Handshake;
+    private readonly SemaphoreSlim _inviteListenerGate = new(1, 1);
+    private readonly HashSet<string> _selfUdpAddresses = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Cipher (рядовые сообщения) транспивер на data UDP-порту пользователя.</summary>
-    public MessageTransceiver? Message => _dataPortMultiplexer?.Message;
+    private readonly ChatSessionCache _sessionCache;
+    private readonly P2pRoutingSettingsStore _store;
+    private UserEntity? _currentDataPortUser;
+    private CancellationTokenSource? _dataCts;
+    private DataPortMultiplexer? _dataPortMultiplexer;
 
-    /// <summary>UDP-транспорт data-порта (для отправки invite-replies/control в адрес пира).</summary>
-    public UdpTransport? DataUdp => _dataUdp;
-
-    public P2pRoutingSettings Settings { get; } = new();
-    public ITransport? BluetoothTransport => _bluetooth?.Current;
-
-    /// <summary>
-    ///     Сканирование LAN: presence UDP 17501; wire discovery (gossip / маршруты)
-    ///     <see cref="UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort" />
-    /// </summary>
-    public LocalNetworkScanner LocalScan { get; }
-
-    public IUdpTransportFactory UdpTransportFactory => _udpTransportFactory;
+    private volatile bool _discoveryHooked;
+    private CancellationTokenSource? _inviteCts;
+    private Task? _inviteReceiveTask;
+    private UdpTransport? _inviteUdp;
+    private CancellationTokenSource? _presencePingWorkCts;
 
     public UserP2pRuntime(P2pRoutingSettingsStore store, AuthService auth, ChatRepository chats,
         ChatMediaOptions chatMedia, IUdpTransportFactory udpTransportFactory, ChatSessionCache sessionCache,
@@ -89,13 +63,41 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         _auth = auth;
         _chats = chats;
         _chatMedia = chatMedia;
-        _udpTransportFactory = udpTransportFactory;
+        UdpTransportFactory = udpTransportFactory;
         _sessionCache = sessionCache;
         _cryptoSessionCache = cryptoSessionCache;
         _bluetooth = bluetooth;
         LocalScan = new LocalNetworkScanner(Settings, udpTransportFactory, () => _bluetooth?.Current,
             additionalDiscoveryTransports, routeTableSnapshotSource, discoveryPingStore, blePeripheralScanner,
             bleDiscoveredPeerStore, bluetoothPresencePingTargetsProvider);
+    }
+
+    /// <summary>Глобальный invite-транспивер (порт 17502). Поднимается в <see cref="EnsureInviteListenerRunningAsync" />.</summary>
+    public InviteTransceiver? Invite { get; private set; }
+
+    /// <summary>Handshake-транспивер на data UDP-порту пользователя.</summary>
+    public HandshakeTransceiver? Handshake => _dataPortMultiplexer?.Handshake;
+
+    /// <summary>Cipher (рядовые сообщения) транспивер на data UDP-порту пользователя.</summary>
+    public MessageTransceiver? Message => _dataPortMultiplexer?.Message;
+
+    /// <summary>UDP-транспорт data-порта (для отправки invite-replies/control в адрес пира).</summary>
+    public UdpTransport? DataUdp { get; private set; }
+
+    public P2pRoutingSettings Settings { get; } = new();
+    public ITransport? BluetoothTransport => _bluetooth?.Current;
+
+    /// <summary>
+    ///     Сканирование LAN: presence UDP 17501; wire discovery (gossip / маршруты)
+    ///     <see cref="UdpPeerDiscoveryOptions.DefaultDiscoveryUdpPort" />
+    /// </summary>
+    public LocalNetworkScanner LocalScan { get; }
+
+    public IUdpTransportFactory UdpTransportFactory { get; }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync().ConfigureAwait(false);
     }
 
     public ChatP2pSession GetSession(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo,
@@ -123,7 +125,6 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         _sessionCache.TryRemove(chatId, out var session);
 
         if (_discoverySessionStartGates.TryRemove(chatId, out var gate))
-        {
             try
             {
                 gate.Dispose();
@@ -132,10 +133,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             {
                 // ignore
             }
-        }
 
         if (session != null)
-        {
             try
             {
                 await session.DisposeAsync().ConfigureAwait(false);
@@ -144,7 +143,6 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             {
                 // ignore
             }
-        }
     }
 
     /// <summary>
@@ -177,13 +175,13 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 return;
 
             _inviteCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            _inviteUdp = _udpTransportFactory.Acquire(IPAddress.Any, ChatInviteCodec.InviteUdpPort,
-                enableBroadcast: true);
+            _inviteUdp = UdpTransportFactory.Acquire(IPAddress.Any, ChatInviteCodec.InviteUdpPort,
+                true);
             await _inviteUdp.StartAsync(cancellationToken).ConfigureAwait(false);
-            _inviteTransceiver = new InviteTransceiver(_inviteUdp);
-            _inviteTransceiver.GotData += OnInviteReceived;
-            await _inviteTransceiver.StartAsync(_inviteCts.Token).ConfigureAwait(false);
-            _inviteReceiveTask = Task.Run(() => InviteReceiveLoopAsync(_inviteUdp, _inviteTransceiver, _inviteCts.Token),
+            Invite = new InviteTransceiver(_inviteUdp);
+            Invite.GotData += OnInviteReceived;
+            await Invite.StartAsync(_inviteCts.Token).ConfigureAwait(false);
+            _inviteReceiveTask = Task.Run(() => InviteReceiveLoopAsync(_inviteUdp, Invite, _inviteCts.Token),
                 _inviteCts.Token);
         }
         catch
@@ -212,13 +210,12 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             await StopDataPortCoreAsync(cancellationToken).ConfigureAwait(false);
             _dataCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-            _dataUdp = _udpTransportFactory.Acquire(IPAddress.Any, user.DataUdpPort);
-            await _dataUdp.StartAsync(cancellationToken).ConfigureAwait(false);
+            DataUdp = UdpTransportFactory.Acquire(IPAddress.Any, user.DataUdpPort);
+            await DataUdp.StartAsync(cancellationToken).ConfigureAwait(false);
 
-            var inbound = new List<ITransport> { _dataUdp };
+            var inbound = new List<ITransport> { DataUdp };
             var bluetooth = BluetoothTransport;
             if (bluetooth != null)
-            {
                 try
                 {
                     await bluetooth.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -228,7 +225,6 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 {
                     // bluetooth subsystem optional
                 }
-            }
 
             _dataPortMultiplexer = new DataPortMultiplexer(ResolveDataOutboundTransport);
             await _dataPortMultiplexer.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -254,7 +250,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     {
         return destination.Kind switch
         {
-            TransportKind.Udp when Settings.EnableUdpTransport => _dataUdp,
+            TransportKind.Udp when Settings.EnableUdpTransport => DataUdp,
             TransportKind.Bluetooth when Settings.EnableBluetoothTransport => BluetoothTransport,
             _ => null
         };
@@ -263,7 +259,6 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private async Task StopDataPortCoreAsync(CancellationToken cancellationToken)
     {
         if (_dataCts != null)
-        {
             try
             {
                 await _dataCts.CancelAsync().ConfigureAwait(false);
@@ -272,7 +267,6 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             {
                 _dataCts.Cancel();
             }
-        }
 
         if (_dataPortMultiplexer != null)
         {
@@ -289,7 +283,6 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         }
 
         foreach (var task in _dataReceiveTasks)
-        {
             try
             {
                 await task.ConfigureAwait(false);
@@ -298,17 +291,16 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             {
                 // ignore
             }
-        }
 
         _dataReceiveTasks.Clear();
 
-        if (_dataUdp != null)
+        if (DataUdp != null)
         {
-            var u = _dataUdp;
-            _dataUdp = null;
+            var u = DataUdp;
+            DataUdp = null;
             try
             {
-                await _udpTransportFactory.ReleaseAsync(u, cancellationToken).ConfigureAwait(false);
+                await UdpTransportFactory.ReleaseAsync(u, cancellationToken).ConfigureAwait(false);
             }
             catch
             {
@@ -438,7 +430,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             var chat = await _chats.FindChatByPeerNetworkIdAsync(user.Id, peerShort).ConfigureAwait(false);
             if (chat == null)
                 return;
-            await TryEnsureChatSessionStartedAsync(chat.Id, uiSync: null, cancellationToken).ConfigureAwait(false);
+            await TryEnsureChatSessionStartedAsync(chat.Id, null, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -454,13 +446,11 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     {
         _selfUdpAddresses.Clear();
         foreach (var ip in LocalIPv4Resolver.GetAllUnicastIpv4Ordered())
-        {
-            if (System.Net.IPAddress.TryParse(ip, out var parsed))
+            if (IPAddress.TryParse(ip, out var parsed))
                 _selfUdpAddresses.Add(parsed.ToString());
-        }
 
-        _selfUdpAddresses.Add(System.Net.IPAddress.Loopback.ToString());
-        _selfUdpAddresses.Add(System.Net.IPAddress.Any.ToString());
+        _selfUdpAddresses.Add(IPAddress.Loopback.ToString());
+        _selfUdpAddresses.Add(IPAddress.Any.ToString());
     }
 
     private bool IsOwnInviteDatagram(TransportAddress remoteAddress)
@@ -484,7 +474,6 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private async Task StopInviteListenerCoreAsync(CancellationToken cancellationToken)
     {
         if (_inviteCts != null)
-        {
             try
             {
                 await _inviteCts.CancelAsync().ConfigureAwait(false);
@@ -493,21 +482,20 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             {
                 await _inviteCts.CancelAsync().ConfigureAwait(false);
             }
-        }
 
-        if (_inviteTransceiver != null)
+        if (Invite != null)
         {
-            _inviteTransceiver.GotData -= OnInviteReceived;
+            Invite.GotData -= OnInviteReceived;
             try
             {
-                await _inviteTransceiver.StopAsync(cancellationToken).ConfigureAwait(false);
+                await Invite.StopAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 // ignore
             }
 
-            _inviteTransceiver = null;
+            Invite = null;
         }
 
         if (_inviteReceiveTask != null)
@@ -530,7 +518,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             _inviteUdp = null;
             try
             {
-                await _udpTransportFactory.ReleaseAsync(u, cancellationToken).ConfigureAwait(false);
+                await UdpTransportFactory.ReleaseAsync(u, cancellationToken).ConfigureAwait(false);
             }
             catch
             {
@@ -617,7 +605,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
         await ApplyDiscoveryPingRouteAsync(chat, peer.TransportKind, seenDirect, cancellationToken)
             .ConfigureAwait(false);
-        await TryEnsureChatSessionStartedAsync(chat.Id, uiSync: null, cancellationToken).ConfigureAwait(false);
+        await TryEnsureChatSessionStartedAsync(chat.Id, null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -649,7 +637,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 var primary = PeerHostList.PrimaryHost(chat.PeerHost);
                 if (string.Equals(primary, seenDirect, StringComparison.Ordinal))
                     return;
-                await session.ApplyPeerEndpointAsync(seenDirect, chat.PeerPort, cancellationToken).ConfigureAwait(false);
+                await session.ApplyPeerEndpointAsync(seenDirect, chat.PeerPort, cancellationToken)
+                    .ConfigureAwait(false);
             }
             else
             {
@@ -717,9 +706,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         var sessions = _sessionCache.DrainAll();
 
         foreach (var kv in _discoverySessionStartGates.ToArray())
-        {
             if (_discoverySessionStartGates.TryRemove(kv.Key, out var g))
-            {
                 try
                 {
                     g.Dispose();
@@ -728,11 +715,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 {
                     // ignore
                 }
-            }
-        }
 
         foreach (var s in sessions)
-        {
             try
             {
                 await s.DisposeAsync().ConfigureAwait(false);
@@ -741,10 +725,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             {
                 // ignore
             }
-        }
 
         await LocalScan.StopAsync(cancellationToken).ConfigureAwait(false);
     }
-
-    public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
 }

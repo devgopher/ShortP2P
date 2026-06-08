@@ -26,6 +26,11 @@ public sealed class DataPortMultiplexer : IAsyncDisposable
 
     public MessageTransceiver Message { get; }
 
+    public ValueTask DisposeAsync()
+    {
+        return StopAsync();
+    }
+
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
         await Handshake.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -37,8 +42,6 @@ public sealed class DataPortMultiplexer : IAsyncDisposable
         await Handshake.StopAsync(cancellationToken).ConfigureAwait(false);
         await Message.StopAsync(cancellationToken).ConfigureAwait(false);
     }
-
-    public ValueTask DisposeAsync() => StopAsync();
 
     private async ValueTask SendRawAsync(ReadOnlyMemory<byte> packet, TransportAddress destination,
         CancellationToken cancellationToken)

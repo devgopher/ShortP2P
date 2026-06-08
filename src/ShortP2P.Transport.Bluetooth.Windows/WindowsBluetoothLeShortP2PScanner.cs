@@ -1,8 +1,7 @@
 using System.Runtime.Versioning;
-using Microsoft.Extensions.Logging;
-using ShortP2P.Transport;
-using ShortP2P.Transport.Abstractions;
 using Windows.Devices.Bluetooth.Advertisement;
+using Microsoft.Extensions.Logging;
+using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
 
@@ -29,7 +28,7 @@ public sealed class WindowsBluetoothLeShortP2PScanner(ILogger<WindowsBluetoothLe
             SignalStrengthFilter =
             {
                 SamplingInterval = TimeSpan.FromMilliseconds(500)
-            },
+            }
         };
         var seen = new Dictionary<ulong, BleAdScanResult>();
         watcher.Received += (_, e) =>

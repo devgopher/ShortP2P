@@ -1,35 +1,16 @@
 using System.Security.Cryptography;
-using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace ShortP2P.Crypto;
 
 public static class RsaKeySerializer
 {
-    private sealed class PublicDto
-    {
-        public string M { get; set; } = "";
-        public string E { get; set; } = "";
-    }
-
-    private sealed class PrivateDto
-    {
-        public string M { get; set; } = "";
-        public string E { get; set; } = "";
-        public string D { get; set; } = "";
-        public string P { get; set; } = "";
-        public string Q { get; set; } = "";
-        public string DP { get; set; } = "";
-        public string DQ { get; set; } = "";
-        public string IQ { get; set; } = "";
-    }
-
     public static string SerializePublic(RsaPublicKey key)
     {
         var dto = new PublicDto
         {
             M = Convert.ToBase64String(key.Modulus),
-            E = Convert.ToBase64String(key.Exponent),
+            E = Convert.ToBase64String(key.Exponent)
         };
         return JsonSerializer.Serialize(dto);
     }
@@ -51,14 +32,15 @@ public static class RsaKeySerializer
             Q = Convert.ToBase64String(key.Q),
             DP = Convert.ToBase64String(key.DP),
             DQ = Convert.ToBase64String(key.DQ),
-            IQ = Convert.ToBase64String(key.InverseQ),
+            IQ = Convert.ToBase64String(key.InverseQ)
         };
         return JsonSerializer.Serialize(dto);
     }
 
     public static RsaPrivateKey DeserializePrivate(string json)
     {
-        var dto = JsonSerializer.Deserialize<PrivateDto>(json) ?? throw new FormatException("Invalid private key JSON.");
+        var dto = JsonSerializer.Deserialize<PrivateDto>(json) ??
+                  throw new FormatException("Invalid private key JSON.");
         var p = new RSAParameters
         {
             Modulus = Convert.FromBase64String(dto.M),
@@ -68,8 +50,26 @@ public static class RsaKeySerializer
             Q = Convert.FromBase64String(dto.Q),
             DP = Convert.FromBase64String(dto.DP),
             DQ = Convert.FromBase64String(dto.DQ),
-            InverseQ = Convert.FromBase64String(dto.IQ),
+            InverseQ = Convert.FromBase64String(dto.IQ)
         };
         return new RsaPrivateKey(p);
+    }
+
+    private sealed class PublicDto
+    {
+        public string M { get; set; } = "";
+        public string E { get; set; } = "";
+    }
+
+    private sealed class PrivateDto
+    {
+        public string M { get; set; } = "";
+        public string E { get; set; } = "";
+        public string D { get; set; } = "";
+        public string P { get; set; } = "";
+        public string Q { get; set; } = "";
+        public string DP { get; set; } = "";
+        public string DQ { get; set; } = "";
+        public string IQ { get; set; } = "";
     }
 }

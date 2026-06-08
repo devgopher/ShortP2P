@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using Timer = System.Windows.Forms.Timer;
 
 namespace ShortP2P.WinForms;
 
@@ -9,14 +10,11 @@ public sealed class LogViewerForm : Form
     private const int RefreshIntervalMs = 5000;
     private const long MaxTailBytes = 768 * 1024;
     private const uint WmVscroll = 0x0115;
-    private static readonly IntPtr SbBottom = (IntPtr)7;
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    private static readonly IntPtr SbBottom = 7;
 
     private readonly TextBox _appLog = CreateLogTextBox();
+    private readonly Timer _timer = new() { Interval = RefreshIntervalMs };
     private readonly TextBox _userLog = CreateLogTextBox();
-    private readonly System.Windows.Forms.Timer _timer = new() { Interval = RefreshIntervalMs };
 
     public LogViewerForm()
     {
@@ -50,15 +48,21 @@ public sealed class LogViewerForm : Form
         };
     }
 
-    private static TextBox CreateLogTextBox() => new()
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    private static TextBox CreateLogTextBox()
     {
-        Multiline = true,
-        ReadOnly = true,
-        ScrollBars = ScrollBars.Both,
-        WordWrap = false,
-        Font = new Font(FontFamily.GenericMonospace, 9f),
-        Dock = DockStyle.Fill,
-    };
+        return new TextBox
+        {
+            Multiline = true,
+            ReadOnly = true,
+            ScrollBars = ScrollBars.Both,
+            WordWrap = false,
+            Font = new Font(FontFamily.GenericMonospace, 9f),
+            Dock = DockStyle.Fill
+        };
+    }
 
     private void RefreshLogs()
     {
@@ -96,7 +100,7 @@ public sealed class LogViewerForm : Form
                 prefix = $"(Showing last {MaxTailBytes} bytes.)\r\n\r\n";
             }
 
-            using var reader = new StreamReader(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            using var reader = new StreamReader(fs, Encoding.UTF8, true);
             return prefix + reader.ReadToEnd();
         }
         catch (Exception ex)

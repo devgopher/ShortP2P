@@ -1,10 +1,12 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using NLog;
 using NLog.Config;
 using NLog.Extensions.Logging;
 using ShortP2P.Auth;
 using ShortP2P.Client;
+using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
@@ -13,11 +15,11 @@ using ShortP2P.Discovery;
 using ShortP2P.Discovery.Ble;
 using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
-using NLog;
-using ShortP2P.Client.Bluetooth;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 using ShortP2P.Transport.Bluetooth.Windows;
+using SQLitePCL;
+using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 namespace ShortP2P.WinForms;
 
@@ -30,7 +32,7 @@ internal static class Program
 
         var builder = Host.CreateApplicationBuilder();
         builder.Logging.ClearProviders();
-        builder.Logging.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Information);
+        builder.Logging.SetMinimumLevel(LogLevel.Information);
         builder.Logging.AddNLog();
 
         var services = builder.Services;
@@ -39,7 +41,7 @@ internal static class Program
         services.AddSingleton(_ => ChatMediaOptions.LoadOrDefault(Path.Combine(appRoot, "chat-media.json")));
         services.AddSingleton(_ => new AppDatabase(Path.Combine(appRoot, "shortp2p.db")));
         services.AddSingleton<IUserAuthRepository, SqliteUserAuthRepository>();
-        services.AddRouteDbContextWithPeerExpiryCleanup(Path.Combine(appRoot, "routes.db"), enableDiscovery: true);
+        services.AddRouteDbContextWithPeerExpiryCleanup(Path.Combine(appRoot, "routes.db"), true);
         services.AddSingleton<ISessionStorage>(_ => new FileSessionStorage(Path.Combine(appRoot, "session")));
         services.AddSingleton<AuthService>();
         services.AddSingleton<ChatRepository>();
@@ -65,7 +67,7 @@ internal static class Program
             sp.GetRequiredService<ChatSessionCache>(),
             sp.GetRequiredService<P2pCryptoSessionCache>(),
             sp.GetRequiredService<IBluetoothTransportProvider>(),
-            additionalDiscoveryTransports: null,
+            null,
             sp.GetService<IRouteTableSnapshotSource>(),
             sp.GetService<IDiscoveryPingStore>(),
             sp.GetRequiredService<IBleShortP2PPeripheralScanner>(),
@@ -79,7 +81,7 @@ internal static class Program
         services.AddTransient<MyQrForm>();
         services.AddTransient<RoutingSettingsForm>();
         services.AddTransient<AppSettingsForm>();
-        
+
         using var host = builder.Build();
         host.Services.ApplyRouteDatabaseMigrationsAsync().GetAwaiter().GetResult();
         host.StartAsync().GetAwaiter().GetResult();
@@ -91,7 +93,7 @@ internal static class Program
         var userActionLogger = provider.GetRequiredService<ILogger<UserAction>>();
         RegisterGlobalExceptionLogging(hostLogger);
 
-        SQLitePCL.Batteries_V2.Init();
+        Batteries_V2.Init();
         ApplicationConfiguration.Initialize();
         hostLogger.LogInformation("WinForms application started");
 

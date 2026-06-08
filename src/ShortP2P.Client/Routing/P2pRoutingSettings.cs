@@ -1,6 +1,9 @@
 namespace ShortP2P.Client.Routing;
 
-/// <summary>Параметры поиска по графу и повторов при ошибке отправки (настраиваются через <see cref="P2pRoutingSettingsStore"/>).</summary>
+/// <summary>
+///     Параметры поиска по графу и повторов при ошибке отправки (настраиваются через
+///     <see cref="P2pRoutingSettingsStore" />).
+/// </summary>
 public sealed class P2pRoutingSettings
 {
     /// <summary>Максимальная глубина поиска (число рёбер от инициатора), 1–3.</summary>

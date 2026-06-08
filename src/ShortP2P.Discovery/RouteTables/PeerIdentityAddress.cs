@@ -12,7 +12,7 @@ public class PeerIdentityAddress
     /// </summary>
     [Key]
     public long Id { get; set; }
-    
+
     /// <summary>
     ///     Id маршрута
     /// </summary>

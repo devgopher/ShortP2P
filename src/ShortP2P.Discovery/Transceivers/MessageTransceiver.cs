@@ -48,7 +48,10 @@ public sealed class MessageTransceiver : IUnicastTransceiver<TransportReceiveMes
         await _sendRaw(packet, destination, cancellationToken).ConfigureAwait(false);
     }
 
-    public ValueTask DisposeAsync() => StopAsync();
+    public ValueTask DisposeAsync()
+    {
+        return StopAsync();
+    }
 
     /// <summary>Вызывается из <see cref="DataPortMultiplexer" /> для cipher-датаграммы (без байта 0x02).</summary>
     internal void HandleIncoming(ReadOnlyMemory<byte> cipherPayload, TransportAddress remoteAddress)

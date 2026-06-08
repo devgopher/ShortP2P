@@ -1,28 +1,30 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices.WindowsRuntime;
-using OpenCvSharp;
-using OpenCvSharp.Extensions;
 using Windows.Media.Core;
 using Windows.Media.Playback;
 using Windows.Storage;
+using OpenCvSharp;
+using OpenCvSharp.Extensions;
+using Timer = System.Windows.Forms.Timer;
 
 namespace ShortP2P.WinForms;
 
 internal sealed class VideoPlayerForm : Form
 {
-    private readonly byte[] _videoBytes;
     private readonly string _fileName;
+    private readonly Timer _frameTimer = new();
+    private readonly byte[] _videoBytes;
+
     private readonly PictureBox _view = new()
     {
         Dock = DockStyle.Fill,
         SizeMode = PictureBoxSizeMode.Zoom,
-        BackColor = Color.Black,
+        BackColor = Color.Black
     };
-    private readonly System.Windows.Forms.Timer _frameTimer = new();
+
     private VideoCapture? _capture;
+    private bool _ended;
     private MediaPlayer? _mediaPlayer;
     private string? _tempPath;
-    private bool _ended;
 
     public VideoPlayerForm(byte[] videoBytes, string fileName)
     {
@@ -61,9 +63,7 @@ internal sealed class VideoPlayerForm : Form
             _frameTimer.Interval = Math.Clamp((int)Math.Round(1000.0 / fps), 15, 200);
 
             if (await TryStartSystemAudioAsync(_tempPath).ConfigureAwait(true))
-            {
                 _mediaPlayer!.MediaEnded += (_, _) => BeginInvoke(OnPlaybackEnded);
-            }
 
             if (!ShowFrame())
             {
@@ -129,7 +129,7 @@ internal sealed class VideoPlayerForm : Form
         if (_capture == null || !_capture.Read(frame) || frame.Empty())
             return false;
 
-        using var bitmap = BitmapConverter.ToBitmap(frame);
+        using var bitmap = frame.ToBitmap();
         var previous = _view.Image;
         _view.Image = (Image)bitmap.Clone();
         previous?.Dispose();
@@ -165,7 +165,7 @@ internal sealed class VideoPlayerForm : Form
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
             Text =
-                "Встроенный просмотр недоступен для этого формата.\r\nВидео открыто в проигрывате по умолчанию.",
+                "Встроенный просмотр недоступен для этого формата.\r\nВидео открыто в проигрывате по умолчанию."
         });
         Width = 420;
         Height = 140;
@@ -192,7 +192,6 @@ internal sealed class VideoPlayerForm : Form
         _view.Image = null;
 
         if (!string.IsNullOrWhiteSpace(_tempPath))
-        {
             try
             {
                 File.Delete(_tempPath);
@@ -201,7 +200,6 @@ internal sealed class VideoPlayerForm : Form
             {
                 // ignore
             }
-        }
 
         base.OnFormClosed(e);
     }

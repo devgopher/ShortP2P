@@ -18,7 +18,7 @@ public static class DocumentAttachHelper
             ".odg" => "application/vnd.oasis.opendocument.graphics",
             ".rtf" => "application/rtf",
             ".pdf" => "application/pdf",
-            _ => "",
+            _ => ""
         };
         return mime.Length > 0;
     }

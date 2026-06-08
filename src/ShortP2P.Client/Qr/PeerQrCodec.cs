@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Linq;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -15,10 +14,13 @@ public static class PeerQrCodec
     {
         PropertyNameCaseInsensitive = true,
         ReadCommentHandling = JsonCommentHandling.Disallow,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    public static string Serialize(PeerQrPayload payload) => JsonSerializer.Serialize(payload, JsonOptions);
+    public static string Serialize(PeerQrPayload payload)
+    {
+        return JsonSerializer.Serialize(payload, JsonOptions);
+    }
 
     public static bool TryDeserialize(string json, [NotNullWhen(true)] out PeerQrPayload? payload, out string? error)
     {
@@ -63,7 +65,7 @@ public static class PeerQrCodec
         TryMergeQrBleContacts(p, out var mergedBle);
 
         if (mergedHosts.Count == 0 && mergedBle.Count == 0
-            && !CompressedNetworkId.TryParseShortString(p.Id, out _))
+                                   && !CompressedNetworkId.TryParseShortString(p.Id, out _))
         {
             error = "QR is missing a valid host IP (h / ha), network id (id), or legacy contact (b / ba).";
             return false;
@@ -101,10 +103,8 @@ public static class PeerQrCodec
 
         TryAddQrHost(merged, seen, p.H);
         if (p.Ha != null)
-        {
             foreach (var x in p.Ha)
                 TryAddQrHost(merged, seen, x);
-        }
     }
 
     private static void TryMergeQrBleContacts(PeerQrPayload p, out List<string> merged)
@@ -114,10 +114,8 @@ public static class PeerQrCodec
 
         TryAddQrBleContact(merged, seen, p.B);
         if (p.Ba != null)
-        {
             foreach (var x in p.Ba)
                 TryAddQrBleContact(merged, seen, x);
-        }
     }
 
     private static void TryAddQrHost(List<string> merged, HashSet<string> seen, string? s)

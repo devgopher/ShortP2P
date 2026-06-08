@@ -1,6 +1,3 @@
-using Android.Bluetooth;
-using ShortP2P.Transport;
-
 namespace ShortP2P.Transport.Bluetooth.Android;
 
 public sealed class AndroidBluetoothRadioCatalog : IBluetoothRadioCatalog

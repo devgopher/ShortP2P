@@ -1,3 +1,4 @@
+using System.Text;
 using ShortP2P.Auth;
 
 namespace ShortP2P.Client;
@@ -36,7 +37,7 @@ public sealed class FileSessionStorage : ISessionStorage
 
     private string PathFor(string key)
     {
-        var safe = Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(key));
+        var safe = Convert.ToHexString(Encoding.UTF8.GetBytes(key));
         return Path.Combine(_directory, safe + ".session");
     }
 }

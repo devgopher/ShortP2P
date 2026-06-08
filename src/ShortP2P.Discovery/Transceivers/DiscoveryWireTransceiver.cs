@@ -37,14 +37,14 @@ public sealed class DiscoveryWireTransceiver(ITransport transport, int udpPort =
         await _transport.SendAsync(message.RawPayload, destination, cancellationToken).ConfigureAwait(false);
     }
 
-    public async ValueTask SendBroadcastAsync(DiscoveryWireMessage message, CancellationToken cancellationToken = default)
+    public async ValueTask SendBroadcastAsync(DiscoveryWireMessage message,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(message);
         if (_transport.Kind != TransportKind.Udp)
             return;
         EnsureRawNotEmpty(message);
         foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(udpPort))
-        {
             try
             {
                 await _transport.SendAsync(message.RawPayload, UdpTransportAddress.FromIPEndPoint(ep),
@@ -54,10 +54,12 @@ public sealed class DiscoveryWireTransceiver(ITransport transport, int udpPort =
             {
                 // best-effort
             }
-        }
     }
 
-    public ValueTask DisposeAsync() => StopAsync();
+    public ValueTask DisposeAsync()
+    {
+        return StopAsync();
+    }
 
     private static void EnsureRawNotEmpty(DiscoveryWireMessage message)
     {

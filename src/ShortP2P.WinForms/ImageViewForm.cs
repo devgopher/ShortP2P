@@ -13,7 +13,7 @@ public sealed class ImageViewForm : Form
         {
             Dock = DockStyle.Fill,
             SizeMode = PictureBoxSizeMode.Zoom,
-            Image = Image.FromStream(new MemoryStream(imageBytes)),
+            Image = Image.FromStream(new MemoryStream(imageBytes))
         };
         FormClosed += (_, _) => pic.Image?.Dispose();
         Controls.Add(pic);

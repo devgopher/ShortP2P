@@ -1,12 +1,9 @@
-using Microsoft.Extensions.Logging;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Bluetooth;
-using ShortP2P.Client.Routing;
-using ShortP2P.Discovery.Ble;
-using ShortP2P.Transport.Abstractions;
 #if ANDROID
 using ShortP2P.Transport.Bluetooth.Android;
 #endif
+
 #if WINDOWS
 using ShortP2P.Transport.Bluetooth.Windows;
 #endif
@@ -28,7 +25,9 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
         get
         {
             lock (_sync)
+            {
                 return _instance;
+            }
         }
     }
 
@@ -52,7 +51,9 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
     public void SetLocalNetworkId(CompressedNetworkId? networkId)
     {
         lock (_sync)
+        {
             _localNetworkId = networkId;
+        }
     }
 
     public void ApplySettings(P2pRoutingSettings settings)

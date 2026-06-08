@@ -1,4 +1,3 @@
-using ShortP2P.Auth.Data;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport;
@@ -17,10 +16,8 @@ public static class BleAdvertisementIdentityParser
             return false;
 
         foreach (var companyId in manufacturerCompanyIds)
-        {
             if (companyId == BleShortP2PGattProtocol.ManufacturerCompanyId)
                 return true;
-        }
 
         return false;
     }
@@ -37,9 +34,7 @@ public static class BleAdvertisementIdentityParser
     {
         if (BleShortP2PGattProtocol.TryParseManufacturerNetworkIdPayload(companyId, data, out var networkId)
             || BleShortP2PGattProtocol.TryParseManufacturerLegacyNetworkId(companyId, data, out networkId))
-        {
             return new BleAdScanResult { NetworkId = networkId };
-        }
 
         return default;
     }

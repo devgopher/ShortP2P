@@ -1,6 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-
 namespace ShortP2P.MauiApp;
 
 public partial class App : Application
@@ -18,7 +15,6 @@ public partial class App : Application
         var logger = MauiProgram.Services.GetRequiredService<ILogger<App>>();
         logger.LogInformation("Application window created");
         if (Interlocked.Exchange(ref _permissionsBootstrapped, 1) == 0)
-        {
             MainThread.BeginInvokeOnMainThread(async () =>
             {
                 try
@@ -30,7 +26,6 @@ public partial class App : Application
                     logger.LogWarning(ex, "Permission bootstrap failed");
                 }
             });
-        }
         return new Window(new NavigationPage(login));
     }
 }

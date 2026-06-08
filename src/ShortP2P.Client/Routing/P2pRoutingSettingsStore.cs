@@ -2,7 +2,7 @@ using ShortP2P.Auth;
 
 namespace ShortP2P.Client.Routing;
 
-/// <summary>Хранит настройки маршрутизации в <see cref="ISessionStorage"/>.</summary>
+/// <summary>Хранит настройки маршрутизации в <see cref="ISessionStorage" />.</summary>
 public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
 {
     private const string KMaxHops = "p2p_route_max_hops";
@@ -56,7 +56,10 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
         return s;
     }
 
-    private static string? NullIfWhiteSpace(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+    private static string? NullIfWhiteSpace(string? s)
+    {
+        return string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+    }
 
     public async Task SaveAsync(P2pRoutingSettings settings)
     {

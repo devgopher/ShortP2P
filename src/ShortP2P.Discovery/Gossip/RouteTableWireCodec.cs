@@ -32,7 +32,8 @@ public static class RouteTableWireCodec
         return buf;
     }
 
-    public static bool TryParseRequest(ReadOnlySpan<byte> datagram, out long nonce, out CompressedNetworkId senderNetworkId)
+    public static bool TryParseRequest(ReadOnlySpan<byte> datagram, out long nonce,
+        out CompressedNetworkId senderNetworkId)
     {
         nonce = 0;
         senderNetworkId = CompressedNetworkId.Empty;
@@ -138,7 +139,7 @@ public static class RouteTableWireCodec
 
             if (p.PeerIdentity.DataUdpPort is < 1 or > 65535)
                 throw new ArgumentOutOfRangeException(nameof(p.PeerIdentity.DataUdpPort));
-            
+
             WriteUInt16Be(parts, (ushort)p.PeerIdentity.DataUdpPort);
 
             var nick = Encoding.UTF8.GetBytes(p.PeerIdentity.Nickname ?? "?");
@@ -216,7 +217,7 @@ public static class RouteTableWireCodec
                 string.IsNullOrWhiteSpace(nick) ? "?" : nick.Trim(),
                 cn,
                 port,
-                maxNicknameUtf8Bytes: GossipWireCodec.MaxNicknameUtf8Bytes);
+                GossipWireCodec.MaxNicknameUtf8Bytes);
             peerList.Add(new PeerIdentityAddress
             {
                 RouteId = prRouteId,

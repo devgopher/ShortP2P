@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using ShortP2P.Client.Routing;
@@ -13,7 +12,7 @@ public static class LocalIPv4Resolver
     [
         "https://api.ipify.org",
         "https://ipv4.icanhazip.com",
-        "https://ifconfig.me/ip",
+        "https://ifconfig.me/ip"
     ];
 
     public static string? TryGetPreferredUnicastIpv4()
@@ -44,7 +43,7 @@ public static class LocalIPv4Resolver
         return scored.OrderByDescending(x => x.Score).Select(x => x.Ip).FirstOrDefault();
     }
 
-    /// <summary>Все поднятые unicast IPv4 (без loopback), от лучшего к худшему по эвристике <see cref="Score"/>.</summary>
+    /// <summary>Все поднятые unicast IPv4 (без loopback), от лучшего к худшему по эвристике <see cref="Score" />.</summary>
     public static List<string> GetAllUnicastIpv4Ordered()
     {
         var scored = new List<(string Ip, int Score)>();
@@ -103,7 +102,6 @@ public static class LocalIPv4Resolver
     {
         using var http = new HttpClient { Timeout = timeout };
         foreach (var url in PublicIpLookupUrls)
-        {
             try
             {
                 var text = http.GetStringAsync(url).GetAwaiter().GetResult();
@@ -118,7 +116,6 @@ public static class LocalIPv4Resolver
             {
                 // try next endpoint
             }
-        }
 
         return null;
     }
@@ -147,8 +144,10 @@ public static class LocalIPv4Resolver
     }
 
     /// <summary>Список хостов для поля invite/ответа на инвайт (публичный предпочтительнее).</summary>
-    public static string GetInviteHostsCommaSeparated(TimeSpan publicLookupTimeout) =>
-        string.Join(", ", GetInviteHostCandidatesOrdered(publicLookupTimeout));
+    public static string GetInviteHostsCommaSeparated(TimeSpan publicLookupTimeout)
+    {
+        return string.Join(", ", GetInviteHostCandidatesOrdered(publicLookupTimeout));
+    }
 
     private static int Score(IPAddress a)
     {

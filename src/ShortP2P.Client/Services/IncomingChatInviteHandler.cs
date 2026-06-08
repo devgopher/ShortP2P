@@ -2,10 +2,8 @@ using System.Diagnostics;
 using System.Net;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
-using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Crypto;
-using ShortP2P.Discovery;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
@@ -57,7 +55,7 @@ public static class IncomingChatInviteHandler
             var chatPeerPort = existing.PeerPort is < 1 or > 65535 || existing.PeerPort == ChatInviteCodec.InviteUdpPort
                 ? PresencePingCodec.DefaultDataUdpPort
                 : existing.PeerPort;
-            await repo.UpdateChatP2pRouteAsync(existing.Id, mergedHost, chatPeerPort, relayRouteBlob: null)
+            await repo.UpdateChatP2pRouteAsync(existing.Id, mergedHost, chatPeerPort, null)
                 .ConfigureAwait(false);
             existing.PeerHost = mergedHost;
             existing.PeerPort = chatPeerPort;

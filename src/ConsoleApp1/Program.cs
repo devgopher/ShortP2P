@@ -1,6 +1,7 @@
-﻿using ShortP2P.Transport;
-using Windows.Devices.Bluetooth.Advertisement;
+﻿using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Devices.Enumeration;
+using Windows.Storage.Streams;
+using ShortP2P.Transport;
 
 namespace QuickBlueToothLE;
 
@@ -20,7 +21,7 @@ internal class Program
             for (var i = 0; i < mac.Length; i++)
                 mac[i] = (byte)(args.BluetoothAddress >> (8 * i));
             var address = BluetoothTransportAddress.ToMacString(mac);
-            short rssi = args.RawSignalStrengthInDBm;
+            var rssi = args.RawSignalStrengthInDBm;
             Console.WriteLine($"Device: {address}, RSSI: {rssi} dBm, Timestamp: {args.Timestamp}");
 
             // Пример чтения данных из рекламного пакета (local name, manufacturer data)
@@ -32,15 +33,13 @@ internal class Program
             {
                 var companyId = md.CompanyId;
                 var data = md.Data; // IBuffer
-                byte[] bytes = new byte[data.Length];
-                Windows.Storage.Streams.DataReader.FromBuffer(data).ReadBytes(bytes);
+                var bytes = new byte[data.Length];
+                DataReader.FromBuffer(data).ReadBytes(bytes);
                 Console.WriteLine($"  Manufacturer: 0x{companyId:X}, Data: {BitConverter.ToString(bytes)}");
             }
 
             foreach (var section in args.Advertisement.DataSections)
-            {
                 Console.WriteLine($"  DataSection Type: 0x{section.DataType:X}, Length: {section.Data.Length}");
-            }
         }
 
         // Query for extra properties you want returned
@@ -57,7 +56,7 @@ internal class Program
             };
         deviceWatcher.Received += OnAdvertisementReceived;
         deviceWatcher.Start();
-        
+
         Console.WriteLine("Watcher started. Нажмите Enter для остановки...");
         Console.ReadLine();
 

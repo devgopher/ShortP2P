@@ -6,29 +6,33 @@ namespace ShortP2P.WinForms;
 
 public sealed class AppSettingsForm : Form
 {
-    private readonly AppSettingsStore _settings;
-    private readonly P2pRoutingSettingsStore _routingStore;
-    private readonly UserP2pRuntime _runtime;
-    private readonly ILogger<UserAction> _userActions;
     private readonly ComboBox _audioSourceCombo = new()
     {
         DropDownStyle = ComboBoxStyle.DropDownList,
-        Width = 440,
+        Width = 440
     };
-    private readonly ComboBox _videoSourceCombo = new()
-    {
-        DropDownStyle = ComboBoxStyle.DropDownList,
-        Width = 440,
-    };
+
+    private readonly Button _cancelButton = new() { Text = "Отмена", AutoSize = true };
     private readonly Button _refreshAudioSourcesButton = new() { Text = "Обновить список", AutoSize = true };
     private readonly Button _refreshVideoSourcesButton = new() { Text = "Обновить список", AutoSize = true };
+    private readonly P2pRoutingSettingsStore _routingStore;
+    private readonly UserP2pRuntime _runtime;
+    private readonly Button _saveButton = new() { Text = "Сохранить", AutoSize = true };
+    private readonly AppSettingsStore _settings;
+
     private readonly CheckBox _trafficSavingEnabled = new()
     {
         AutoSize = true,
-        Text = "Включить экономию трафика",
+        Text = "Включить экономию трафика"
     };
-    private readonly Button _saveButton = new() { Text = "Сохранить", AutoSize = true };
-    private readonly Button _cancelButton = new() { Text = "Отмена", AutoSize = true };
+
+    private readonly ILogger<UserAction> _userActions;
+
+    private readonly ComboBox _videoSourceCombo = new()
+    {
+        DropDownStyle = ComboBoxStyle.DropDownList,
+        Width = 440
+    };
 
     public AppSettingsForm(AppSettingsStore settings, P2pRoutingSettingsStore routingStore, UserP2pRuntime runtime,
         ILogger<UserAction> userActions)
@@ -58,7 +62,7 @@ public sealed class AppSettingsForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 4,
-            Padding = new Padding(12),
+            Padding = new Padding(12)
         };
         soundRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         soundRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -69,20 +73,20 @@ public sealed class AppSettingsForm : Form
         var sourceLabel = new Label
         {
             AutoSize = true,
-            Text = "Источник звука для голосовых сообщений:",
+            Text = "Источник звука для голосовых сообщений:"
         };
         var sourceHint = new Label
         {
             AutoSize = true,
             ForeColor = SystemColors.GrayText,
             Text = "Список включает все устройства записи Windows: микрофоны, веб-камеры с микрофоном, линейные входы.",
-            MaximumSize = new Size(500, 0),
+            MaximumSize = new Size(500, 0)
         };
         var sourceRow = new FlowLayoutPanel
         {
             AutoSize = true,
             WrapContents = false,
-            FlowDirection = FlowDirection.LeftToRight,
+            FlowDirection = FlowDirection.LeftToRight
         };
         sourceRow.Controls.Add(_audioSourceCombo);
         sourceRow.Controls.Add(_refreshAudioSourcesButton);
@@ -96,7 +100,7 @@ public sealed class AppSettingsForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 4,
-            Padding = new Padding(12),
+            Padding = new Padding(12)
         };
         videoRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         videoRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -106,13 +110,13 @@ public sealed class AppSettingsForm : Form
         var videoSourceLabel = new Label
         {
             AutoSize = true,
-            Text = "Источник видео для записи видеосообщений:",
+            Text = "Источник видео для записи видеосообщений:"
         };
         var videoSourceRow = new FlowLayoutPanel
         {
             AutoSize = true,
             WrapContents = false,
-            FlowDirection = FlowDirection.LeftToRight,
+            FlowDirection = FlowDirection.LeftToRight
         };
         videoSourceRow.Controls.Add(_videoSourceCombo);
         videoSourceRow.Controls.Add(_refreshVideoSourcesButton);
@@ -121,7 +125,7 @@ public sealed class AppSettingsForm : Form
             AutoSize = true,
             ForeColor = SystemColors.GrayText,
             MaximumSize = new Size(500, 0),
-            Text = "Выбранный источник используется в окне записи с камеры (кнопка 📹 в чате).",
+            Text = "Выбранный источник используется в окне записи с камеры (кнопка 📹 в чате)."
         };
         videoRoot.Controls.Add(videoSourceLabel, 0, 0);
         videoRoot.Controls.Add(videoSourceRow, 0, 1);
@@ -132,7 +136,7 @@ public sealed class AppSettingsForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 3,
-            Padding = new Padding(12),
+            Padding = new Padding(12)
         };
         trafficRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         trafficRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -143,7 +147,7 @@ public sealed class AppSettingsForm : Form
             ForeColor = SystemColors.GrayText,
             MaximumSize = new Size(500, 0),
             Text = "В режиме экономии трафика голосовые сообщения кодируются с битрейтом 6 kbit/s " +
-                   "(вместо 24 kbit/s), а presence-пинги отправляются раз в 10 секунд.",
+                   "(вместо 24 kbit/s), а presence-пинги отправляются раз в 10 секунд."
         };
         trafficRoot.Controls.Add(_trafficSavingEnabled, 0, 0);
         trafficRoot.Controls.Add(trafficHint, 0, 1);
@@ -154,7 +158,7 @@ public sealed class AppSettingsForm : Form
             Dock = DockStyle.Bottom,
             AutoSize = true,
             FlowDirection = FlowDirection.RightToLeft,
-            Padding = new Padding(8),
+            Padding = new Padding(8)
         };
         bottomButtons.Controls.Add(_cancelButton);
         bottomButtons.Controls.Add(_saveButton);
@@ -162,8 +166,8 @@ public sealed class AppSettingsForm : Form
         Controls.Add(tabs);
         Controls.Add(bottomButtons);
 
-        _refreshAudioSourcesButton.Click += (_, _) => ReloadAudioInputs(keepCurrentSelection: true);
-        _refreshVideoSourcesButton.Click += async (_, _) => await ReloadVideoInputsAsync(keepCurrentSelection: true).ConfigureAwait(true);
+        _refreshAudioSourcesButton.Click += (_, _) => ReloadAudioInputs(true);
+        _refreshVideoSourcesButton.Click += async (_, _) => await ReloadVideoInputsAsync(true).ConfigureAwait(true);
         _cancelButton.Click += (_, _) => Close();
         _saveButton.Click += async (_, _) => await SaveAndCloseAsync().ConfigureAwait(true);
         Shown += async (_, _) => await OnShownAsync().ConfigureAwait(true);
@@ -172,8 +176,8 @@ public sealed class AppSettingsForm : Form
     private async Task OnShownAsync()
     {
         await _settings.InitializeAsync().ConfigureAwait(true);
-        ReloadAudioInputs(keepCurrentSelection: false);
-        await ReloadVideoInputsAsync(keepCurrentSelection: false).ConfigureAwait(true);
+        ReloadAudioInputs(false);
+        await ReloadVideoInputsAsync(false).ConfigureAwait(true);
         _trafficSavingEnabled.Checked = _settings.Current.TrafficSavingEnabled;
     }
 
@@ -255,11 +259,17 @@ public sealed class AppSettingsForm : Form
 
     private sealed record AudioInputOptionItem(int? DeviceNumber, string DisplayText)
     {
-        public override string ToString() => DisplayText;
+        public override string ToString()
+        {
+            return DisplayText;
+        }
     }
 
     private sealed record VideoInputOptionItem(string? DeviceId, string DisplayText)
     {
-        public override string ToString() => DisplayText;
+        public override string ToString()
+        {
+            return DisplayText;
+        }
     }
 }

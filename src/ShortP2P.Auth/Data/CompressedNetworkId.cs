@@ -85,17 +85,35 @@ public readonly struct CompressedNetworkId : IEquatable<CompressedNetworkId>, IC
         return c != 0 ? c : _part1.CompareTo(other._part1);
     }
 
-    public static bool operator ==(CompressedNetworkId a, CompressedNetworkId b) => a.Equals(b);
+    public static bool operator ==(CompressedNetworkId a, CompressedNetworkId b)
+    {
+        return a.Equals(b);
+    }
 
-    public static bool operator !=(CompressedNetworkId a, CompressedNetworkId b) => !a.Equals(b);
+    public static bool operator !=(CompressedNetworkId a, CompressedNetworkId b)
+    {
+        return !a.Equals(b);
+    }
 
-    public bool Equals(CompressedNetworkId other) => _part0 == other._part0 && _part1 == other._part1;
+    public bool Equals(CompressedNetworkId other)
+    {
+        return _part0 == other._part0 && _part1 == other._part1;
+    }
 
-    public override bool Equals(object? obj) => obj is CompressedNetworkId other && Equals(other);
+    public override bool Equals(object? obj)
+    {
+        return obj is CompressedNetworkId other && Equals(other);
+    }
 
-    public override int GetHashCode() => HashCode.Combine(_part0, _part1);
+    public override int GetHashCode()
+    {
+        return HashCode.Combine(_part0, _part1);
+    }
 
-    public override string ToString() => IsEmpty ? "" : ToShortString();
+    public override string ToString()
+    {
+        return IsEmpty ? "" : ToShortString();
+    }
 
     private CompressedNetworkId(ulong part0, uint part1)
     {

@@ -1,6 +1,6 @@
+using Windows.Devices.Enumeration;
 using NAudio.Wave;
 using ShortP2P.Auth;
-using Windows.Devices.Enumeration;
 
 namespace ShortP2P.WinForms;
 
@@ -9,12 +9,11 @@ public sealed class AppSettingsStore(ISessionStorage storage)
     private const string KVoiceInputDeviceNumber = "wf_voice_input_device_number";
     private const string KTrafficSavingEnabled = "wf_traffic_saving_enabled";
     private const string KVideoInputDeviceId = "wf_video_input_device_id";
-    private readonly ISessionStorage _storage = storage ?? throw new ArgumentNullException(nameof(storage));
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private AppSettingsSnapshot _current = new(null, false, null);
+    private readonly ISessionStorage _storage = storage ?? throw new ArgumentNullException(nameof(storage));
     private volatile bool _loaded;
 
-    public AppSettingsSnapshot Current => _current;
+    public AppSettingsSnapshot Current { get; private set; } = new(null, false, null);
 
     public async Task InitializeAsync()
     {
@@ -24,7 +23,7 @@ public sealed class AppSettingsStore(ISessionStorage storage)
     public async Task<AppSettingsSnapshot> GetAsync()
     {
         await EnsureLoadedAsync().ConfigureAwait(false);
-        return _current;
+        return Current;
     }
 
     public async Task SetVoiceInputDeviceNumberAsync(int? deviceNumber)
@@ -38,14 +37,14 @@ public sealed class AppSettingsStore(ISessionStorage storage)
         else
             _storage.Remove(KVoiceInputDeviceNumber);
 
-        _current = _current with { VoiceInputDeviceNumber = deviceNumber };
+        Current = Current with { VoiceInputDeviceNumber = deviceNumber };
     }
 
     public async Task SetTrafficSavingEnabledAsync(bool enabled)
     {
         await EnsureLoadedAsync().ConfigureAwait(false);
         await _storage.SetAsync(KTrafficSavingEnabled, enabled.ToString()).ConfigureAwait(false);
-        _current = _current with { TrafficSavingEnabled = enabled };
+        Current = Current with { TrafficSavingEnabled = enabled };
     }
 
     public async Task SetVideoInputDeviceIdAsync(string? deviceId)
@@ -54,12 +53,12 @@ public sealed class AppSettingsStore(ISessionStorage storage)
         if (string.IsNullOrWhiteSpace(deviceId))
         {
             _storage.Remove(KVideoInputDeviceId);
-            _current = _current with { VideoInputDeviceId = null };
+            Current = Current with { VideoInputDeviceId = null };
             return;
         }
 
         await _storage.SetAsync(KVideoInputDeviceId, deviceId.Trim()).ConfigureAwait(false);
-        _current = _current with { VideoInputDeviceId = deviceId.Trim() };
+        Current = Current with { VideoInputDeviceId = deviceId.Trim() };
     }
 
     private async Task EnsureLoadedAsync()
@@ -78,7 +77,7 @@ public sealed class AppSettingsStore(ISessionStorage storage)
             var trafficSavingEnabled =
                 bool.TryParse(await _storage.GetAsync(KTrafficSavingEnabled).ConfigureAwait(false), out var ts) && ts;
             var videoDeviceId = await _storage.GetAsync(KVideoInputDeviceId).ConfigureAwait(false);
-            _current = new AppSettingsSnapshot(saved, trafficSavingEnabled,
+            Current = new AppSettingsSnapshot(saved, trafficSavingEnabled,
                 string.IsNullOrWhiteSpace(videoDeviceId) ? null : videoDeviceId.Trim());
             _loaded = true;
         }
@@ -89,7 +88,10 @@ public sealed class AppSettingsStore(ISessionStorage storage)
     }
 }
 
-public sealed record AppSettingsSnapshot(int? VoiceInputDeviceNumber, bool TrafficSavingEnabled, string? VideoInputDeviceId);
+public sealed record AppSettingsSnapshot(
+    int? VoiceInputDeviceNumber,
+    bool TrafficSavingEnabled,
+    string? VideoInputDeviceId);
 
 public static class AudioInputDeviceCatalog
 {

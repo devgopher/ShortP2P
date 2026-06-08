@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore.Design;
 namespace ShortP2P.Discovery.RouteTables;
 
 /// <summary>
-/// Позволяет выполнять <c>dotnet ef</c> для библиотеки без отдельного startup-проекта.
+///     Позволяет выполнять <c>dotnet ef</c> для библиотеки без отдельного startup-проекта.
 /// </summary>
 public sealed class RouteDbContextDesignTimeFactory : IDesignTimeDbContextFactory<RouteDbContext>
 {

@@ -1,10 +1,3 @@
-using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Globalization;
-using Microsoft.Extensions.Logging;
-using Microsoft.Maui.ApplicationModel;
-using Microsoft.Maui.ApplicationModel.DataTransfer;
-using Microsoft.Maui.Devices;
 using ShortP2P.Auth;
 using ShortP2P.Client;
 using ShortP2P.Client.ChatMedia;
@@ -18,30 +11,31 @@ public partial class ChatDetailPage : ContentPage
     private static readonly Color PresenceOnline = Color.FromArgb("#228B22");
     private static readonly Color PresenceOffline = Color.FromArgb("#CD5C5C");
 
-    private static readonly FilePickerFileType OfficeDocFileTypes = new(new Dictionary<DevicePlatform, IEnumerable<string>>
-    {
-        [DevicePlatform.WinUI] =
-        [
-            ".doc", ".docx", ".rtf", ".pdf", ".odt", ".ods", ".odp", ".odg", ".xlsx", ".xls", ".pptx", ".ppt",
-        ],
-        [DevicePlatform.Android] =
-        [
-            "application/pdf",
-            "application/msword",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/vnd.ms-excel",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/vnd.ms-powerpoint",
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "application/vnd.oasis.opendocument.text",
-            "application/vnd.oasis.opendocument.spreadsheet",
-            "application/vnd.oasis.opendocument.presentation",
-            "application/vnd.oasis.opendocument.graphics",
-            "application/rtf",
-        ],
-        [DevicePlatform.iOS] = ["public.data"],
-        [DevicePlatform.MacCatalyst] = ["public.data"],
-    });
+    private static readonly FilePickerFileType OfficeDocFileTypes = new(
+        new Dictionary<DevicePlatform, IEnumerable<string>>
+        {
+            [DevicePlatform.WinUI] =
+            [
+                ".doc", ".docx", ".rtf", ".pdf", ".odt", ".ods", ".odp", ".odg", ".xlsx", ".xls", ".pptx", ".ppt"
+            ],
+            [DevicePlatform.Android] =
+            [
+                "application/pdf",
+                "application/msword",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/vnd.ms-excel",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.ms-powerpoint",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "application/vnd.oasis.opendocument.text",
+                "application/vnd.oasis.opendocument.spreadsheet",
+                "application/vnd.oasis.opendocument.presentation",
+                "application/vnd.oasis.opendocument.graphics",
+                "application/rtf"
+            ],
+            [DevicePlatform.iOS] = ["public.data"],
+            [DevicePlatform.MacCatalyst] = ["public.data"]
+        });
 
     private readonly AuthService _auth;
     private readonly ChatRepository _repo;
@@ -115,7 +109,6 @@ public partial class ChatDetailPage : ContentPage
         _p2pSession = _p2p.GetSession(chat, user, _auth, _repo, uiSync);
         _p2pSession.MessagesChanged += OnP2PMessagesChanged;
         if (!_p2p.IsChatSessionStarted(chat.Id))
-        {
             try
             {
                 await _p2pSession.StartAsync().ConfigureAwait(true);
@@ -126,7 +119,6 @@ public partial class ChatDetailPage : ContentPage
                 _logger.LogWarning(ex, "Could not start UDP for chat {ChatId}", chat.Id);
                 await DisplayAlert("P2P", $"Could not start UDP: {ex.Message}", "OK").ConfigureAwait(true);
             }
-        }
 
         await ReloadMessagesAsync().ConfigureAwait(true);
         RefreshPeerPresenceLabel();
@@ -147,11 +139,15 @@ public partial class ChatDetailPage : ContentPage
         }
     }
 
-    private void OnPeerLanPresenceChanged(object? sender, EventArgs e) =>
+    private void OnPeerLanPresenceChanged(object? sender, EventArgs e)
+    {
         MainThread.BeginInvokeOnMainThread(RefreshPeerPresenceLabel);
+    }
 
-    private void OnP2PMessagesChanged(object? sender, EventArgs e) =>
+    private void OnP2PMessagesChanged(object? sender, EventArgs e)
+    {
         MainThread.BeginInvokeOnMainThread(async () => await ReloadMessagesAsync().ConfigureAwait(true));
+    }
 
     private void EnsurePresenceRefreshTimerStarted()
     {
@@ -163,7 +159,10 @@ public partial class ChatDetailPage : ContentPage
             _presenceRefreshTimer.Start();
     }
 
-    private void OnPresenceRefreshTimerTick(object? sender, EventArgs e) => RefreshPeerPresenceLabel();
+    private void OnPresenceRefreshTimerTick(object? sender, EventArgs e)
+    {
+        RefreshPeerPresenceLabel();
+    }
 
     private async Task ReloadMessagesAsync()
     {
@@ -184,10 +183,7 @@ public partial class ChatDetailPage : ContentPage
                 .ConfigureAwait(true);
             _hasMoreRows = page.Count == MessagesPageSize;
             _loadedRows.AddRange(page);
-            foreach (var m in page)
-            {
-                _messageItems.Add(BuildMessageRowVm(m));
-            }
+            foreach (var m in page) _messageItems.Add(BuildMessageRowVm(m));
         }
         finally
         {
@@ -219,7 +215,7 @@ public partial class ChatDetailPage : ContentPage
             fileBody.Spans.Add(new Span
             {
                 Text = $"{name} · {kb} КБ · нажмите строку — ",
-                TextColor = color,
+                TextColor = color
             });
             fileBody.Spans.Add(new Span { Text = "Скачать", TextColor = Colors.DodgerBlue });
             return new MessageRowVm
@@ -238,7 +234,7 @@ public partial class ChatDetailPage : ContentPage
                 DeliveryGlyph = glyph,
                 DeliveryGlyphColor = gColor,
                 Outgoing = m.Outgoing,
-                DeliveryStatus = ds,
+                DeliveryStatus = ds
             };
         }
 
@@ -261,7 +257,7 @@ public partial class ChatDetailPage : ContentPage
                 DeliveryGlyph = glyph,
                 DeliveryGlyphColor = gColor,
                 Outgoing = m.Outgoing,
-                DeliveryStatus = ds,
+                DeliveryStatus = ds
             };
         }
 
@@ -281,7 +277,7 @@ public partial class ChatDetailPage : ContentPage
             fileBody.Spans.Add(new Span
             {
                 Text = $"{name} · {kb} КБ · {stateText}",
-                TextColor = color,
+                TextColor = color
             });
             return new MessageRowVm
             {
@@ -299,7 +295,7 @@ public partial class ChatDetailPage : ContentPage
                 DeliveryGlyph = glyph,
                 DeliveryGlyphColor = gColor,
                 Outgoing = m.Outgoing,
-                DeliveryStatus = ds,
+                DeliveryStatus = ds
             };
         }
 
@@ -318,7 +314,7 @@ public partial class ChatDetailPage : ContentPage
             DeliveryGlyph = glyph,
             DeliveryGlyphColor = gColor,
             Outgoing = m.Outgoing,
-            DeliveryStatus = ds,
+            DeliveryStatus = ds
         };
     }
 
@@ -596,7 +592,7 @@ public partial class ChatDetailPage : ContentPage
             var pick = await FilePicker.Default.PickAsync(new PickOptions
             {
                 PickerTitle = "Изображение (JPEG, PNG, GIF)",
-                FileTypes = FilePickerFileType.Images,
+                FileTypes = FilePickerFileType.Images
             }).ConfigureAwait(true);
             if (pick == null)
                 return;
@@ -674,7 +670,7 @@ public partial class ChatDetailPage : ContentPage
             var pick = await FilePicker.Default.PickAsync(new PickOptions
             {
                 PickerTitle = "Документ Word / LibreOffice (до 10 МБ)",
-                FileTypes = OfficeDocFileTypes,
+                FileTypes = OfficeDocFileTypes
             }).ConfigureAwait(true);
             if (pick == null)
                 return;
@@ -708,7 +704,8 @@ public partial class ChatDetailPage : ContentPage
             if (bytes.Length > _media.MaxDocumentBytes)
             {
                 var limMb = (_media.MaxDocumentBytes + (1024 * 1024 - 1)) / (1024 * 1024);
-                await DisplayAlert("Размер", $"Файл больше {limMb} МБ (лимит maxDocumentBytes в chat-media.json).", "OK")
+                await DisplayAlert("Размер", $"Файл больше {limMb} МБ (лимит maxDocumentBytes в chat-media.json).",
+                        "OK")
                     .ConfigureAwait(true);
                 return;
             }
@@ -739,17 +736,15 @@ public partial class ChatDetailPage : ContentPage
         {
             TapGestureRecognizer tg => tg.Parent as Element,
             Element el => el,
-            _ => null,
+            _ => null
         };
         MessageRowVm? vm = null;
         for (var el = walk; el != null; el = el.Parent as Element)
-        {
             if (el.BindingContext is MessageRowVm row)
             {
                 vm = row;
                 break;
             }
-        }
 
         if (vm == null || vm.MessageId == 0)
             return;
@@ -770,6 +765,7 @@ public partial class ChatDetailPage : ContentPage
                 await _p2pSession.RequestBinaryDownloadAsync(vm.MessageId).ConfigureAwait(true);
                 await ReloadMessagesAsync().ConfigureAwait(true);
             }
+
             var row = await _repo.GetMessageAsync(vm.MessageId).ConfigureAwait(true);
             if (row?.ImageBlob is not { Length: > 0 } blob)
             {
@@ -783,7 +779,7 @@ public partial class ChatDetailPage : ContentPage
             await Share.Default.RequestAsync(new ShareFileRequest
             {
                 Title = "Сохранить или отправить документ",
-                File = new ShareFile(temp),
+                File = new ShareFile(temp)
             }).ConfigureAwait(true);
         }
         catch (Exception ex)
@@ -798,10 +794,8 @@ public partial class ChatDetailPage : ContentPage
         var invalid = Path.GetInvalidFileNameChars();
         var chars = name.ToCharArray();
         for (var i = 0; i < chars.Length; i++)
-        {
             if (invalid.Contains(chars[i]))
                 chars[i] = '_';
-        }
 
         var s = new string(chars).Trim();
         return string.IsNullOrEmpty(s) ? "document" : s;
@@ -817,7 +811,7 @@ public partial class ChatDetailPage : ContentPage
             MessageDeliveryStatus.Pending => (OutgoingDeliveryIndicators.Pending, Color.FromArgb("#B8860B"), true),
             MessageDeliveryStatus.Delivered => (OutgoingDeliveryIndicators.Delivered, Color.FromArgb("#228B22"), true),
             MessageDeliveryStatus.Failed => (OutgoingDeliveryIndicators.Failed, Colors.Red, true),
-            _ => (OutgoingDeliveryIndicators.Delivered, Color.FromArgb("#228B22"), true),
+            _ => (OutgoingDeliveryIndicators.Delivered, Color.FromArgb("#228B22"), true)
         };
     }
 
@@ -827,7 +821,7 @@ public partial class ChatDetailPage : ContentPage
         const int hueSteps = 12;
         const int lightSteps = 3;
         var h = hash % hueSteps;
-        var lBand = (hash / hueSteps) % lightSteps;
+        var lBand = hash / hueSteps % lightSteps;
         var hueDeg = h * (360.0f / hueSteps);
         var lightness = 0.40f + lBand * 0.06f;
         return Color.FromHsla(hueDeg / 360.0f, 0.72f, lightness);
@@ -875,11 +869,7 @@ public partial class ChatDetailPage : ContentPage
         try
         {
             var ok = await _p2pSession.ClearMessagesAsync().ConfigureAwait(true);
-            if (!ok)
-            {
-                await DisplayAlert("Ошибка", "Не удалось удалить переписку.", "OK").ConfigureAwait(true);
-                return;
-            }
+            if (!ok) await DisplayAlert("Ошибка", "Не удалось удалить переписку.", "OK").ConfigureAwait(true);
         }
         catch (Exception ex)
         {

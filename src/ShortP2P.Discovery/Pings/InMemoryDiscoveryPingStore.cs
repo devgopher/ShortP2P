@@ -15,11 +15,15 @@ public sealed class InMemoryDiscoveryPingStore : IDiscoveryPingStore
         _entries.AddOrUpdate(key, entry, (_, _) => entry);
     }
 
-    public IReadOnlyList<DiscoveryPingEntry> GetSnapshot() =>
-        _entries.Values
+    public IReadOnlyList<DiscoveryPingEntry> GetSnapshot()
+    {
+        return _entries.Values
             .OrderByDescending(e => e.LastSeenUtc)
             .ToArray();
+    }
 
-    private static string BuildKey(CompressedNetworkId networkId, TransportAddress address) =>
-        $"{networkId.ToShortString()}:{(int)address.Kind}:{Convert.ToBase64String(address.Data)}";
+    private static string BuildKey(CompressedNetworkId networkId, TransportAddress address)
+    {
+        return $"{networkId.ToShortString()}:{(int)address.Kind}:{Convert.ToBase64String(address.Data)}";
+    }
 }

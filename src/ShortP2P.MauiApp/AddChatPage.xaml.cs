@@ -1,8 +1,6 @@
-using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Services;
-using ShortP2P.Crypto;
 
 namespace ShortP2P.MauiApp;
 
@@ -10,8 +8,8 @@ public partial class AddChatPage : ContentPage
 {
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
-    private readonly UserP2pRuntime _p2p;
     private readonly ILogger<AddChatPage> _logger;
+    private readonly UserP2pRuntime _p2p;
 
     public AddChatPage(AuthService auth, ChatRepository chats, UserP2pRuntime p2p, ILogger<AddChatPage> logger)
     {
@@ -32,7 +30,7 @@ public partial class AddChatPage : ContentPage
         var result = await FilePicker.Default.PickAsync(new PickOptions
         {
             PickerTitle = "Image with peer QR code",
-            FileTypes = FilePickerFileType.Images,
+            FileTypes = FilePickerFileType.Images
         }).ConfigureAwait(true);
 
         if (result == null)
@@ -175,7 +173,8 @@ public partial class AddChatPage : ContentPage
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "QR auto-install failed");
-            await DisplayAlert("QR", $"Could not auto-install chat: {ex.Message} {ex.StackTrace}", "OK").ConfigureAwait(true);
+            await DisplayAlert("QR", $"Could not auto-install chat: {ex.Message} {ex.StackTrace}", "OK")
+                .ConfigureAwait(true);
         }
     }
 

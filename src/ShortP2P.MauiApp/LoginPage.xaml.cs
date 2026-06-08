@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
 using ShortP2P.Client.Services;
 
@@ -49,7 +47,6 @@ public partial class LoginPage : ContentPage
     {
         var user = _auth.CurrentUser;
         if (user != null)
-        {
             try
             {
                 var p2p = MauiProgram.Services.GetRequiredService<UserP2pRuntime>();
@@ -62,7 +59,6 @@ public partial class LoginPage : ContentPage
             {
                 _logger.LogWarning(ex, "Ensure P2P sessions on login");
             }
-        }
 
         var chats = MauiProgram.Services.GetRequiredService<ChatsPage>();
         Application.Current!.MainPage = new NavigationPage(chats);

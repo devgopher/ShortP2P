@@ -18,8 +18,10 @@ internal static class VoiceRecordHelper
 
     /// <summary>WAV (RIFF) в памяти → Ogg Opus mono (6 или 24 kbps в зависимости от настроек).</summary>
     public static Task<(bool Ok, byte[]? OggBytes, string? Error)> EncodeWavPcmToOggOpusAsync(byte[] wavBytes,
-        bool trafficSavingEnabled, CancellationToken cancellationToken = default) =>
-        Task.Run(() => EncodeWavPcmToOggOpus(wavBytes, trafficSavingEnabled), cancellationToken);
+        bool trafficSavingEnabled, CancellationToken cancellationToken = default)
+    {
+        return Task.Run(() => EncodeWavPcmToOggOpus(wavBytes, trafficSavingEnabled), cancellationToken);
+    }
 
     private static (bool Ok, byte[]? OggBytes, string? Error) EncodeWavPcmToOggOpus(byte[] wavBytes,
         bool trafficSavingEnabled)
@@ -29,7 +31,7 @@ internal static class VoiceRecordHelper
 
         try
         {
-            using var wavMs = new MemoryStream(wavBytes, writable: false);
+            using var wavMs = new MemoryStream(wavBytes, false);
             using var wav = new WaveFileReader(wavMs);
             var fmt = wav.WaveFormat;
             if (fmt.BitsPerSample != 16)
@@ -71,10 +73,11 @@ internal static class VoiceRecordHelper
             }
 
             var oggMs = new MemoryStream();
-            var encoder = OpusCodecFactory.CreateEncoder(OpusDecodeSampleRate, 1, OpusApplication.OPUS_APPLICATION_VOIP);
+            var encoder =
+                OpusCodecFactory.CreateEncoder(OpusDecodeSampleRate, 1, OpusApplication.OPUS_APPLICATION_VOIP);
             encoder.Bitrate = trafficSavingEnabled ? TrafficSavingBitrate : DefaultBitrate;
             var tags = new OpusTags();
-            var oggOut = new OpusOggWriteStream(encoder, oggMs, tags, inputSampleRate: sampleRate);
+            var oggOut = new OpusOggWriteStream(encoder, oggMs, tags, sampleRate);
             oggOut.WriteSamples(monoPcm, 0, monoPcm.Length);
             oggOut.Finish();
 
@@ -90,7 +93,7 @@ internal static class VoiceRecordHelper
     /// <summary>Декодирование Ogg Opus → PCM16 моно для NAudio.</summary>
     public static (byte[] PcmBytes, int SampleRateHz) DecodeOpusOggToPcm16(byte[] oggBytes)
     {
-        var mem = new MemoryStream(oggBytes, writable: false);
+        var mem = new MemoryStream(oggBytes, false);
         var decoder = OpusCodecFactory.CreateDecoder(OpusDecodeSampleRate, 1);
         var oggIn = new OpusOggReadStream(decoder, mem);
         var samples = new List<short>();

@@ -8,20 +8,17 @@ namespace ShortP2P.Client.Qr;
 /// <summary>Compact JSON payload embedded in a peer contact QR code (version 1).</summary>
 public sealed class PeerQrPayload
 {
-    [JsonPropertyName("v")]
-    public int V { get; set; }
+    [JsonPropertyName("v")] public int V { get; set; }
 
-    [JsonPropertyName("n")]
-    public string N { get; set; } = "";
+    [JsonPropertyName("n")] public string N { get; set; } = "";
 
-    [JsonPropertyName("h")]
-    public string H { get; set; } = "";
+    [JsonPropertyName("h")] public string H { get; set; } = "";
 
-    /// <summary>Дополнительные IPv4/IPv6 (первый по-прежнему в <see cref="H"/>). Старые клиенты поле игнорируют.</summary>
+    /// <summary>Дополнительные IPv4/IPv6 (первый по-прежнему в <see cref="H" />). Старые клиенты поле игнорируют.</summary>
     [JsonPropertyName("ha")]
     public List<string>? Ha { get; set; }
 
-    /// <summary>Устаревшее: раньше Bluetooth MAC, затем дублировал <see cref="Id"/>. Не пишется в новых QR.</summary>
+    /// <summary>Устаревшее: раньше Bluetooth MAC, затем дублировал <see cref="Id" />. Не пишется в новых QR.</summary>
     [JsonPropertyName("b")]
     public string? B { get; set; }
 
@@ -29,17 +26,15 @@ public sealed class PeerQrPayload
     [JsonPropertyName("ba")]
     public List<string>? Ba { get; set; }
 
-    [JsonPropertyName("p")]
-    public int P { get; set; }
+    [JsonPropertyName("p")] public int P { get; set; }
 
-    [JsonPropertyName("id")]
-    public string Id { get; set; } = "";
+    [JsonPropertyName("id")] public string Id { get; set; } = "";
 
-    /// <summary>RSA public key JSON (same format as <see cref="T:ShortP2P.Crypto.RsaKeySerializer"/>).</summary>
+    /// <summary>RSA public key JSON (same format as <see cref="T:ShortP2P.Crypto.RsaKeySerializer" />).</summary>
     [JsonPropertyName("k")]
     public string K { get; set; } = "";
 
-    /// <summary>IP, network id и (для старых QR) MAC для <see cref="Data.ChatEntity.PeerHost"/>.</summary>
+    /// <summary>IP, network id и (для старых QR) MAC для <see cref="Data.ChatEntity.PeerHost" />.</summary>
     public string GetCommaSeparatedHosts()
     {
         var list = new List<string>();
@@ -77,30 +72,22 @@ public sealed class PeerQrPayload
 
         addIp(H);
         if (Ha != null)
-        {
             foreach (var x in Ha)
                 addIp(x);
-        }
 
         addNetworkId(Id);
         addNetworkId(B);
         if (Ba != null)
-        {
             foreach (var x in Ba)
                 addNetworkId(x);
-        }
 
         // Старые QR: MAC в b/ba (если b — не network id)
         if (B != null && !CompressedNetworkId.TryParseShortString(B, out _))
             addMac(B);
         if (Ba != null)
-        {
             foreach (var x in Ba)
-            {
                 if (!CompressedNetworkId.TryParseShortString(x, out _))
                     addMac(x);
-            }
-        }
 
         return string.Join(", ", list);
     }

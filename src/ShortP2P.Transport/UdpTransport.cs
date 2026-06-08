@@ -9,7 +9,8 @@ namespace ShortP2P.Transport;
 ///     UDP-транспорт (кроссплатформенный). Один датаграмма = один блок для верхнего слоя.
 ///     Привязка к заданному <see cref="IPAddress" /> и порту — для приёма со всех интерфейсов используйте
 ///     <see cref="IPAddress.Any" /> (в т.ч. DNAT на роутере на этот хост).
-///     Исходящие операции ограничены до 4 параллельных отправок; входящие сериализуются <see cref="SemaphoreSlim" /> (1,1).
+///     Исходящие операции ограничены до 4 параллельных отправок; входящие сериализуются <see cref="SemaphoreSlim" />
+///     (1,1).
 ///     Прямое создание — <see cref="CreateUdpTransport" />; общий сокет на процесс — <see cref="IUdpTransportFactory" />.
 /// </summary>
 public sealed class UdpTransport : ITransport
@@ -17,15 +18,15 @@ public sealed class UdpTransport : ITransport
     private const int MaxConcurrentUdpSends = 4;
 
     private readonly IPAddress _bindAddress;
-    private readonly int _listenPort;
-    private readonly bool _enableBroadcast;
     private readonly Channel<TransportReceiveMessage> _channel = Channel.CreateUnbounded<TransportReceiveMessage>();
-    private readonly SemaphoreSlim _sendGate = new(MaxConcurrentUdpSends, MaxConcurrentUdpSends);
+    private readonly bool _enableBroadcast;
+    private readonly int _listenPort;
     private readonly SemaphoreSlim _receiveGate = new(1, 1);
-    private UdpClient _udp;
+    private readonly SemaphoreSlim _sendGate = new(MaxConcurrentUdpSends, MaxConcurrentUdpSends);
 
     private CancellationTokenSource? _cts;
     private Task? _receiveTask;
+    private UdpClient _udp;
 
     private UdpTransport(IPAddress bindAddress, int listenPort, bool enableBroadcast)
     {
@@ -33,29 +34,6 @@ public sealed class UdpTransport : ITransport
         _listenPort = listenPort;
         _enableBroadcast = enableBroadcast;
         _udp = CreateClient(bindAddress, listenPort, enableBroadcast);
-    }
-
-    /// <summary>Создаёт UDP-транспорт с привязкой к локальному адресу и порту.</summary>
-    /// <param name="ip">Адрес привязки (часто <see cref="IPAddress.Any" />).</param>
-    /// <param name="port">Локальный порт прослушивания.</param>
-    /// <param name="enableBroadcast">Разрешить широковещательные исходящие датаграммы.</param>
-    public static UdpTransport CreateUdpTransport(IPAddress ip, int port, bool enableBroadcast = false)
-    {
-        ArgumentNullException.ThrowIfNull(ip);
-        ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
-        return new UdpTransport(ip, port, enableBroadcast);
-    }
-
-    private static UdpClient CreateClient(IPAddress bindAddress, int listenPort, bool enableBroadcast)
-    {
-        var c = new UdpClient();
-        c.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-        c.Client.Bind(new IPEndPoint(bindAddress, listenPort));
-        if (enableBroadcast)
-            c.EnableBroadcast = true;
-
-        return c;
     }
 
     public TransportKind Kind => TransportKind.Udp;
@@ -130,6 +108,29 @@ public sealed class UdpTransport : ITransport
     public ValueTask DisposeAsync()
     {
         return StopAsync();
+    }
+
+    /// <summary>Создаёт UDP-транспорт с привязкой к локальному адресу и порту.</summary>
+    /// <param name="ip">Адрес привязки (часто <see cref="IPAddress.Any" />).</param>
+    /// <param name="port">Локальный порт прослушивания.</param>
+    /// <param name="enableBroadcast">Разрешить широковещательные исходящие датаграммы.</param>
+    public static UdpTransport CreateUdpTransport(IPAddress ip, int port, bool enableBroadcast = false)
+    {
+        ArgumentNullException.ThrowIfNull(ip);
+        ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
+        return new UdpTransport(ip, port, enableBroadcast);
+    }
+
+    private static UdpClient CreateClient(IPAddress bindAddress, int listenPort, bool enableBroadcast)
+    {
+        var c = new UdpClient();
+        c.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        c.Client.Bind(new IPEndPoint(bindAddress, listenPort));
+        if (enableBroadcast)
+            c.EnableBroadcast = true;
+
+        return c;
     }
 
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)

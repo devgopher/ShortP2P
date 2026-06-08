@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Globalization;
-using System.IO;
 using System.Security.Cryptography;
 using ShortP2P.Crypto;
 using ShortP2P.Transport.Abstractions;
@@ -23,27 +22,33 @@ public sealed class MessengerService(
     private const int MaxTrackedDeliveredIds = 8192;
     private const int MaxTrackedOutboundIds = 8192;
     private static readonly TimeSpan NackMinInterval = TimeSpan.FromMilliseconds(500);
-
-    private readonly MessengerOptions _options = options ?? new MessengerOptions();
-    private readonly Dictionary<Guid, Reassembly> _pending = new();
-    private readonly Func<CancellationToken, ValueTask<P2PSession>> _sessionProvider =
-        sessionProvider ?? throw new ArgumentNullException(nameof(sessionProvider));
-    private readonly object _sync = new();
-    private readonly Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> _sendCipherAsync =
-        sendCipherAsync ?? throw new ArgumentNullException(nameof(sendCipherAsync));
     private readonly ConcurrentDictionary<Guid, AckWaiter> _ackWaiters = new();
     private readonly HashSet<Guid> _deliveredMessageIds = [];
-    /// <summary>Идентификаторы сообщений, отправленных этим экземпляром (защита от приёма собственного эха/hairpin).</summary>
-    private readonly HashSet<Guid> _ownOutboundMessageIds = [];
+
+    private readonly MessengerOptions _options = options ?? new MessengerOptions();
     private readonly Dictionary<Guid, OutboundCacheEntry> _outboundChunks = new();
 
+    /// <summary>Идентификаторы сообщений, отправленных этим экземпляром (защита от приёма собственного эха/hairpin).</summary>
+    private readonly HashSet<Guid> _ownOutboundMessageIds = [];
+
+    private readonly Dictionary<Guid, Reassembly> _pending = new();
+
+    private readonly Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> _sendCipherAsync =
+        sendCipherAsync ?? throw new ArgumentNullException(nameof(sendCipherAsync));
+
+    private readonly Func<CancellationToken, ValueTask<P2PSession>> _sessionProvider =
+        sessionProvider ?? throw new ArgumentNullException(nameof(sessionProvider));
+
+    private readonly object _sync = new();
+
     private CancellationTokenSource? _cts;
-    public event EventHandler<IncomingBinaryMessage>? GotData;
 
     public ValueTask DisposeAsync()
     {
         return StopAsync();
     }
+
+    public event EventHandler<IncomingBinaryMessage>? GotData;
 
     public ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
@@ -115,7 +120,7 @@ public sealed class MessengerService(
                     return;
                 }
                 catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested &&
-                                                             !cancellationToken.IsCancellationRequested)
+                                                            !cancellationToken.IsCancellationRequested)
                 {
                     last = ex;
                     if (waiter.NackObserved)
@@ -164,7 +169,8 @@ public sealed class MessengerService(
         }
 
         var encryptedChunks = new byte[totalChunks][];
-        Console.WriteLine($"{DateTime.UtcNow.ToString(CultureInfo.InvariantCulture)} sending to {FormatDestinationForLog(destination)}");
+        Console.WriteLine(
+            $"{DateTime.UtcNow.ToString(CultureInfo.InvariantCulture)} sending to {FormatDestinationForLog(destination)}");
 
         for (var i = 0; i < totalChunks; i++)
         {
@@ -204,6 +210,7 @@ public sealed class MessengerService(
         {
             nacksToSend = SweepStateAndCollectNacksLocked(DateTimeOffset.UtcNow);
         }
+
         foreach (var nack in nacksToSend)
             _ = SendDeliveryNackAsync(nack.MessageId, nack.MissingIndices, nack.ReplyTo, cancellationToken);
 
@@ -225,6 +232,7 @@ public sealed class MessengerService(
             {
                 _outboundChunks.Remove(ackId);
             }
+
             if (_ackWaiters.TryGetValue(ackId, out var w))
                 w.TrySetResult();
             return;
@@ -239,10 +247,8 @@ public sealed class MessengerService(
             return;
         }
 
-        if (!TryParseChunk(decrypted, out var messageId, out var chunkIndex, out var totalChunks, out var payloadBytes))
-        {
-            return;
-        }
+        if (!TryParseChunk(decrypted, out var messageId, out var chunkIndex, out var totalChunks,
+                out var payloadBytes)) return;
 
         var sendDeliveryAck = false;
         byte[]? assembledBuffer = null;
@@ -334,7 +340,8 @@ public sealed class MessengerService(
         return true;
     }
 
-    private async Task SendDeliveryAckAsync(Guid messageId, TransportAddress replyTo, CancellationToken cancellationToken)
+    private async Task SendDeliveryAckAsync(Guid messageId, TransportAddress replyTo,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -367,7 +374,8 @@ public sealed class MessengerService(
         }
     }
 
-    private async ValueTask ResendMissingChunksAsync(Guid messageId, int[] missingChunkIndices, TransportAddress replyTo,
+    private async ValueTask ResendMissingChunksAsync(Guid messageId, int[] missingChunkIndices,
+        TransportAddress replyTo,
         CancellationToken cancellationToken)
     {
         byte[][]? encryptedChunks = null;
@@ -398,10 +406,8 @@ public sealed class MessengerService(
     {
         var result = new List<int>(Math.Min(state.TotalChunks - state.Received, _options.MaxNackChunkIndices));
         for (var i = 0; i < state.TotalChunks && result.Count < _options.MaxNackChunkIndices; i++)
-        {
             if (state.Parts[i] == null)
                 result.Add(i);
-        }
 
         return result.ToArray();
     }
@@ -430,10 +436,8 @@ public sealed class MessengerService(
         }
 
         foreach (var kv in _outboundChunks.ToArray())
-        {
             if (nowUtc - kv.Value.LastAccessUtc >= _options.OutboundChunkCacheTtl)
                 _outboundChunks.Remove(kv.Key);
-        }
 
         return nacks;
     }

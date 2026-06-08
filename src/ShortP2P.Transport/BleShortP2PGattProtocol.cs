@@ -8,10 +8,6 @@ namespace ShortP2P.Transport;
 /// </summary>
 public static class BleShortP2PGattProtocol
 {
-    public static readonly Guid ServiceUuid = Guid.Parse("9FE8E58B-AF85-4D91-B245-2B40EA0439C7");
-    public static readonly Guid PeerRxCharacteristicUuid = Guid.Parse("8DFE6F10-6CB7-4E73-A918-DC47AC34D9E9");
-    public static readonly Guid PeerTxCharacteristicUuid = Guid.Parse("7CF03A12-8B5E-4D91-B245-2B40EA0439C8");
-
     /// <summary>Кадр объявления NetworkId по GATT RX (только для сопряжённых пиров, не в рекламе).</summary>
     public const byte FrameNetworkIdAnnounce = 0x32;
 
@@ -24,13 +20,16 @@ public static class BleShortP2PGattProtocol
 
     public const ushort ManufacturerCompanyId = 0xE58B;
 
-    private static ReadOnlySpan<byte> ManufacturerMagic => "SP2N"u8;
-
     public const byte ManufacturerPayloadTypeNetworkId = 0x02;
 
     public const int ManufacturerNetworkIdPayloadLength = 1 + GattServiceDataNetworkIdLength;
 
     public const int ManufacturerLegacyNetworkIdPayloadLength = 4 + 16;
+    public static readonly Guid ServiceUuid = Guid.Parse("9FE8E58B-AF85-4D91-B245-2B40EA0439C7");
+    public static readonly Guid PeerRxCharacteristicUuid = Guid.Parse("8DFE6F10-6CB7-4E73-A918-DC47AC34D9E9");
+    public static readonly Guid PeerTxCharacteristicUuid = Guid.Parse("7CF03A12-8B5E-4D91-B245-2B40EA0439C8");
+
+    private static ReadOnlySpan<byte> ManufacturerMagic => "SP2N"u8;
 
     public static byte[] BuildManufacturerNetworkIdPayload(CompressedNetworkId networkId)
     {
@@ -123,7 +122,8 @@ public static class BleShortP2PGattProtocol
         return TryParseGattServiceDataNetworkIdPayload(sectionPayload.Slice(16), out networkId);
     }
 
-    public static bool TryParseGattServiceDataNetworkId(ReadOnlySpan<byte> serviceData, out CompressedNetworkId networkId)
+    public static bool TryParseGattServiceDataNetworkId(ReadOnlySpan<byte> serviceData,
+        out CompressedNetworkId networkId)
     {
         networkId = CompressedNetworkId.Empty;
         if (serviceData.Length < GattServiceDataNetworkIdLength)

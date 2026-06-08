@@ -22,13 +22,11 @@ public sealed class BluetoothPresencePingTargetsProvider(AuthService auth, ChatR
             var list = await chats.ListChatsAsync(user.Id).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             foreach (var chat in list)
+            foreach (var ep in PeerTransportEndpoints.Parse(chat))
             {
-                foreach (var ep in PeerTransportEndpoints.Parse(chat))
-                {
-                    if (ep.Kind != TransportKind.Bluetooth || ep.Data.Length != BluetoothTransportAddress.MacLength)
-                        continue;
-                    dedup[Convert.ToBase64String(ep.Data)] = ep;
-                }
+                if (ep.Kind != TransportKind.Bluetooth || ep.Data.Length != BluetoothTransportAddress.MacLength)
+                    continue;
+                dedup[Convert.ToBase64String(ep.Data)] = ep;
             }
         }
 
