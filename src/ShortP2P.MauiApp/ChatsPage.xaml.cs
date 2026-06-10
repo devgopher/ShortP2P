@@ -74,6 +74,12 @@ public partial class ChatsPage : ContentPage
         await Navigation.PushAsync(page).ConfigureAwait(true);
     }
 
+    private async void OnLogsClicked(object? sender, EventArgs e)
+    {
+        var page = MauiProgram.Services.GetRequiredService<LogsPage>();
+        await Navigation.PushAsync(page).ConfigureAwait(true);
+    }
+
     protected override async void OnAppearing()
     {
         base.OnAppearing();

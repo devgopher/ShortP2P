@@ -104,6 +104,7 @@ public static class MauiProgram
         builder.Services.AddTransient<MyQrPage>();
         builder.Services.AddTransient<RoutingSettingsPage>();
         builder.Services.AddTransient<LanScanPage>();
+        builder.Services.AddTransient<LogsPage>();
 
 #if DEBUG
         builder.Logging.AddDebug();
