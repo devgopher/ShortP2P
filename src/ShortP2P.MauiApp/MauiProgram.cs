@@ -1,10 +1,22 @@
+using Microsoft.Extensions.Logging;
+using NLog;
+using NLog.Config;
+using NLog.Extensions.Logging;
+using NLog.Targets;
+using NLog.Targets.Wrappers;
 using ShortP2P.Auth;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Discovery;
+using ShortP2P.Discovery.Ble;
+using ShortP2P.Discovery.Pings;
+using ShortP2P.Discovery.RouteTables;
 using ShortP2P.MauiApp.Services;
+using ShortP2P.Transport;
+using ShortP2P.Transport.Abstractions;
 #if ANDROID
 using ShortP2P.Transport.Bluetooth.Android;
 #endif

@@ -1,3 +1,6 @@
+using System.Collections.ObjectModel;
+using System.Globalization;
+using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
 using ShortP2P.Client;
 using ShortP2P.Client.ChatMedia;

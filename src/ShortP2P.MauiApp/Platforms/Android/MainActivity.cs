@@ -1,4 +1,8 @@
-﻿namespace ShortP2P.MauiApp;
+﻿using Android.App;
+using Android.Content;
+using Android.Content.PM;
+
+namespace ShortP2P.MauiApp;
 
 [Activity(Theme = "@style/Maui.SplashTheme", MainLauncher = true, LaunchMode = LaunchMode.SingleTop,
     ConfigurationChanges = ConfigChanges.ScreenSize | ConfigChanges.Orientation | ConfigChanges.UiMode |

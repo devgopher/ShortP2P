@@ -1,6 +1,8 @@
+using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Qr;
+using ShortP2P.Crypto;
 
 namespace ShortP2P.MauiApp;
 

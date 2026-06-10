@@ -1,3 +1,10 @@
+using System.Collections.Concurrent;
+using System.Threading.Channels;
+using Android.Bluetooth;
+using Android.Bluetooth.LE;
+using Android.Content;
+using Android.OS;
+using Java.Util;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport.Bluetooth.Android;
@@ -270,7 +277,7 @@ public sealed class AndroidBluetoothTransport : ITransport
     private IReadOnlyList<TransportAddress> GetBondedDeviceAddresses()
     {
         var list = new List<TransportAddress>();
-        var bonded = _adapter?.GetBondedDevices();
+        var bonded = _adapter?.BondedDevices;
         if (bonded == null)
             return list;
         foreach (var device in bonded)

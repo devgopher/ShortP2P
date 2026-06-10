@@ -1,6 +1,8 @@
+using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Transport;
 
 namespace ShortP2P.MauiApp;
 

@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace ShortP2P.MauiApp;
 
 public partial class App : Application

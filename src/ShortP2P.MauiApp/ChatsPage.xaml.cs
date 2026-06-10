@@ -1,9 +1,14 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
+using ShortP2P.Crypto;
+using ShortP2P.Transport;
 
 namespace ShortP2P.MauiApp;
 

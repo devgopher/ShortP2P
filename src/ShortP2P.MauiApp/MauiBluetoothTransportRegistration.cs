@@ -1,5 +1,9 @@
+using Microsoft.Extensions.Logging;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Bluetooth;
+using ShortP2P.Client.Routing;
+using ShortP2P.Discovery.Ble;
+using ShortP2P.Transport.Abstractions;
 #if ANDROID
 using ShortP2P.Transport.Bluetooth.Android;
 #endif
