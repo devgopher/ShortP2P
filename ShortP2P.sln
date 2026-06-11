@@ -37,6 +37,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShortP2P.Transport.Bluetoot
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShortP2P.Transport.Tests", "src\ShortP2P.Transport.Tests\ShortP2P.Transport.Tests.csproj", "{C9E0F0BE-50B7-487C-BF6A-2F6293E76717}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShortP2P.Transport.WifiDirect.Windows", "src\ShortP2P.Transport.WifiDirect.Windows\ShortP2P.Transport.WifiDirect.Windows.csproj", "{C55FE37C-7FED-4C4A-BCD2-24463FF53B02}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -239,6 +241,18 @@ Global
 		{C9E0F0BE-50B7-487C-BF6A-2F6293E76717}.Release|x64.Build.0 = Release|Any CPU
 		{C9E0F0BE-50B7-487C-BF6A-2F6293E76717}.Release|x86.ActiveCfg = Release|Any CPU
 		{C9E0F0BE-50B7-487C-BF6A-2F6293E76717}.Release|x86.Build.0 = Release|Any CPU
+		{C55FE37C-7FED-4C4A-BCD2-24463FF53B02}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C55FE37C-7FED-4C4A-BCD2-24463FF53B02}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C55FE37C-7FED-4C4A-BCD2-24463FF53B02}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C55FE37C-7FED-4C4A-BCD2-24463FF53B02}.Debug|x64.Build.0 = Debug|Any CPU
+		{C55FE37C-7FED-4C4A-BCD2-24463FF53B02}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C55FE37C-7FED-4C4A-BCD2-24463FF53B02}.Debug|x86.Build.0 = Debug|Any CPU
+		{C55FE37C-7FED-4C4A-BCD2-24463FF53B02}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C55FE37C-7FED-4C4A-BCD2-24463FF53B02}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C55FE37C-7FED-4C4A-BCD2-24463FF53B02}.Release|x64.ActiveCfg = Release|Any CPU
+		{C55FE37C-7FED-4C4A-BCD2-24463FF53B02}.Release|x64.Build.0 = Release|Any CPU
+		{C55FE37C-7FED-4C4A-BCD2-24463FF53B02}.Release|x86.ActiveCfg = Release|Any CPU
+		{C55FE37C-7FED-4C4A-BCD2-24463FF53B02}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -260,5 +274,6 @@ Global
 		{B44188C9-E0CA-4DF4-9D38-B4D99F77A652} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{01D29679-2DA1-4E08-8DAF-1B92D90C5EB6} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{C9E0F0BE-50B7-487C-BF6A-2F6293E76717} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{C55FE37C-7FED-4C4A-BCD2-24463FF53B02} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal
