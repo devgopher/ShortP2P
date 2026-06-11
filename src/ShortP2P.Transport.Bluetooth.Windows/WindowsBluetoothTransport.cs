@@ -180,9 +180,12 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         {
             var transportAddress =
                 new TransportAddress(TransportKind.Bluetooth, BluetoothMacAddress.FromBluetoothAddress(addr));
+
+            var testBuffer = new byte[5];
+            Random.Shared.NextBytes(testBuffer);
             
             // Делимся своим networkId
-            _ = SendAsync(new ReadOnlyMemory<byte>(), transportAddress);  // TODO: сообщение
+            _ = SendAsync(testBuffer, transportAddress);  // TODO: сообщение
         }
     }
 }
