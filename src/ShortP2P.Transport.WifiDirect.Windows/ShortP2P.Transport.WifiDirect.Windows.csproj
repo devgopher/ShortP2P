@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <RootNamespace>ShortP2P.Transport.WifiDirect.Windows</RootNamespace>
+        <Description>Wi-Fi Direct discovery transport for Windows via WinRT.</Description>
+        <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+        <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\ShortP2P.Transport.Abstractions\ShortP2P.Transport.Abstractions.csproj"/>
+        <ProjectReference Include="..\ShortP2P.Transport\ShortP2P.Transport.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="$(MicrosoftExtensionsVersion)"/>
+    </ItemGroup>
+
+</Project>
