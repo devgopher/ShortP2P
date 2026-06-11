@@ -35,6 +35,7 @@
         <ProjectReference Include="..\ShortP2P.Auth\ShortP2P.Auth.csproj"/>
         <ProjectReference Include="..\ShortP2P.Client\ShortP2P.Client.csproj"/>
         <ProjectReference Include="..\ShortP2P.Transport.Bluetooth.Windows\ShortP2P.Transport.Bluetooth.Windows.csproj"/>
+        <ProjectReference Include="..\ShortP2P.Transport.WifiDirect.Windows\ShortP2P.Transport.WifiDirect.Windows.csproj"/>
     </ItemGroup>
 
 </Project>

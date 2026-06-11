@@ -29,19 +29,26 @@ public static class LanChatStartFromDiscovery
 
         if (peer.TransportKind != TransportKind.Udp)
         {
-            if (peer.TransportKind != TransportKind.Bluetooth)
-                return LanChatStartResult.Failed("Неподдерживаемый транспорт пира.");
-            if (inviteListenerCoordinator?.BluetoothTransport == null)
+            if (peer.TransportKind == TransportKind.Bluetooth &&
+                inviteListenerCoordinator?.BluetoothTransport == null)
                 return LanChatStartResult.Failed("Bluetooth transport is unavailable.");
+            if (peer.TransportKind == TransportKind.WifiDirect &&
+                inviteListenerCoordinator?.WifiDirectTransport == null)
+                return LanChatStartResult.Failed("Wi-Fi Direct transport is unavailable.");
+            if (peer.TransportKind is not TransportKind.Bluetooth and not TransportKind.WifiDirect)
+                return LanChatStartResult.Failed("Неподдерживаемый транспорт пира.");
         }
 
         var idShort = peer.NetworkId.ToShortString();
         var existing = await chats.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);
         if (existing != null)
         {
-            var seenIp = peer.TransportKind == TransportKind.Bluetooth
-                ? BluetoothTransportAddress.ToMacString(peer.SourceAddress.Data)
-                : UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address.ToString();
+            var seenIp = peer.TransportKind switch
+            {
+                TransportKind.Bluetooth => BluetoothTransportAddress.ToMacString(peer.SourceAddress.Data),
+                TransportKind.WifiDirect => WifiDirectTransportAddress.ToAddressString(peer.SourceAddress.Data),
+                _ => UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address.ToString()
+            };
             var mergedHost = PeerHostList.WithPrimaryFirst(existing.PeerHost, seenIp);
             if (!string.Equals(mergedHost, existing.PeerHost, StringComparison.Ordinal))
             {
@@ -55,11 +62,13 @@ public static class LanChatStartFromDiscovery
             return LanChatStartResult.AlreadyExists(existing);
         }
 
-        var dest = peer.TransportKind == TransportKind.Bluetooth
-            ? peer.SourceAddress
-            : UdpTransportAddress.FromIPEndPoint(
+        var dest = peer.TransportKind switch
+        {
+            TransportKind.Bluetooth or TransportKind.WifiDirect => peer.SourceAddress,
+            _ => UdpTransportAddress.FromIPEndPoint(
                 new IPEndPoint(UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address,
-                    ChatInviteCodec.InviteUdpPort));
+                    ChatInviteCodec.InviteUdpPort))
+        };
 
         var host = InviteHostsBuilder.BuildCommaSeparated(
             inviteListenerCoordinator?.Settings,
@@ -95,11 +104,17 @@ public static class LanChatStartFromDiscovery
                     }
                 }
             }
-            else
+            else if (peer.TransportKind == TransportKind.Bluetooth)
             {
                 var bt = inviteListenerCoordinator!.BluetoothTransport!;
                 await bt.StartAsync(cancellationToken).ConfigureAwait(false);
                 await bt.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                var wfd = inviteListenerCoordinator!.WifiDirectTransport!;
+                await wfd.StartAsync(cancellationToken).ConfigureAwait(false);
+                await wfd.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
             }
         }
         else
@@ -115,6 +130,12 @@ public static class LanChatStartFromDiscovery
                     var bt = inviteListenerCoordinator!.BluetoothTransport!;
                     await bt.StartAsync(cancellationToken).ConfigureAwait(false);
                     await bt.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
+                }
+                else if (peer.TransportKind == TransportKind.WifiDirect)
+                {
+                    var wfd = inviteListenerCoordinator!.WifiDirectTransport!;
+                    await wfd.StartAsync(cancellationToken).ConfigureAwait(false);
+                    await wfd.SendAsync(invite, dest, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {

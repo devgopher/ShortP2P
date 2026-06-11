@@ -3,6 +3,7 @@ using System.Net;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Bluetooth;
+using ShortP2P.Client.WifiDirect;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Qr;
@@ -23,6 +24,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 {
     private readonly AuthService _auth;
     private readonly IBluetoothTransportProvider? _bluetooth;
+    private readonly IWifiDirectTransportProvider? _wifiDirect;
     private readonly ChatMediaOptions _chatMedia;
     private readonly ChatRepository _chats;
     private readonly P2pCryptoSessionCache _cryptoSessionCache;
@@ -47,17 +49,21 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private Task? _inviteReceiveTask;
     private UdpTransport? _inviteUdp;
     private CancellationTokenSource? _presencePingWorkCts;
+    private CancellationTokenSource? _wifiDirectInboundCts;
+    private Task? _wifiDirectInboundTask;
 
     public UserP2pRuntime(P2pRoutingSettingsStore store, AuthService auth, ChatRepository chats,
         ChatMediaOptions chatMedia, IUdpTransportFactory udpTransportFactory, ChatSessionCache sessionCache,
         P2pCryptoSessionCache cryptoSessionCache,
         IBluetoothTransportProvider? bluetooth = null,
+        IWifiDirectTransportProvider? wifiDirect = null,
         IEnumerable<ITransport>? additionalDiscoveryTransports = null,
         IRouteTableSnapshotSource? routeTableSnapshotSource = null,
         IDiscoveryPingStore? discoveryPingStore = null,
         IBleShortP2PPeripheralScanner? blePeripheralScanner = null,
         IBleDiscoveredPeerStore? bleDiscoveredPeerStore = null,
-        IBluetoothPresencePingTargetsProvider? bluetoothPresencePingTargetsProvider = null)
+        IBluetoothPresencePingTargetsProvider? bluetoothPresencePingTargetsProvider = null,
+        IWifiDirectPresencePingTargetsProvider? wifiDirectPresencePingTargetsProvider = null)
     {
         _store = store;
         _auth = auth;
@@ -67,9 +73,11 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         _sessionCache = sessionCache;
         _cryptoSessionCache = cryptoSessionCache;
         _bluetooth = bluetooth;
+        _wifiDirect = wifiDirect;
         LocalScan = new LocalNetworkScanner(Settings, udpTransportFactory, () => _bluetooth?.Current,
-            additionalDiscoveryTransports, routeTableSnapshotSource, discoveryPingStore, blePeripheralScanner,
-            bleDiscoveredPeerStore, bluetoothPresencePingTargetsProvider);
+            () => _wifiDirect?.Current, additionalDiscoveryTransports, routeTableSnapshotSource, discoveryPingStore,
+            blePeripheralScanner, bleDiscoveredPeerStore, bluetoothPresencePingTargetsProvider,
+            wifiDirectPresencePingTargetsProvider);
     }
 
     /// <summary>Глобальный invite-транспивер (порт 17502). Поднимается в <see cref="EnsureInviteListenerRunningAsync" />.</summary>
@@ -86,6 +94,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
     public P2pRoutingSettings Settings { get; } = new();
     public ITransport? BluetoothTransport => _bluetooth?.Current;
+    public ITransport? WifiDirectTransport => _wifiDirect?.Current;
 
     /// <summary>
     ///     Сканирование LAN: presence UDP 17501; wire discovery (gossip / маршруты)
@@ -252,6 +261,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         {
             TransportKind.Udp when Settings.EnableUdpTransport => DataUdp,
             TransportKind.Bluetooth when Settings.EnableBluetoothTransport => BluetoothTransport,
+            TransportKind.WifiDirect when Settings.EnableWifiDirectTransport => WifiDirectTransport,
             _ => null
         };
     }
@@ -408,16 +418,18 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     {
         try
         {
-            var udp = _inviteUdp;
-            if (udp == null)
-                return;
             if (IsOwnInviteDatagram(invite.RemoteAddress))
                 return;
 
             // Не проталкивать cancellationToken в TryAccept: при остановке слушателя иначе можно прервать AddChat по пути.
             await IncomingChatInviteHandler.TryAcceptAsync(invite.RawPayload, _auth, _chats,
-                async (payload, dest, _) => await udp.SendAsync(payload, dest, CancellationToken.None)
-                    .ConfigureAwait(false),
+                async (payload, dest, _) =>
+                {
+                    var transport = ResolveInviteReplyTransport(dest);
+                    if (transport == null)
+                        return;
+                    await transport.SendAsync(payload, dest, CancellationToken.None).ConfigureAwait(false);
+                },
                 invite.RemoteAddress,
                 Settings,
                 Settings.EnableBluetoothTransport ? Settings.SelectedBluetoothAdapterMac : null,
@@ -541,6 +553,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         Settings.LinkTechnology = persisted.LinkTechnology;
         Settings.EnableUdpTransport = persisted.EnableUdpTransport;
         Settings.EnableBluetoothTransport = persisted.EnableBluetoothTransport;
+        Settings.EnableWifiDirectTransport = persisted.EnableWifiDirectTransport;
         Settings.SelectedBluetoothAdapterDeviceId = persisted.SelectedBluetoothAdapterDeviceId;
         Settings.SelectedBluetoothAdapterMac = persisted.SelectedBluetoothAdapterMac;
         Settings.SuggestBluetoothPairing = persisted.SuggestBluetoothPairing;
@@ -548,6 +561,23 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         Settings.AdvertisedPeerCapabilities = persisted.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
         _bluetooth?.SetLocalNetworkId(CompressedNetworkId.FromShortString(user.NetworkIdShort));
         _bluetooth?.ApplySettings(Settings);
+        _wifiDirect?.SetLocalNetworkId(CompressedNetworkId.FromShortString(user.NetworkIdShort));
+        _wifiDirect?.ApplySettings(Settings);
+
+        var wifiDirect = WifiDirectTransport;
+        if (wifiDirect != null)
+            try
+            {
+                await wifiDirect.StartAsync(cancellationToken).ConfigureAwait(false);
+                _wifiDirectInboundCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                _wifiDirectInboundTask = Task.Run(
+                    () => WifiDirectInboundDemuxLoopAsync(wifiDirect, _wifiDirectInboundCts.Token),
+                    _wifiDirectInboundCts.Token);
+            }
+            catch
+            {
+                // wifi direct subsystem optional
+            }
 
         // Инвайты (отдельный UDP) должны работать даже если presence/LAN bind на Android не удался.
         await EnsureInviteListenerRunningAsync(user, cancellationToken).ConfigureAwait(false);
@@ -591,7 +621,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         var user = _auth.CurrentUser;
         if (user == null)
             return;
-        if (peer.TransportKind is not TransportKind.Udp and not TransportKind.Bluetooth)
+        if (peer.TransportKind is not TransportKind.Udp and not TransportKind.Bluetooth
+            and not TransportKind.WifiDirect)
             return;
 
         var shortId = peer.NetworkId.ToShortString();
@@ -599,9 +630,13 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         if (chat == null)
             return;
 
-        var seenDirect = peer.TransportKind == TransportKind.Udp
-            ? UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address.ToString()
-            : BluetoothTransportAddress.ToMacString(peer.SourceAddress.Data);
+        var seenDirect = peer.TransportKind switch
+        {
+            TransportKind.Udp => UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address.ToString(),
+            TransportKind.Bluetooth => BluetoothTransportAddress.ToMacString(peer.SourceAddress.Data),
+            TransportKind.WifiDirect => WifiDirectTransportAddress.ToAddressString(peer.SourceAddress.Data),
+            _ => string.Empty
+        };
 
         await ApplyDiscoveryPingRouteAsync(chat, peer.TransportKind, seenDirect, cancellationToken)
             .ConfigureAwait(false);
@@ -726,6 +761,75 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 // ignore
             }
 
+        if (_wifiDirectInboundCts != null)
+            try
+            {
+                await _wifiDirectInboundCts.CancelAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore
+            }
+
+        if (_wifiDirectInboundTask != null)
+            try
+            {
+                await _wifiDirectInboundTask.ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore
+            }
+
+        _wifiDirectInboundCts?.Dispose();
+        _wifiDirectInboundCts = null;
+        _wifiDirectInboundTask = null;
+
+        var wifiDirect = WifiDirectTransport;
+        if (wifiDirect != null)
+            try
+            {
+                await wifiDirect.StopAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore
+            }
+
         await LocalScan.StopAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private ITransport? ResolveInviteReplyTransport(TransportAddress destination)
+    {
+        return destination.Kind switch
+        {
+            TransportKind.Udp => _inviteUdp,
+            TransportKind.Bluetooth when Settings.EnableBluetoothTransport => BluetoothTransport,
+            TransportKind.WifiDirect when Settings.EnableWifiDirectTransport => WifiDirectTransport,
+            _ => null
+        };
+    }
+
+    private async Task WifiDirectInboundDemuxLoopAsync(ITransport wifiDirect, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var msg in wifiDirect.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (msg.Payload.IsEmpty)
+                    continue;
+                var frame = msg.Payload.Span[0];
+                if (frame == 0x31 || frame is 0x40 or 0x41 or 0x42 or 0x43)
+                    LocalScan.DispatchWifiDirectInbound(msg);
+                else if (frame == 0x30)
+                    Invite?.HandleIncoming(msg);
+                else
+                    _dataPortMultiplexer?.HandleIncoming(msg);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // expected on stop
+        }
     }
 }

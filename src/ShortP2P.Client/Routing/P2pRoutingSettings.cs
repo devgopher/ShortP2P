@@ -27,6 +27,9 @@ public sealed class P2pRoutingSettings
     /// <summary>Разрешить Bluetooth-транспорт (передача и приём).</summary>
     public bool EnableBluetoothTransport { get; set; } = true;
 
+    /// <summary>Разрешить Wi-Fi Direct discovery (реклама и сканирование NetworkId).</summary>
+    public bool EnableWifiDirectTransport { get; set; } = true;
+
     /// <summary>
     ///     WinRT <c>DeviceInformation.Id</c> выбранного радио (пусто — системный адаптер по умолчанию).
     ///     Должен совпадать с адаптером, через который поднят GATT (см. Routing → перезапуск после смены).

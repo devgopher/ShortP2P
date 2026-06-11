@@ -62,6 +62,7 @@ public static class RouteInfrastructureServiceCollectionExtensions
         services.AddDbContext<RouteDbContext>(o => o.UseSqlite(dbPath));
         services.AddDbContextFactory<RouteDbContext>(o => o.UseSqlite(dbPath));
         services.AddSingleton<IRouteTableSnapshotSource, EfRouteTableSnapshotSource>();
+        services.AddSingleton<IPeerRouteWriter, EfPeerRouteWriter>();
         services.AddSingleton<IDiscoveryPingStore, InMemoryDiscoveryPingStore>();
         services.AddSingleton<IDiscoveryStrategy, GossipStrategy>();
         services.AddSingleton(_ =>

@@ -278,6 +278,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
             }
 
             if (from.Kind == TransportKind.Bluetooth) return true;
+            if (from.Kind == TransportKind.WifiDirect) return true;
 
             if (!string.IsNullOrEmpty(chat.RelayRouteBlob))
                 return true;
@@ -589,6 +590,13 @@ public sealed class ChatP2pSession : IAsyncDisposable
                 case TransportKind.Bluetooth when bluetoothTransport != null:
                     await bluetoothTransport.SendAsync(ping, addr, cancellationToken).ConfigureAwait(false);
                     break;
+                case TransportKind.WifiDirect:
+                {
+                    var wfd = _runtime.WifiDirectTransport;
+                    if (wfd != null)
+                        await wfd.SendAsync(ping, addr, cancellationToken).ConfigureAwait(false);
+                    break;
+                }
             }
         }
 
@@ -1371,6 +1379,14 @@ public sealed class ChatP2pSession : IAsyncDisposable
                 await bt.SendAsync(packet, destination, cancellationToken).ConfigureAwait(false);
                 return;
 
+            case TransportKind.WifiDirect:
+                if (!IsTransportEnabled(TransportKind.WifiDirect))
+                    throw new InvalidOperationException("Wi-Fi Direct транспорт отключён в настройках.");
+                var wfd = ResolveOutbound(destination)
+                          ?? throw new InvalidOperationException("Wi-Fi Direct транспорт недоступен.");
+                await wfd.SendAsync(packet, destination, cancellationToken).ConfigureAwait(false);
+                return;
+
             default:
                 throw new InvalidOperationException($"Транспорт {destination.Kind} не поддерживается для invite.");
         }
@@ -1435,6 +1451,8 @@ public sealed class ChatP2pSession : IAsyncDisposable
         {
             TransportKind.Udp when IsTransportEnabled(TransportKind.Udp) => _runtime.DataUdp,
             TransportKind.Bluetooth when IsTransportEnabled(TransportKind.Bluetooth) => bluetoothTransport,
+            TransportKind.WifiDirect when IsTransportEnabled(TransportKind.WifiDirect) =>
+                _runtime.WifiDirectTransport,
             _ => null
         };
     }
@@ -1928,6 +1946,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
         {
             TransportKind.Udp => routingSettings?.EnableUdpTransport ?? true,
             TransportKind.Bluetooth => routingSettings?.EnableBluetoothTransport ?? true,
+            TransportKind.WifiDirect => routingSettings?.EnableWifiDirectTransport ?? true,
             _ => false
         };
     }

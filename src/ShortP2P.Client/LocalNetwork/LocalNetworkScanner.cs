@@ -29,21 +29,25 @@ public sealed class LocalNetworkScanner(
     P2pRoutingSettings routingSettings,
     IUdpTransportFactory udpTransportFactory,
     Func<ITransport?>? getBluetoothTransport = null,
+    Func<ITransport?>? getWifiDirectTransport = null,
     IEnumerable<ITransport>? additionalDiscoveryTransports = null,
     IRouteTableSnapshotSource? routeTableSnapshotSource = null,
     IDiscoveryPingStore? discoveryPingStore = null,
     IBleShortP2PPeripheralScanner? blePeripheralScanner = null,
     IBleDiscoveredPeerStore? bleDiscoveredPeerStore = null,
-    IBluetoothPresencePingTargetsProvider? bluetoothPresencePingTargetsProvider = null) : IAsyncDisposable
+    IBluetoothPresencePingTargetsProvider? bluetoothPresencePingTargetsProvider = null,
+    IWifiDirectPresencePingTargetsProvider? wifiDirectPresencePingTargetsProvider = null) : IAsyncDisposable
 {
     /// <summary>Длительность приёма пингов при ручном сканировании по умолчанию.</summary>
     public static readonly TimeSpan DefaultScanListenDuration = TimeSpan.FromSeconds(45);
 
     private readonly IEnumerable<ITransport>? _additionalDiscoveryTransports = additionalDiscoveryTransports;
     private readonly ConcurrentDictionary<string, TransportAddress> _bluetoothTargets = new();
+    private readonly ConcurrentDictionary<string, TransportAddress> _wifiDirectTargets = new();
 
     private readonly ConcurrentDictionary<CompressedNetworkId, DiscoveredLocalPeer> _entries = new();
     private readonly Func<ITransport?>? _getBluetoothTransport = getBluetoothTransport;
+    private readonly Func<ITransport?>? _getWifiDirectTransport = getWifiDirectTransport;
     private readonly List<PresencePingCodec.Transceiver> _secondaryPingTransceivers = [];
     private readonly List<Task> _secondaryPresenceReceiveTasks = [];
     private readonly object _snapshotSync = new();
@@ -74,6 +78,10 @@ public sealed class LocalNetworkScanner(
     private Task? _staleLoop;
     public bool IsUdpListening => _presenceUdp != null;
     public bool IsBluetoothListening { get; private set; }
+    public bool IsWifiDirectListening { get; private set; }
+
+    private PresencePingCodec.Transceiver? _wifiDirectPingTransceiver;
+    private DiscoveryWireTransceiver? _wifiDirectDiscoveryTransceiver;
 
     /// <summary>Удалять пира из списка, если не было пинга дольше этого (несколько периодов рассылки).</summary>
     private TimeSpan DiscoveryStaleAfter =>
@@ -133,7 +141,7 @@ public sealed class LocalNetworkScanner(
         _localPeer = localPeer;
         _nextPublicIpv4PresenceLookupUtc = DateTimeOffset.MinValue;
         _secondaryPresenceTransports = BuildSecondaryPresenceTransports(_getBluetoothTransport?.Invoke(),
-            _additionalDiscoveryTransports);
+            _getWifiDirectTransport?.Invoke(), _additionalDiscoveryTransports);
         EnsurePublicIpv4InPresenceTargets();
         _presenceUdp = udpTransportFactory.Acquire(IPAddress.Any, PresencePingCodec.UdpPort, true);
         _discoveryWireUdp = udpTransportFactory.Acquire(IPAddress.Any,
@@ -147,6 +155,19 @@ public sealed class LocalNetworkScanner(
             await transport.StartAsync(cancellationToken).ConfigureAwait(false);
             if (transport.Kind == TransportKind.Bluetooth)
                 IsBluetoothListening = true;
+            if (transport.Kind == TransportKind.WifiDirect)
+                IsWifiDirectListening = true;
+        }
+
+        var wifiDirect = _getWifiDirectTransport?.Invoke();
+        if (wifiDirect != null)
+        {
+            _wifiDirectPingTransceiver = new PresencePingCodec.Transceiver(wifiDirect);
+            _wifiDirectPingTransceiver.GotData += OnPresencePingReceived;
+            await _wifiDirectPingTransceiver.StartAsync(token).ConfigureAwait(false);
+            _wifiDirectDiscoveryTransceiver = new DiscoveryWireTransceiver(wifiDirect);
+            _wifiDirectDiscoveryTransceiver.GotData += OnDiscoveryWireReceived;
+            await _wifiDirectDiscoveryTransceiver.StartAsync(token).ConfigureAwait(false);
         }
 
         _presencePingTransceiver = new PresencePingCodec.Transceiver(_presenceUdp);
@@ -163,6 +184,8 @@ public sealed class LocalNetworkScanner(
 
         foreach (var transport in _secondaryPresenceTransports)
         {
+            if (transport.Kind == TransportKind.WifiDirect)
+                continue;
             var tx = new PresencePingCodec.Transceiver(transport);
             tx.GotData += OnPresencePingReceived;
             await tx.StartAsync(token).ConfigureAwait(false);
@@ -315,6 +338,27 @@ public sealed class LocalNetworkScanner(
         _bluetoothTargets[Convert.ToBase64String(address.Data)] = address;
     }
 
+    public void RememberWifiDirectPeer(TransportAddress address)
+    {
+        if (address.Kind != TransportKind.WifiDirect || address.Data.Length == 0)
+            return;
+        if (!WifiDirectTransportAddress.TryParseAddress(address.Data, out _))
+            return;
+        _wifiDirectTargets[Convert.ToBase64String(address.Data)] = address;
+    }
+
+    /// <summary>Единая точка приёма кадров с Wi-Fi Direct (demux в UserP2pRuntime).</summary>
+    public void DispatchWifiDirectInbound(TransportReceiveMessage msg)
+    {
+        if (msg.Payload.IsEmpty)
+            return;
+        var frame = msg.Payload.Span[0];
+        if (frame == 0x31)
+            _wifiDirectPingTransceiver?.HandleIncoming(msg);
+        else if (frame is 0x40 or 0x41 or 0x42 or 0x43)
+            _wifiDirectDiscoveryTransceiver?.HandleIncoming(msg);
+    }
+
     /// <summary>
     ///     Запоминает IP-адрес пира, чтобы отправлять presence-пинги напрямую (в т.ч. для non-LAN адресов после Add/QR).
     /// </summary>
@@ -344,6 +388,7 @@ public sealed class LocalNetworkScanner(
         {
             TransportKind.Udp => routingSettings.EnableUdpTransport,
             TransportKind.Bluetooth => routingSettings.EnableBluetoothTransport,
+            TransportKind.WifiDirect => routingSettings.EnableWifiDirectTransport,
             _ => true
         };
     }
@@ -432,6 +477,16 @@ public sealed class LocalNetworkScanner(
                     CancellationToken.None);
             }
         }
+        else if (msg.RemoteAddress.Kind == TransportKind.WifiDirect)
+        {
+            RememberWifiDirectPeer(msg.RemoteAddress);
+            if (bleDiscoveredPeerStore != null)
+            {
+                var nick = string.IsNullOrWhiteSpace(msg.Nickname) ? "?" : msg.Nickname.Trim();
+                _ = bleDiscoveredPeerStore.RecordScanSeenAsync(msg.RemoteAddress,
+                    new BleAdScanResult { NetworkId = msg.PeerNetworkId });
+            }
+        }
 
         var peer = new DiscoveredLocalPeer(msg.PeerNetworkId, msg.Nickname, msg.RemoteAddress,
             msg.RemoteAddress.Kind, DateTimeOffset.UtcNow, msg.PeerDataUdpPort, msg.AdvertisedLink,
@@ -459,7 +514,7 @@ public sealed class LocalNetworkScanner(
     {
         if (Volatile.Read(ref _presencePingTransmitDepth) != 0)
             return;
-        if (!IsTransportEnabled(TransportKind.Udp))
+        if (!IsTransportEnabled(msg.RemoteAddress.Kind))
             return;
 
         var token = _cts?.Token ?? CancellationToken.None;
@@ -484,8 +539,8 @@ public sealed class LocalNetworkScanner(
     {
         try
         {
-            var wireUdp = _discoveryWireUdp;
-            if (wireUdp == null)
+            var replyTransport = GetDiscoveryWireReplyTransport(msg.RemoteAddress);
+            if (replyTransport == null)
                 return;
             var buf = msg.RawPayload.ToArray();
             switch (msg.Kind)
@@ -494,11 +549,11 @@ public sealed class LocalNetworkScanner(
                     TryHandleGossipAckAsDiscovery(buf, msg.RemoteAddress);
                     return;
                 case DiscoveryWireKind.GossipProbe:
-                    await TryReplyToGossipProbeAsync(wireUdp, buf, msg.RemoteAddress, cancellationToken)
+                    await TryReplyToGossipProbeAsync(replyTransport, buf, msg.RemoteAddress, cancellationToken)
                         .ConfigureAwait(false);
                     return;
                 case DiscoveryWireKind.RouteTableRequest:
-                    await TryReplyToRouteTableRequestAsync(wireUdp, buf, msg.RemoteAddress, cancellationToken)
+                    await TryReplyToRouteTableRequestAsync(replyTransport, buf, msg.RemoteAddress, cancellationToken)
                         .ConfigureAwait(false);
                     return;
                 case DiscoveryWireKind.RouteTableReply:
@@ -530,23 +585,34 @@ public sealed class LocalNetworkScanner(
         if (localPeer != null && responderId == localPeer.NetworkId)
             return true;
 
-        if (remote.Kind != TransportKind.Udp)
-            return true;
-
-        IPEndPoint remoteEp;
-        try
-        {
-            remoteEp = UdpTransportAddress.ToIPEndPoint(remote);
-        }
-        catch
-        {
-            return true;
-        }
-
-        var dataAddr = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(remoteEp.Address, dataPort));
         nick = string.IsNullOrWhiteSpace(nick) ? "?" : nick.Trim();
-        var peer = new DiscoveredLocalPeer(responderId, nick, dataAddr, TransportKind.Udp, DateTimeOffset.UtcNow,
-            dataPort);
+        DiscoveredLocalPeer peer;
+        if (remote.Kind == TransportKind.WifiDirect)
+        {
+            RememberWifiDirectPeer(remote);
+            peer = new DiscoveredLocalPeer(responderId, nick, remote, TransportKind.WifiDirect,
+                DateTimeOffset.UtcNow, dataPort);
+        }
+        else if (remote.Kind == TransportKind.Udp)
+        {
+            IPEndPoint remoteEp;
+            try
+            {
+                remoteEp = UdpTransportAddress.ToIPEndPoint(remote);
+            }
+            catch
+            {
+                return true;
+            }
+
+            var dataAddr = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(remoteEp.Address, dataPort));
+            peer = new DiscoveredLocalPeer(responderId, nick, dataAddr, TransportKind.Udp, DateTimeOffset.UtcNow,
+                dataPort);
+        }
+        else
+        {
+            return true;
+        }
         OnDiscoveryPingReceived(peer);
         DiscoveryPingReceived?.Invoke(this, new DiscoveryPingReceivedEventArgs(peer));
         return true;
@@ -760,7 +826,52 @@ public sealed class LocalNetworkScanner(
                     }
             }
 
-            foreach (var transport in _secondaryPresenceTransports.Where(t => t.Kind != TransportKind.Bluetooth))
+            var wfd = _secondaryPresenceTransports.FirstOrDefault(t => t.Kind == TransportKind.WifiDirect);
+            if (wfd != null && IsTransportEnabled(TransportKind.WifiDirect))
+            {
+                try
+                {
+                    if (wifiDirectPresencePingTargetsProvider != null)
+                    {
+                        var fromProvider = await wifiDirectPresencePingTargetsProvider
+                            .GetWifiDirectPingTargetsAsync(cancellationToken).ConfigureAwait(false);
+                        foreach (var addr in fromProvider)
+                            RememberWifiDirectPeer(addr);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                foreach (var target in _wifiDirectTargets.Values)
+                    try
+                    {
+                        await wfd.SendAsync(payload, target, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // peer offline
+                    }
+
+                if (_wifiDirectTargets.IsEmpty)
+                    try
+                    {
+                        await wfd.SendAsync(payload, new TransportAddress(TransportKind.WifiDirect, []),
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+            }
+
+            foreach (var transport in _secondaryPresenceTransports.Where(t =>
+                         t.Kind is not TransportKind.Bluetooth and not TransportKind.WifiDirect))
             {
                 if (!IsTransportEnabled(transport.Kind))
                     continue;
@@ -786,10 +897,20 @@ public sealed class LocalNetworkScanner(
     /// <summary>
     ///     Gossip-зонды на wire-порт: те же broadcast, что LAN, и unicast на известные внешние/внутренние IPv4.
     /// </summary>
+    private ITransport? GetDiscoveryWireReplyTransport(TransportAddress remote)
+    {
+        return remote.Kind switch
+        {
+            TransportKind.Udp => _discoveryWireUdp,
+            TransportKind.WifiDirect => _getWifiDirectTransport?.Invoke(),
+            _ => null
+        };
+    }
+
     private async Task SendGossipDiscoveryProbesAsync(PeerIdentity localPeer, CancellationToken cancellationToken)
     {
         var wireUdp = _discoveryWireUdp;
-        if (wireUdp == null || !IsTransportEnabled(TransportKind.Udp))
+        if (wireUdp == null && _getWifiDirectTransport?.Invoke() == null)
             return;
 
         long nonce;
@@ -801,6 +922,7 @@ public sealed class LocalNetworkScanner(
         RegisterGossipBroadcastNonce(nonce);
         var probe = GossipWireCodec.BuildProbe(nonce, localPeer.NetworkId, CompressedNetworkId.Empty);
 
+        if (wireUdp != null && IsTransportEnabled(TransportKind.Udp))
         foreach (var ep in LanBroadcastHelper.GetIpv4BroadcastEndpoints(GossipWireCodec.UdpPort))
             try
             {
@@ -812,6 +934,7 @@ public sealed class LocalNetworkScanner(
                 // один broadcast может быть недоступен
             }
 
+        if (wireUdp != null && IsTransportEnabled(TransportKind.Udp))
         foreach (var host in _udpPresenceTargets.Values)
             try
             {
@@ -826,6 +949,31 @@ public sealed class LocalNetworkScanner(
             {
                 // узел недоступен или фильтрация
             }
+
+        var wfd = _getWifiDirectTransport?.Invoke();
+        if (wfd != null && IsTransportEnabled(TransportKind.WifiDirect))
+        {
+            foreach (var target in _wifiDirectTargets.Values)
+                try
+                {
+                    await wfd.SendAsync(probe, target, cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // ignore
+                }
+
+            if (_wifiDirectTargets.IsEmpty)
+                try
+                {
+                    await wfd.SendAsync(probe, new TransportAddress(TransportKind.WifiDirect, []), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    // ignore
+                }
+        }
     }
 
     private static async Task<IReadOnlyList<TransportAddress>> TryGetPairedBluetoothAddressesAsync(
@@ -899,11 +1047,13 @@ public sealed class LocalNetworkScanner(
     }
 
     private static List<ITransport> BuildSecondaryPresenceTransports(ITransport? bluetoothTransport,
-        IEnumerable<ITransport>? additionalDiscoveryTransports)
+        ITransport? wifiDirectTransport, IEnumerable<ITransport>? additionalDiscoveryTransports)
     {
         var list = new List<ITransport>();
         if (bluetoothTransport != null && bluetoothTransport.Kind != TransportKind.Udp)
             list.Add(bluetoothTransport);
+        if (wifiDirectTransport != null && wifiDirectTransport.Kind != TransportKind.Udp)
+            list.Add(wifiDirectTransport);
         if (additionalDiscoveryTransports == null)
             return list;
 

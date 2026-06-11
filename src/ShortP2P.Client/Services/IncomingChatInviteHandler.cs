@@ -123,6 +123,8 @@ public static class IncomingChatInviteHandler
         {
             case TransportKind.Bluetooth:
                 return BluetoothTransportAddress.ToMacString(sourceAddress.Data);
+            case TransportKind.WifiDirect:
+                return WifiDirectTransportAddress.ToAddressString(sourceAddress.Data);
             case TransportKind.Udp:
             {
                 var seenIp = UdpTransportAddress.ToIPEndPoint(sourceAddress).Address.ToString();

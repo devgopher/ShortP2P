@@ -71,6 +71,7 @@
     <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
         <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.250909003"/>
         <ProjectReference Include="..\ShortP2P.Transport.Bluetooth.Windows\ShortP2P.Transport.Bluetooth.Windows.csproj"/>
+        <ProjectReference Include="..\ShortP2P.Transport.WifiDirect.Windows\ShortP2P.Transport.WifiDirect.Windows.csproj"/>
     </ItemGroup>
 
     <ItemGroup>

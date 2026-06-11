@@ -32,6 +32,7 @@ public sealed class MainChatsForm : Form
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly IServiceProvider _services;
     private readonly Label _udpTransportIndicator = new() { AutoSize = true };
+    private readonly Label _wifiDirectTransportIndicator = new() { AutoSize = true };
     private readonly HashSet<int> _unreadChatIds = [];
     private readonly ILogger<UserAction> _userActions;
     private int? _focusedChatId;
@@ -124,6 +125,8 @@ public sealed class MainChatsForm : Form
         transportIndicators.Controls.Add(_udpTransportIndicator);
         transportIndicators.Controls.Add(new Label { AutoSize = true, Text = "   " });
         transportIndicators.Controls.Add(_bluetoothTransportIndicator);
+        transportIndicators.Controls.Add(new Label { AutoSize = true, Text = "   " });
+        transportIndicators.Controls.Add(_wifiDirectTransportIndicator);
 
         _list.DisplayMember = nameof(ChatEntity.PeerNickname);
         _list.ValueMember = nameof(ChatEntity.Id);
@@ -578,6 +581,9 @@ public sealed class MainChatsForm : Form
         // if (_p2P.BluetoothTransport is WindowsBluetoothTransport wbt)
         //     btRunning = wbt.IsRunning;
         UpdateIndicator(_bluetoothTransportIndicator, "Bluetooth", _p2P.Settings.EnableBluetoothTransport, btRunning);
+        var wfdRunning = _p2P.LocalScan.IsWifiDirectListening;
+        UpdateIndicator(_wifiDirectTransportIndicator, "Wi-Fi Direct", _p2P.Settings.EnableWifiDirectTransport,
+            wfdRunning);
     }
 
     private static void UpdateIndicator(Label label, string name, bool enabled, bool available)

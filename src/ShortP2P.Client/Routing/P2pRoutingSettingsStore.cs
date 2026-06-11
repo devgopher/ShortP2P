@@ -12,6 +12,7 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
     private const string KLinkTechnology = "p2p_link_technology";
     private const string KEnableUdpTransport = "p2p_transport_udp_enabled";
     private const string KEnableBluetoothTransport = "p2p_transport_bluetooth_enabled";
+    private const string KEnableWifiDirectTransport = "p2p_transport_wifidirect_enabled";
     private const string KBluetoothAdapterDeviceId = "p2p_bluetooth_adapter_device_id";
     private const string KBluetoothAdapterMac = "p2p_bluetooth_adapter_mac";
     private const string KBluetoothPairingPrompt = "p2p_bluetooth_pairing_prompt";
@@ -38,6 +39,8 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
             s.EnableUdpTransport = udp;
         if (bool.TryParse(await _storage.GetAsync(KEnableBluetoothTransport).ConfigureAwait(false), out var bt))
             s.EnableBluetoothTransport = bt;
+        if (bool.TryParse(await _storage.GetAsync(KEnableWifiDirectTransport).ConfigureAwait(false), out var wfd))
+            s.EnableWifiDirectTransport = wfd;
         s.SelectedBluetoothAdapterDeviceId =
             NullIfWhiteSpace(await _storage.GetAsync(KBluetoothAdapterDeviceId).ConfigureAwait(false));
         s.SelectedBluetoothAdapterMac =
@@ -72,6 +75,8 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
         await _storage.SetAsync(KLinkTechnology, ((int)settings.LinkTechnology).ToString()).ConfigureAwait(false);
         await _storage.SetAsync(KEnableUdpTransport, settings.EnableUdpTransport.ToString()).ConfigureAwait(false);
         await _storage.SetAsync(KEnableBluetoothTransport, settings.EnableBluetoothTransport.ToString())
+            .ConfigureAwait(false);
+        await _storage.SetAsync(KEnableWifiDirectTransport, settings.EnableWifiDirectTransport.ToString())
             .ConfigureAwait(false);
         await _storage.SetAsync(KBluetoothAdapterDeviceId, settings.SelectedBluetoothAdapterDeviceId ?? string.Empty)
             .ConfigureAwait(false);

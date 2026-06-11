@@ -7,6 +7,7 @@ using NLog.Extensions.Logging;
 using ShortP2P.Auth;
 using ShortP2P.Client;
 using ShortP2P.Client.Bluetooth;
+using ShortP2P.Client.WifiDirect;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
@@ -46,12 +47,16 @@ internal static class Program
         services.AddSingleton<AuthService>();
         services.AddSingleton<ChatRepository>();
         services.AddSingleton<IBluetoothPresencePingTargetsProvider, BluetoothPresencePingTargetsProvider>();
+        services.AddSingleton<IWifiDirectPresencePingTargetsProvider, WifiDirectPresencePingTargetsProvider>();
         services.AddSingleton<IBleDiscoveredPeerStore, SqliteBleDiscoveredPeerStore>();
         services.AddSingleton<P2pRoutingSettingsStore>();
         services.AddSingleton<AppSettingsStore>();
         services.AddSingleton<BluetoothTransportRegistration>();
         services.AddSingleton<IBluetoothTransportProvider>(sp =>
             sp.GetRequiredService<BluetoothTransportRegistration>());
+        services.AddSingleton<WifiDirectTransportRegistration>();
+        services.AddSingleton<IWifiDirectTransportProvider>(sp =>
+            sp.GetRequiredService<WifiDirectTransportRegistration>());
         services.AddSingleton<IBluetoothRadioCatalog, WindowsBluetoothRadioCatalog>();
         services.AddSingleton<IBleShortP2PPeripheralScanner>(sp =>
             sp.GetRequiredService<BluetoothTransportRegistration>().PeripheralScanner);
@@ -67,12 +72,14 @@ internal static class Program
             sp.GetRequiredService<ChatSessionCache>(),
             sp.GetRequiredService<P2pCryptoSessionCache>(),
             sp.GetRequiredService<IBluetoothTransportProvider>(),
+            sp.GetRequiredService<IWifiDirectTransportProvider>(),
             null,
             sp.GetService<IRouteTableSnapshotSource>(),
             sp.GetService<IDiscoveryPingStore>(),
             sp.GetRequiredService<IBleShortP2PPeripheralScanner>(),
             sp.GetRequiredService<IBleDiscoveredPeerStore>(),
-            sp.GetRequiredService<IBluetoothPresencePingTargetsProvider>()));
+            sp.GetRequiredService<IBluetoothPresencePingTargetsProvider>(),
+            sp.GetRequiredService<IWifiDirectPresencePingTargetsProvider>()));
 
         services.AddTransient<LoginForm>();
         services.AddTransient<RegisterForm>();
@@ -89,6 +96,7 @@ internal static class Program
         var provider = host.Services;
         var routing = provider.GetRequiredService<P2pRoutingSettingsStore>().LoadAsync().GetAwaiter().GetResult();
         provider.GetRequiredService<BluetoothTransportRegistration>().ApplySettings(routing);
+        provider.GetRequiredService<WifiDirectTransportRegistration>().ApplySettings(routing);
         var hostLogger = provider.GetRequiredService<ILogger<WinFormsHost>>();
         var userActionLogger = provider.GetRequiredService<ILogger<UserAction>>();
         RegisterGlobalExceptionLogging(hostLogger);

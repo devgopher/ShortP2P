@@ -252,7 +252,6 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         if (create.Error != BluetoothError.Success || create.ServiceProvider == null)
             return;
         _bleServiceProvider = create.ServiceProvider;
-
         var rxParameters = new GattLocalCharacteristicParameters
         {
             CharacteristicProperties = GattCharacteristicProperties.Write
@@ -374,7 +373,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             BleWindowsAdvertisementLog.LogAdvertisementReceived(_logger, addr, macKey, args, scanResult);
             if (_bleAdvertisementDeviceCache.TryAdd(macKey, dev))
                 _logger?.LogInformation("BLE device cached from advertisement: {Mac}", macKey);
-            _ = TryOfferNetworkIdToPeerAsync(macKey, mac, dev);
+           // _ = TryOfferNetworkIdToPeerAsync(macKey, mac, dev);
         }
         catch
         {

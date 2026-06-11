@@ -32,6 +32,9 @@ public partial class ChatsPage : ContentPage
         _bluetoothCatalog = bluetoothCatalog;
         _logger = logger;
         ChatsCollection.ItemsSource = _chatRows;
+#if !WINDOWS
+        WifiDirectTransportIndicator.IsVisible = false;
+#endif
     }
 
     private void OnChatListChangedFromInvite(object? sender, EventArgs e)
@@ -136,6 +139,27 @@ public partial class ChatsPage : ContentPage
     private void OnPresenceRefreshTimerTick(object? sender, EventArgs e)
     {
         UpdatePeerOnlineFlags();
+        UpdateTransportIndicators();
+    }
+
+    private void UpdateTransportIndicators()
+    {
+        UdpTransportIndicator.Text = FormatTransportIndicator("UDP", _p2p.Settings.EnableUdpTransport,
+            _p2p.LocalScan.IsUdpListening);
+        var btRunning = _p2p.LocalScan.IsBluetoothListening;
+        BluetoothTransportIndicator.Text = FormatTransportIndicator("Bluetooth",
+            _p2p.Settings.EnableBluetoothTransport, btRunning);
+#if WINDOWS
+        WifiDirectTransportIndicator.Text = FormatTransportIndicator("Wi-Fi Direct",
+            _p2p.Settings.EnableWifiDirectTransport, _p2p.LocalScan.IsWifiDirectListening);
+#endif
+    }
+
+    private static string FormatTransportIndicator(string name, bool enabled, bool available)
+    {
+        if (!enabled)
+            return $"{name}: off";
+        return available ? $"{name}: on" : $"{name}: unavailable";
     }
 
     private async Task RefreshAsync()
@@ -156,6 +180,7 @@ public partial class ChatsPage : ContentPage
         _chatRows.Clear();
         foreach (var c in list)
             _chatRows.Add(new ChatListRowVm(c, _p2p.LocalScan.IsPeerSeenRecentlyOnLan(c.PeerNetworkIdShort)));
+        UpdateTransportIndicators();
     }
 
     private async void OnAddChatClicked(object? sender, EventArgs e)

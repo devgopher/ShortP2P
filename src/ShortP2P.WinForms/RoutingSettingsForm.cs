@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Bluetooth;
+using ShortP2P.Client.WifiDirect;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
 using ShortP2P.Transport;
@@ -29,10 +30,14 @@ internal sealed class RoutingSettingsForm : Form
 
     private readonly IBluetoothRadioCatalog _bluetoothCatalog;
     private readonly IBluetoothTransportProvider _bluetoothTransport;
+    private readonly IWifiDirectTransportProvider _wifiDirectTransport;
     private readonly NumericUpDown _delayMs = new() { Minimum = 0, Maximum = 120_000, Width = 100 };
 
     private readonly CheckBox _enableBluetoothTransport = new()
         { AutoSize = true, Text = "Bluetooth", Anchor = AnchorStyles.Left };
+
+    private readonly CheckBox _enableWifiDirectTransport = new()
+        { AutoSize = true, Text = "Wi-Fi Direct", Anchor = AnchorStyles.Left };
 
     private readonly CheckBox _enableUdpTransport = new() { AutoSize = true, Text = "UDP", Anchor = AnchorStyles.Left };
 
@@ -61,6 +66,7 @@ internal sealed class RoutingSettingsForm : Form
 
     public RoutingSettingsForm(P2pRoutingSettingsStore store, UserP2pRuntime runtime,
         IBluetoothRadioCatalog bluetoothCatalog, IBluetoothTransportProvider bluetoothTransport,
+        IWifiDirectTransportProvider wifiDirectTransport,
         ILogger<RoutingSettingsForm> logger,
         ILogger<UserAction> userActions)
     {
@@ -68,6 +74,7 @@ internal sealed class RoutingSettingsForm : Form
         _runtime = runtime;
         _bluetoothCatalog = bluetoothCatalog;
         _bluetoothTransport = bluetoothTransport;
+        _wifiDirectTransport = wifiDirectTransport;
         _logger = logger;
         _userActions = userActions;
         foreach (var p in LinkTechnologyPresetExtensions.AllPresets)
@@ -110,6 +117,7 @@ internal sealed class RoutingSettingsForm : Form
         };
         transportPanel.Controls.Add(_enableUdpTransport);
         transportPanel.Controls.Add(_enableBluetoothTransport);
+        transportPanel.Controls.Add(_enableWifiDirectTransport);
         Row(6, "Транспорт", transportPanel);
         Row(7, "Bluetooth-адаптер", _bluetoothAdapter);
         Row(8, "Bluetooth", _suggestBluetoothPairing);
@@ -182,6 +190,7 @@ internal sealed class RoutingSettingsForm : Form
         _linkTechnology.SelectedIndex = li >= 0 ? li : 0;
         _enableUdpTransport.Checked = s.EnableUdpTransport;
         _enableBluetoothTransport.Checked = s.EnableBluetoothTransport;
+        _enableWifiDirectTransport.Checked = s.EnableWifiDirectTransport;
         _suggestBluetoothPairing.Checked = s.SuggestBluetoothPairing;
         _trafficSavingEnabled = s.TrafficSavingEnabled;
         _advertisePeerSearch.Checked = s.AdvertisedPeerCapabilities.HasFlag(PresencePeerCapabilities.PeerSearch);
@@ -262,6 +271,7 @@ internal sealed class RoutingSettingsForm : Form
             LinkTechnology = LinkTechnologyPresetExtensions.AllPresets[li],
             EnableUdpTransport = _enableUdpTransport.Checked,
             EnableBluetoothTransport = _enableBluetoothTransport.Checked,
+            EnableWifiDirectTransport = _enableWifiDirectTransport.Checked,
             SuggestBluetoothPairing = _suggestBluetoothPairing.Checked,
             TrafficSavingEnabled = _trafficSavingEnabled,
             AdvertisedPeerCapabilities = cap
@@ -279,11 +289,13 @@ internal sealed class RoutingSettingsForm : Form
         _runtime.Settings.LinkTechnology = s.LinkTechnology;
         _runtime.Settings.EnableUdpTransport = s.EnableUdpTransport;
         _runtime.Settings.EnableBluetoothTransport = s.EnableBluetoothTransport;
+        _runtime.Settings.EnableWifiDirectTransport = s.EnableWifiDirectTransport;
         _runtime.Settings.SelectedBluetoothAdapterDeviceId = s.SelectedBluetoothAdapterDeviceId;
         _runtime.Settings.SelectedBluetoothAdapterMac = s.SelectedBluetoothAdapterMac;
         _runtime.Settings.SuggestBluetoothPairing = s.SuggestBluetoothPairing;
         _runtime.Settings.TrafficSavingEnabled = s.TrafficSavingEnabled;
         _runtime.Settings.AdvertisedPeerCapabilities = s.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
         _bluetoothTransport.ApplySettings(s);
+        _wifiDirectTransport.ApplySettings(s);
     }
 }

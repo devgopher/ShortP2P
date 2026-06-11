@@ -18,6 +18,11 @@
     <Grid RowDefinitions="Auto,*" Padding="12" RowSpacing="8">
         <VerticalStackLayout Grid.Row="0" Spacing="4">
             <Label x:Name="ProfileLabel" FontSize="12" TextColor="Gray" />
+            <HorizontalStackLayout x:Name="TransportIndicators" Spacing="16">
+                <Label x:Name="UdpTransportIndicator" FontSize="11" />
+                <Label x:Name="BluetoothTransportIndicator" FontSize="11" />
+                <Label x:Name="WifiDirectTransportIndicator" FontSize="11" />
+            </HorizontalStackLayout>
             <Label Text="P2P chats (UDP). Swipe left on a row and tap Delete to remove the chat on this device only."
                    FontSize="12" TextColor="Gray" />
         </VerticalStackLayout>
