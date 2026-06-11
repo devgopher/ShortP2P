@@ -92,9 +92,9 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
             ulong? localAddr = null;
             try
             {
-                localAddr = LocalAdapterBluetoothMac
-                    .TryGetAdapterAddressAsync(settings.SelectedBluetoothAdapterDeviceId)
-                    .GetAwaiter().GetResult();
+                // localAddr = LocalAdapterBluetoothMac
+                //     .TryGetAdapterAddressAsync(settings.SelectedBluetoothAdapterDeviceId)
+                //     .GetAwaiter().GetResult();
             }
             catch
             {

@@ -12,7 +12,7 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 public sealed class WindowsBluetoothLeShortP2PScanner(ILogger<WindowsBluetoothLeShortP2PScanner>? logger = null)
     : IBleShortP2PPeripheralScanner
 {
-    private readonly BleAdvertisementMergeCache _mergeCache = new(logger);
+    // private readonly BleAdvertisementMergeCache _mergeCache = new(logger);
 
     public async Task ScanAsync(TimeSpan duration, Action<TransportAddress, BleAdScanResult> onDeviceDiscovered,
         CancellationToken cancellationToken = default)
@@ -33,17 +33,17 @@ public sealed class WindowsBluetoothLeShortP2PScanner(ILogger<WindowsBluetoothLe
         var seen = new Dictionary<ulong, BleAdScanResult>();
         watcher.Received += (_, e) =>
         {
-            if (!BleWindowsAdvertisementHelper.IsShortP2P(e.Advertisement))
-                return;
-            var scanResult = _mergeCache.Observe(e.BluetoothAddress, e.Advertisement);
-            var hadEntry = seen.TryGetValue(e.BluetoothAddress, out var prev);
-            if (hadEntry && !BleWindowsAdvertisementHelper.IdentityImproved(prev, scanResult))
-                return;
-            seen[e.BluetoothAddress] = scanResult;
-            var mac = BluetoothMacAddress.FromBluetoothAddress(e.BluetoothAddress);
-            var macKey = BluetoothTransportAddress.ToMacString(mac);
-            BleWindowsAdvertisementLog.LogScanDiscovery(logger, macKey, scanResult, !hadEntry);
-            onDeviceDiscovered(BluetoothTransportAddress.FromMac(mac), scanResult);
+            // if (!BleWindowsAdvertisementHelper.IsShortP2P(e.Advertisement))
+            //     return;
+            // var scanResult = _mergeCache.Observe(e.BluetoothAddress, e.Advertisement);
+            // var hadEntry = seen.TryGetValue(e.BluetoothAddress, out var prev);
+            // if (hadEntry && !BleWindowsAdvertisementHelper.IdentityImproved(prev, scanResult))
+            //     return;
+            // seen[e.BluetoothAddress] = scanResult;
+            // var mac = BluetoothMacAddress.FromBluetoothAddress(e.BluetoothAddress);
+            // var macKey = BluetoothTransportAddress.ToMacString(mac);
+            // BleWindowsAdvertisementLog.LogScanDiscovery(logger, macKey, scanResult, !hadEntry);
+            // onDeviceDiscovered(BluetoothTransportAddress.FromMac(mac), scanResult);
         };
 
         try

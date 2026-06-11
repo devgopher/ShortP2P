@@ -1281,8 +1281,8 @@ public sealed class ChatForm : Form
 
     private bool HandleBluetoothUnavailable(Exception ex)
     {
-        if (!WindowsBluetoothTransport.IsUnavailableError(ex))
-            return false;
+        // if (!WindowsBluetoothTransport.IsUnavailableError(ex))
+        //     return false;
 
         _userActions.LogInformation("Chat {Peer}: bluetooth unavailable ({Message})", _chat.PeerNickname, ex.Message);
         if (!_p2PRuntime.Settings.SuggestBluetoothPairing || _pairingPromptShown)
