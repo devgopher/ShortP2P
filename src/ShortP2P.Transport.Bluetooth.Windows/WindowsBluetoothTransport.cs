@@ -24,7 +24,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private bool _isStarted;
     private readonly Dictionary<string, BluetoothLEAdvertisement> _advertisements = new(5);
     private GattLocalCharacteristic? _bleRxCharacteristic;
-    
+
     public ValueTask DisposeAsync()
     {
         throw new NotImplementedException();
@@ -158,15 +158,23 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         if (rx == null)
             return;
 
-        var txResult = await service.GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerTxCharacteristicUuid)
-            .AsTask(cancellationToken)
-            .ConfigureAwait(false);
         var writer = new DataWriter();
         writer.WriteBytes(payload.ToArray());
         var status = await rx.WriteValueAsync(writer.DetachBuffer(), GattWriteOption.WriteWithoutResponse).AsTask(cancellationToken)
             .ConfigureAwait(false);
         if (status != GattCommunicationStatus.Success)
             throw new IOException("BLE write failed.");
+    }
+
+    public byte[] MakeNetworkIdPacket(byte[] data)
+    {
+        var prefix = new byte[] { 0x33, 0x55 };
+        byte[] result = new byte[prefix.Length + data.Length]; 
+
+        prefix.CopyTo(result, 0);
+        data.CopyTo(result, prefix.Length);
+        
+        return result;
     }
     
     private void OnAdvertisementReceived(BluetoothLEAdvertisementWatcher sender,
@@ -181,11 +189,13 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             var transportAddress =
                 new TransportAddress(TransportKind.Bluetooth, BluetoothMacAddress.FromBluetoothAddress(addr));
 
-            var testBuffer = new byte[5];
-            Random.Shared.NextBytes(testBuffer);
+            if (options.LocalNetworkId == null)
+                return;
+
+            var networkIdPacket = MakeNetworkIdPacket(options.LocalNetworkId?.ToWireBytes()); 
             
             // Делимся своим networkId
-            _ = SendAsync(testBuffer, transportAddress);  // TODO: сообщение
+            _ = SendAsync(networkIdPacket, transportAddress);  // TODO: сообщение
         }
     }
 }
