@@ -291,7 +291,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         {
             var watcher = new BluetoothLEAdvertisementWatcher
             {
-                ScanningMode = BluetoothLEScanningMode.Active
+                ScanningMode = BluetoothLEScanningMode.Passive
             };
             watcher.Received += OnBleShortP2PAdvertisementReceived;
             watcher.Start();
