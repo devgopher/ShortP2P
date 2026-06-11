@@ -24,6 +24,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private bool _isStarted;
     private readonly Dictionary<string, BluetoothLEAdvertisement> _advertisements = new(5);
     private GattLocalCharacteristic? _bleRxCharacteristic;
+    private const int DefaultChannelCapacity = 64;
 
     public ValueTask DisposeAsync()
     {
@@ -31,7 +32,15 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     }
 
     public TransportKind Kind => TransportKind.Bluetooth;
-    public ChannelReader<TransportReceiveMessage> Inbound { get; }
+    public ChannelReader<TransportReceiveMessage> Inbound => Channel.Reader;
+
+    private static Channel<TransportReceiveMessage> Channel => System.Threading.Channels.Channel.CreateBounded<TransportReceiveMessage>(new BoundedChannelOptions(DefaultChannelCapacity)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest,
+            SingleReader = true,
+            SingleWriter = false
+        });
+
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
         var create = await GattServiceProvider.CreateAsync(BleShortP2PGattProtocol.ServiceUuid).AsTask(cancellationToken)
@@ -102,7 +111,15 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             // }
             //
             // var remote = await ResolveBleRemoteAddressAsync(args.Session).ConfigureAwait(false);
-            // await _inbound.Writer.WriteAsync(new TransportReceiveMessage(data, remote)).ConfigureAwait(false);
+            
+            var device = await BluetoothLEDevice.FromIdAsync(args.Session.DeviceId.Id);
+
+            if (device == null)
+                return;
+            
+            var addr = new TransportAddress(TransportKind.Bluetooth, BluetoothMacAddress.FromBluetoothAddress(device.BluetoothAddress));
+            
+            await Channel.Writer.WriteAsync(new TransportReceiveMessage(data, addr)).ConfigureAwait(false);
         }
         catch
         {
