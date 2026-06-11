@@ -44,7 +44,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
     private volatile bool _discoveryHooked;
     private CancellationTokenSource? _inviteCts;
-    private Task? _inviteReceiveTask;
+    private readonly List<Task> _inviteReceiveTasks = [];
     private UdpTransport? _inviteUdp;
     private CancellationTokenSource? _presencePingWorkCts;
 
@@ -181,8 +181,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             Invite = new InviteTransceiver(_inviteUdp);
             Invite.GotData += OnInviteReceived;
             await Invite.StartAsync(_inviteCts.Token).ConfigureAwait(false);
-            _inviteReceiveTask = Task.Run(() => InviteReceiveLoopAsync(_inviteUdp, Invite, _inviteCts.Token),
-                _inviteCts.Token);
+            _inviteReceiveTasks.AddRange(Task.Run(() => InviteReceiveLoopAsync(_inviteUdp, Invite, _inviteCts.Token), _inviteCts.Token),
+                Task.Run(() => InviteReceiveLoopAsync(_inviteUdp, Invite, _inviteCts.Token), _inviteCts.Token));
         }
         catch
         {
@@ -498,18 +498,18 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             Invite = null;
         }
 
-        if (_inviteReceiveTask != null)
+        if (_inviteReceiveTasks != null)
         {
             try
             {
-                await _inviteReceiveTask.ConfigureAwait(false);
+                await Task.WhenAll(_inviteReceiveTasks).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 // ignore
             }
 
-            _inviteReceiveTask = null;
+            _inviteReceiveTasks.Clear();
         }
 
         if (_inviteUdp != null)

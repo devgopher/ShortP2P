@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.Versioning;
+using System.Text;
 using System.Threading.Channels;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Advertisement;
@@ -17,14 +18,32 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 ///     и входящие записи через локальный GATT-сервер.
 /// </summary>
 [SupportedOSPlatform("windows10.0.18362.0")]
-public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions options) : ITransport
+public sealed class WindowsBluetoothTransport : ITransport
 {
     private GattServiceProvider? _bleServiceProvider;
     private BluetoothLEAdvertisementWatcher? _advertisementWatcher;
     private bool _isStarted;
-    private readonly Dictionary<string, BluetoothLEAdvertisement> _advertisements = new(5);
+    private readonly Dictionary<string, BluetoothLEDevice> _devices = new(5);
     private GattLocalCharacteristic? _bleRxCharacteristic;
-    private const int DefaultChannelCapacity = 64;
+    private readonly WindowsBluetoothTransportOptions _options;
+
+    static WindowsBluetoothTransport()
+    {
+        Channel = System.Threading.Channels.Channel.CreateBounded<TransportReceiveMessage>(new BoundedChannelOptions(DefaultChannelCapacity)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest,
+            SingleReader = true,
+            SingleWriter = false
+        });
+    }
+    
+    /// <summary>
+    ///     Bluetooth Low Energy (GATT) на Windows через WinRT: исходящие записи в RX-характеристику пира
+    ///     и входящие записи через локальный GATT-сервер.
+    /// </summary>
+    public WindowsBluetoothTransport(WindowsBluetoothTransportOptions options) => _options = options;
+
+    private const int DefaultChannelCapacity = 1024;
 
     public ValueTask DisposeAsync()
     {
@@ -34,12 +53,7 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     public TransportKind Kind => TransportKind.Bluetooth;
     public ChannelReader<TransportReceiveMessage> Inbound => Channel.Reader;
 
-    private static Channel<TransportReceiveMessage> Channel => System.Threading.Channels.Channel.CreateBounded<TransportReceiveMessage>(new BoundedChannelOptions(DefaultChannelCapacity)
-        {
-            FullMode = BoundedChannelFullMode.DropOldest,
-            SingleReader = true,
-            SingleWriter = false
-        });
+    private static Channel<TransportReceiveMessage> Channel { get; }
 
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
@@ -103,21 +117,17 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             if (req.Option == GattWriteOption.WriteWithResponse)
                 req.Respond();
 
-            // if (BleShortP2PGattProtocol.TryParseNetworkIdAnnouncePacket(data, out var peerNetworkId))
-            // {
-            //     var addr = await ResolveBleRemoteAddressAsync(args.Session).ConfigureAwait(false);
-            //     HandlePeerNetworkIdAnnounce(addr, peerNetworkId);
-            //     return;
-            // }
-            //
-            // var remote = await ResolveBleRemoteAddressAsync(args.Session).ConfigureAwait(false);
-            
             var device = await BluetoothLEDevice.FromIdAsync(args.Session.DeviceId.Id);
 
             if (device == null)
                 return;
             
             var addr = new TransportAddress(TransportKind.Bluetooth, BluetoothMacAddress.FromBluetoothAddress(device.BluetoothAddress));
+
+            if (TryParseNetworkIdPacket(data, out var networkId))
+            {
+                _devices[networkId] = device;
+            }
             
             await Channel.Writer.WriteAsync(new TransportReceiveMessage(data, addr)).ConfigureAwait(false);
         }
@@ -183,15 +193,31 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             throw new IOException("BLE write failed.");
     }
 
-    public byte[] MakeNetworkIdPacket(byte[] data)
-    {
-        var prefix = new byte[] { 0x33, 0x55 };
-        byte[] result = new byte[prefix.Length + data.Length]; 
+    private static readonly byte[] Prefix = [0x33, 0x55];
 
-        prefix.CopyTo(result, 0);
-        data.CopyTo(result, prefix.Length);
+    private byte[] MakeNetworkIdPacket(byte[] data)
+    {
+        var result = new byte[Prefix.Length + data.Length]; 
+
+        Prefix.CopyTo(result, 0);
+        data.CopyTo(result, Prefix.Length);
         
         return result;
+    }
+    
+    public bool TryParseNetworkIdPacket(byte[] data, out string networkId)
+    {
+        if (data[..2] == Prefix)
+        {
+            var packetId = data[2..];
+            
+            networkId = Encoding.UTF8.GetString(packetId);
+            
+            return true;
+        }
+        
+        networkId = null;
+        return false;
     }
     
     private void OnAdvertisementReceived(BluetoothLEAdvertisementWatcher sender,
@@ -206,10 +232,10 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             var transportAddress =
                 new TransportAddress(TransportKind.Bluetooth, BluetoothMacAddress.FromBluetoothAddress(addr));
 
-            if (options.LocalNetworkId == null)
+            if (_options.LocalNetworkId == null)
                 return;
 
-            var networkIdPacket = MakeNetworkIdPacket(options.LocalNetworkId?.ToWireBytes()); 
+            var networkIdPacket = MakeNetworkIdPacket(_options.LocalNetworkId?.ToWireBytes()); 
             
             // Делимся своим networkId
             _ = SendAsync(networkIdPacket, transportAddress);  // TODO: сообщение

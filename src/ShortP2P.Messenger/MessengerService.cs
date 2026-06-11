@@ -61,7 +61,7 @@ public sealed class MessengerService(
     ///     Передаёт уже снятый с префикса 0x02 cipher payload в очередь обработки.
     ///     Вызывается из подписки на <c>MessageTransceiver.GotData</c>.
     /// </summary>
-    public bool TryAcceptCipher(TransportReceiveMessage message)
+    public bool TryAcceptCipher(  TransportReceiveMessage message)
     {
         var token = _cts?.Token ?? CancellationToken.None;
         if (token.IsCancellationRequested)
