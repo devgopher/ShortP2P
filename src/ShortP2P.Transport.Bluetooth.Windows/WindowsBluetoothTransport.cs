@@ -48,6 +48,17 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
     private BluetoothLEAdvertisementWatcher? _bleShortP2PAdvertisementWatcher;
     private GattLocalCharacteristic? _bleTxCharacteristic;
 
+    private readonly Channel<BluetoothLEAdvertisementReceivedEventArgs> _bleAdvertisementQueue =
+        Channel.CreateBounded<BluetoothLEAdvertisementReceivedEventArgs>(
+            new BoundedChannelOptions(DefaultChannelCapacity)
+            {
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleReader = false,
+                SingleWriter = false
+            });
+
+    private Task? _bleAdvertisementProcessorTask;
+
     private bool _disposed;
     private ulong _myBluetoothAddr;
     private volatile string? _myBluetoothMac;
@@ -136,6 +147,13 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
             }
 
         StopBleShortP2PAdvertisementWatcher();
+
+        _bleAdvertisementProcessorTask = null;
+        while (_bleAdvertisementQueue.Reader.TryRead(out _))
+        {
+            // drain pending advertisements
+        }
+
         _networkIdOfferedToMac.Clear();
 
         foreach (var kv in _bleOutboundPeerTx)
@@ -276,8 +294,9 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
                            ?? 0;
 
         StartBleGattProviderAdvertising(_bleServiceProvider, _options.GattDiscoverable, _logger);
+        _bleAdvertisementProcessorTask = Task.Run(() => ProcessBleAdvertisementQueueAsync(ct), ct);
         StartBleShortP2PAdvertisementWatcher();
-        _ = PushNetworkIdToPairedPeersAsync(ct);
+        //_ = PushNetworkIdToPairedPeersAsync(ct);
     }
 
     /// <summary>
@@ -304,12 +323,42 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         }
     }
 
-    private async void OnBleShortP2PAdvertisementReceived(BluetoothLEAdvertisementWatcher sender,
+    private void OnBleShortP2PAdvertisementReceived(BluetoothLEAdvertisementWatcher sender,
         BluetoothLEAdvertisementReceivedEventArgs args)
     {
         var addr = args.BluetoothAddress;
         if (addr == 0)
             return;
+
+        // Не блокируем поток watcher'а: складываем рекламу в очередь и разбираем её в фоновом потоке.
+        _bleAdvertisementQueue.Writer.TryWrite(args);
+    }
+
+    private async Task ProcessBleAdvertisementQueueAsync(CancellationToken ct)
+    {
+        var reader = _bleAdvertisementQueue.Reader;
+        try
+        {
+            while (await reader.WaitToReadAsync(ct).ConfigureAwait(false))
+                while (reader.TryRead(out var args))
+                    try
+                    {
+                        await HandleBleAdvertisementAsync(args).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // ignore single advertisement
+                    }
+        }
+        catch (OperationCanceledException)
+        {
+            // shutdown
+        }
+    }
+
+    private async Task HandleBleAdvertisementAsync(BluetoothLEAdvertisementReceivedEventArgs args)
+    {
+        var addr = args.BluetoothAddress;
         if (!BleWindowsAdvertisementHelper.IsShortP2P(args.Advertisement))
             return;
         var mac = BluetoothMacAddress.FromBluetoothAddress(addr);
@@ -319,7 +368,6 @@ public sealed class WindowsBluetoothTransport(WindowsBluetoothTransportOptions o
         try
         {
             var dev = await BluetoothLEDevice.FromBluetoothAddressAsync(addr).AsTask().ConfigureAwait(false);
-
             if (dev == null)
                 return;
             var scanResult = _bleAdvertisementMergeCache.Observe(addr, args.Advertisement);
