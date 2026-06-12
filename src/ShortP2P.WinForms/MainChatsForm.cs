@@ -394,7 +394,7 @@ public sealed class MainChatsForm : Form
     {
         _userActions.LogInformation("Chats: open add chat");
         using var dlg = _services.GetRequiredService<AddChatForm>();
-        if (dlg.ShowDialog(this) != DialogResult.OK)
+        if (await dlg.ShowDialogAsync(this) != DialogResult.OK)
         {
             _userActions.LogInformation("Chats: add chat cancelled");
             return;
@@ -539,7 +539,7 @@ public sealed class MainChatsForm : Form
 
         _focusedChatId = chat.Id;
         using var win = new ChatForm(chat, u, _auth, _chats, _p2P, _chatLog, _userActions, _chatMedia, _appSettings);
-        win.ShowDialog(this);
+        await win.ShowDialogAsync(this);
         _focusedChatId = null;
         await RefreshAsync().ConfigureAwait(true);
     }

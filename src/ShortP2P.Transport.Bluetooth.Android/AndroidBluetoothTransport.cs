@@ -164,7 +164,7 @@ public sealed class AndroidBluetoothTransport : ITransport
             {
                 try
                 {
-                    _runCts?.Cancel();
+                    await _runCts?.CancelAsync();
                 }
                 catch
                 {
@@ -336,7 +336,7 @@ public sealed class AndroidBluetoothTransport : ITransport
         _started = false;
         try
         {
-            _runCts?.Cancel();
+            await _runCts?.CancelAsync();
         }
         catch
         {

@@ -535,7 +535,7 @@ public sealed class MessengerService(
         }
         catch
         {
-            _cts.Cancel();
+            await _cts.CancelAsync();
         }
 
         _cts.Dispose();

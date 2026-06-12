@@ -521,7 +521,7 @@ public sealed class ChatForm : Form
         ClearDeliveryIssue();
         using var win = new CameraRecordForm(_appSettings.Current.TrafficSavingEnabled,
             _appSettings.Current.VideoInputDeviceId);
-        if (win.ShowDialog(this) != DialogResult.OK || win.Result == null)
+        if (await win.ShowDialogAsync(this) != DialogResult.OK || win.Result == null)
             return;
 
         try

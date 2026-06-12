@@ -54,7 +54,7 @@ public sealed class InfraredSerialTransport : ITransport
             }
             catch
             {
-                _cts.Cancel();
+                await _cts.CancelAsync();
             }
 
             _cts.Dispose();

@@ -769,7 +769,7 @@ public sealed class ChatP2pSession : IAsyncDisposable
         }
         catch
         {
-            _outboundCts.Cancel();
+            await _outboundCts.CancelAsync();
         }
 
         ResetOutboundCts();

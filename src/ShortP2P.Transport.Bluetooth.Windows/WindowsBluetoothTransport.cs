@@ -66,7 +66,8 @@ public sealed class WindowsBluetoothTransport : ITransport
         {
             CharacteristicProperties = GattCharacteristicProperties.Write
                                        | GattCharacteristicProperties.WriteWithoutResponse
-                                       | GattCharacteristicProperties.Notify,
+                                       | GattCharacteristicProperties.Notify
+                                       | GattCharacteristicProperties.Broadcast,
             WriteProtectionLevel = GattProtectionLevel.Plain,
             ReadProtectionLevel = GattProtectionLevel.Plain,
             UserDescription = "ShortP2P BLE RX"

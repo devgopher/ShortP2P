@@ -265,7 +265,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             }
             catch
             {
-                _dataCts.Cancel();
+                await _dataCts.CancelAsync();
             }
 
         if (_dataPortMultiplexer != null)
@@ -692,7 +692,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             _discoveryHooked = false;
             try
             {
-                _presencePingWorkCts?.Cancel();
+                await _presencePingWorkCts?.CancelAsync();
             }
             catch
             {
