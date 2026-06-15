@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Runtime.Versioning;
-using System.Text;
 using System.Threading.Channels;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Advertisement;
@@ -9,6 +8,7 @@ using Windows.Devices.Enumeration;
 using Windows.Storage.Streams;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Auth.Data;
+using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
@@ -23,7 +23,6 @@ public sealed class WindowsBluetoothTransport : ITransport
     private GattServiceProvider? _bleServiceProvider;
     private BluetoothLEAdvertisementWatcher? _advertisementWatcher;
     private bool _isStarted;
-    private readonly Dictionary<string, BluetoothLEDevice> _devices = new(5);
     private GattLocalCharacteristic? _bleRxCharacteristic;
     private readonly WindowsBluetoothTransportOptions _options;
 
@@ -125,11 +124,6 @@ public sealed class WindowsBluetoothTransport : ITransport
             
             var addr = new TransportAddress(TransportKind.Bluetooth, BluetoothMacAddress.FromBluetoothAddress(device.BluetoothAddress));
 
-            if (TryParseNetworkIdPacket(data, out var networkId))
-            {
-                _devices[networkId] = device;
-            }
-            
             await Channel.Writer.WriteAsync(new TransportReceiveMessage(data, addr)).ConfigureAwait(false);
         }
         catch
@@ -194,33 +188,6 @@ public sealed class WindowsBluetoothTransport : ITransport
             throw new IOException("BLE write failed.");
     }
 
-    private static readonly byte[] Prefix = [0x33, 0x55];
-
-    private byte[] MakeNetworkIdPacket(byte[] data)
-    {
-        var result = new byte[Prefix.Length + data.Length]; 
-
-        Prefix.CopyTo(result, 0);
-        data.CopyTo(result, Prefix.Length);
-        
-        return result;
-    }
-    
-    public bool TryParseNetworkIdPacket(byte[] data, out string networkId)
-    {
-        if (data[..2] == Prefix)
-        {
-            var packetId = data[2..];
-            
-            networkId = Encoding.UTF8.GetString(packetId);
-            
-            return true;
-        }
-        
-        networkId = null;
-        return false;
-    }
-    
     private void OnAdvertisementReceived(BluetoothLEAdvertisementWatcher sender,
         BluetoothLEAdvertisementReceivedEventArgs args)
     {
@@ -233,13 +200,13 @@ public sealed class WindowsBluetoothTransport : ITransport
             var transportAddress =
                 new TransportAddress(TransportKind.Bluetooth, BluetoothMacAddress.FromBluetoothAddress(addr));
 
-            if (_options.LocalNetworkId == null)
+            if (_options.LocalNetworkId is not { } localNetworkId || localNetworkId.IsEmpty)
                 return;
 
-            var networkIdPacket = MakeNetworkIdPacket(_options.LocalNetworkId?.ToWireBytes()); 
-            
+            var networkIdPacket = BleNetworkIdPacketCodec.BuildPacket(localNetworkId);
+
             // Делимся своим networkId
-            _ = SendAsync(networkIdPacket, transportAddress);  // TODO: сообщение
+            _ = SendAsync(networkIdPacket, transportAddress);
         }
     }
 }

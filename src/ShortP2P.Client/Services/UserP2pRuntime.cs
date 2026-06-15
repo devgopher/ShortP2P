@@ -81,6 +81,9 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     /// <summary>Cipher (рядовые сообщения) транспивер на data UDP-порту пользователя.</summary>
     public MessageTransceiver? Message => _dataPortMultiplexer?.Message;
 
+    /// <summary>BLE NetworkId транспивер на data-порту (префикс 0x33,0x55).</summary>
+    public BleNetworkIdTransceiver? BleNetworkId => _dataPortMultiplexer?.BleNetworkId;
+
     /// <summary>UDP-транспорт data-порта (для отправки invite-replies/control в адрес пира).</summary>
     public UdpTransport? DataUdp { get; private set; }
 
@@ -227,6 +230,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 }
 
             _dataPortMultiplexer = new DataPortMultiplexer(ResolveDataOutboundTransport);
+            _dataPortMultiplexer.BleNetworkId.GotData += OnBleNetworkIdReceived;
             await _dataPortMultiplexer.StartAsync(cancellationToken).ConfigureAwait(false);
             var dataToken = _dataCts.Token;
             foreach (var transport in inbound)
@@ -270,6 +274,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
         if (_dataPortMultiplexer != null)
         {
+            _dataPortMultiplexer.BleNetworkId.GotData -= OnBleNetworkIdReceived;
             try
             {
                 await _dataPortMultiplexer.StopAsync(cancellationToken).ConfigureAwait(false);
@@ -367,6 +372,37 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         finally
         {
             sem.Release();
+        }
+    }
+
+    private void OnBleNetworkIdReceived(object? sender, BleNetworkIdMessage msg)
+    {
+        if (msg.RemoteAddress.Kind != TransportKind.Bluetooth)
+            return;
+        var token = _dataCts?.Token ?? CancellationToken.None;
+        _ = Task.Run(() => HandleBleNetworkIdAsync(msg, token), token);
+    }
+
+    private async Task HandleBleNetworkIdAsync(BleNetworkIdMessage msg, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var user = _auth.CurrentUser;
+            if (user == null)
+                return;
+            if (msg.NetworkId.ToShortString() == user.NetworkIdShort)
+                return;
+
+            LocalScan.RememberBluetoothPeer(msg.RemoteAddress);
+            await LocalScan.SendUnicastPresencePingAsync(msg.RemoteAddress, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // expected on stop
+        }
+        catch
+        {
+            // safety: не ронять цикл приёма
         }
     }
 
@@ -642,7 +678,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             }
             else
             {
-                var mergedBt = PeerHostList.WithPrimaryFirst(chat.PeerHost, seenDirect);
+                var mergedBt = PeerHostList.MergeAppend(chat.PeerHost, seenDirect);
                 if (string.Equals(mergedBt, chat.PeerHost, StringComparison.Ordinal))
                     return;
                 await _chats.UpdateChatP2pRouteAsync(chat.Id, mergedBt, chat.PeerPort, null).ConfigureAwait(false);
@@ -653,7 +689,9 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             return;
         }
 
-        var mergedHost = PeerHostList.WithPrimaryFirst(chat.PeerHost, seenDirect);
+        var mergedHost = pingKind == TransportKind.Bluetooth
+            ? PeerHostList.MergeAppend(chat.PeerHost, seenDirect)
+            : PeerHostList.WithPrimaryFirst(chat.PeerHost, seenDirect);
         if (string.Equals(mergedHost, chat.PeerHost, StringComparison.Ordinal))
             return;
 

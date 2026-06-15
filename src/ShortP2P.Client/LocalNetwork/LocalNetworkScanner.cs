@@ -316,6 +316,40 @@ public sealed class LocalNetworkScanner(
     }
 
     /// <summary>
+    ///     Unicast presence ping на конкретный BLE-адрес (ответ на полученный NetworkId).
+    /// </summary>
+    public async Task SendUnicastPresencePingAsync(TransportAddress bluetoothDestination,
+        CancellationToken cancellationToken = default)
+    {
+        if (bluetoothDestination.Kind != TransportKind.Bluetooth)
+            return;
+        if (!IsTransportEnabled(TransportKind.Bluetooth))
+            return;
+
+        var localPeer = _localPeer;
+        var bt = _secondaryPresenceTransports.FirstOrDefault(t => t.Kind == TransportKind.Bluetooth);
+        if (localPeer == null || bt == null)
+            return;
+
+        RememberBluetoothPeer(bluetoothDestination);
+        var caps = routingSettings.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
+        var payload = PresencePingCodec.Build(
+            localPeer.NetworkId,
+            localPeer.Nickname,
+            localPeer.DataUdpPort,
+            routingSettings.LinkTechnology,
+            caps);
+        try
+        {
+            await bt.SendAsync(payload, bluetoothDestination, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // peer may be out of range
+        }
+    }
+
+    /// <summary>
     ///     Запоминает IP-адрес пира, чтобы отправлять presence-пинги напрямую (в т.ч. для non-LAN адресов после Add/QR).
     /// </summary>
     public void RememberUdpPresenceTarget(string host)
@@ -439,6 +473,16 @@ public sealed class LocalNetworkScanner(
 
         OnDiscoveryPingReceived(peer);
         DiscoveryPingReceived?.Invoke(this, new DiscoveryPingReceivedEventArgs(peer));
+    }
+
+    private static DiscoveredLocalPeer MergeDiscoveredPeers(DiscoveredLocalPeer existing, DiscoveredLocalPeer incoming)
+    {
+        var lastSeen = incoming.LastSeenUtc > existing.LastSeenUtc ? incoming.LastSeenUtc : existing.LastSeenUtc;
+        if (existing.TransportKind == TransportKind.Udp && incoming.TransportKind == TransportKind.Bluetooth)
+            return existing with { LastSeenUtc = lastSeen };
+        if (existing.TransportKind == TransportKind.Bluetooth && incoming.TransportKind == TransportKind.Udp)
+            return incoming with { LastSeenUtc = lastSeen };
+        return incoming.LastSeenUtc >= existing.LastSeenUtc ? incoming : existing;
     }
 
     private static async Task PresenceReceiveLoopAsync(ITransport transport, PresencePingCodec.Transceiver transceiver,
@@ -628,7 +672,7 @@ public sealed class LocalNetworkScanner(
         discoveryPingStore?.Write(
             new PeerIdentity(peer.Nickname, peer.NetworkId, peer.PeerDataUdpPort),
             peer.SourceAddress, peer.LastSeenUtc);
-        _entries.AddOrUpdate(peer.NetworkId, peer, (_, _) => peer);
+        _entries.AddOrUpdate(peer.NetworkId, peer, (_, existing) => MergeDiscoveredPeers(existing, peer));
         if (_scanSessionActive)
             return;
         RebuildSnapshot();

@@ -1,3 +1,4 @@
+using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Discovery.Transceivers;
@@ -20,11 +21,14 @@ public sealed class DataPortMultiplexer : IAsyncDisposable
 
         Handshake = new HandshakeTransceiver(SendRawAsync);
         Message = new MessageTransceiver(SendRawAsync);
+        BleNetworkId = new BleNetworkIdTransceiver(SendRawAsync);
     }
 
     public HandshakeTransceiver Handshake { get; }
 
     public MessageTransceiver Message { get; }
+
+    public BleNetworkIdTransceiver BleNetworkId { get; }
 
     public ValueTask DisposeAsync()
     {
@@ -35,12 +39,14 @@ public sealed class DataPortMultiplexer : IAsyncDisposable
     {
         await Handshake.StartAsync(cancellationToken).ConfigureAwait(false);
         await Message.StartAsync(cancellationToken).ConfigureAwait(false);
+        await BleNetworkId.StartAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
         await Handshake.StopAsync(cancellationToken).ConfigureAwait(false);
         await Message.StopAsync(cancellationToken).ConfigureAwait(false);
+        await BleNetworkId.StopAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask SendRawAsync(ReadOnlyMemory<byte> packet, TransportAddress destination,
@@ -65,6 +71,12 @@ public sealed class DataPortMultiplexer : IAsyncDisposable
             return;
         if (_shouldAcceptFrom != null && !_shouldAcceptFrom(msg.RemoteAddress))
             return;
+
+        if (BleNetworkIdPacketCodec.TryParsePacket(msg.Payload.Span, out _))
+        {
+            BleNetworkId.HandleIncoming(msg.Payload, msg.RemoteAddress);
+            return;
+        }
 
         var first = msg.Payload.Span[0];
         switch (first)

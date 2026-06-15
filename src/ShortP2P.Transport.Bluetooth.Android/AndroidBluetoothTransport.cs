@@ -261,8 +261,6 @@ public sealed class AndroidBluetoothTransport : ITransport
             {
                 // ignore subscriber errors
             }
-
-            return;
         }
 
         _ = _inbound.Writer.TryWrite(new TransportReceiveMessage(value, addr));
