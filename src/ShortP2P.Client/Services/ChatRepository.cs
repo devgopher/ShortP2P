@@ -11,15 +11,10 @@ public sealed class ChatMessageAppendedEventArgs(int chatId, bool outgoing) : Ev
     public bool Outgoing { get; } = outgoing;
 }
 
-public sealed class ChatRepository
+public sealed class ChatRepository(AppDatabase db)
 {
     private readonly SemaphoreSlim _addChatGate = new(1, 1);
-    private readonly AppDatabase _db;
-
-    public ChatRepository(AppDatabase db)
-    {
-        _db = db ?? throw new ArgumentNullException(nameof(db));
-    }
+    private readonly AppDatabase _db = db ?? throw new ArgumentNullException(nameof(db));
 
     /// <summary>Список чатов на главном экране: обновить после входящего приглашения и т.п.</summary>
     public event EventHandler? ChatListChanged;

@@ -88,18 +88,12 @@ public sealed class UdpTransportFactory : IUdpTransportFactory
         public object Gate { get; } = new();
     }
 
-    private readonly struct UdpTransportCacheKey : IEquatable<UdpTransportCacheKey>
+    private readonly struct UdpTransportCacheKey(IPAddress ip, int port, bool enableBroadcast)
+        : IEquatable<UdpTransportCacheKey>
     {
-        public UdpTransportCacheKey(IPAddress ip, int port, bool enableBroadcast)
-        {
-            Ip = ip;
-            Port = port;
-            EnableBroadcast = enableBroadcast;
-        }
-
-        public IPAddress Ip { get; }
-        public int Port { get; }
-        public bool EnableBroadcast { get; }
+        public IPAddress Ip { get; } = ip;
+        public int Port { get; } = port;
+        public bool EnableBroadcast { get; } = enableBroadcast;
 
         public bool Equals(UdpTransportCacheKey other)
         {

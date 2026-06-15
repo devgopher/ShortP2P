@@ -12,7 +12,8 @@ namespace ShortP2P.Transport.Bluetooth.Android;
 /// <summary>
 ///     BLE GATT: локальный Server (RX приём / TX передача) + Central к пиру (write в RX, subscribe на TX).
 /// </summary>
-public sealed class AndroidBluetoothTransport : ITransport
+public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothTransportOptions options = default)
+    : ITransport
 {
     private const int DefaultChannelCapacity = 256;
     private const int MinApiForGattServerWrite = 31;
@@ -25,7 +26,7 @@ public sealed class AndroidBluetoothTransport : ITransport
     private static readonly UUID TxUuidJava =
         UUID.FromString(BleShortP2PGattProtocol.PeerTxCharacteristicUuid.ToString("D"));
 
-    private readonly Context _context;
+    private readonly Context _context = context.ApplicationContext ?? context;
 
     private readonly Channel<TransportReceiveMessage> _inbound = Channel.CreateBounded<TransportReceiveMessage>(
         new BoundedChannelOptions(DefaultChannelCapacity)
@@ -36,7 +37,6 @@ public sealed class AndroidBluetoothTransport : ITransport
         });
 
     private readonly ConcurrentDictionary<string, byte> _networkIdOfferedToMac = new(StringComparer.OrdinalIgnoreCase);
-    private readonly AndroidBluetoothTransportOptions _options;
 
     private readonly ConcurrentDictionary<string, OutboundPeerState> _outbound = new(StringComparer.OrdinalIgnoreCase);
 
@@ -52,12 +52,6 @@ public sealed class AndroidBluetoothTransport : ITransport
 
     private CancellationTokenSource? _runCts;
     private volatile bool _started;
-
-    public AndroidBluetoothTransport(Context context, AndroidBluetoothTransportOptions options = default)
-    {
-        _context = context.ApplicationContext ?? context;
-        _options = options;
-    }
 
     public ChannelReader<TransportReceiveMessage> Inbound => _inbound.Reader;
 
@@ -147,7 +141,7 @@ public sealed class AndroidBluetoothTransport : ITransport
                     .Build();
                 var scanRspBuilder = new AdvertiseData.Builder()!;
 
-                if (_options.GattDiscoverable)
+                if (options.GattDiscoverable)
                     scanRspBuilder.SetIncludeDeviceName(true);
                 var scanRsp = scanRspBuilder.Build();
                 _advertiseCallback = new AdvertiseCallbackImpl();
@@ -251,11 +245,11 @@ public sealed class AndroidBluetoothTransport : ITransport
 
         if (BleShortP2PGattProtocol.TryParseNetworkIdAnnouncePacket(value, out var peerNetworkId))
         {
-            if (_options.LocalNetworkId is { } local && local == peerNetworkId)
+            if (options.LocalNetworkId is { } local && local == peerNetworkId)
                 return;
             try
             {
-                _options.OnPeerNetworkIdReceived?.Invoke(addr, peerNetworkId);
+                options.OnPeerNetworkIdReceived?.Invoke(addr, peerNetworkId);
             }
             catch
             {
@@ -294,7 +288,7 @@ public sealed class AndroidBluetoothTransport : ITransport
 
     private async Task TryOfferNetworkIdToPeerAsync(TransportAddress destination, CancellationToken ct)
     {
-        if (_options.LocalNetworkId is not { } localNetworkId || localNetworkId.IsEmpty)
+        if (options.LocalNetworkId is not { } localNetworkId || localNetworkId.IsEmpty)
             return;
         var macKey = BluetoothTransportAddress.ToMacString(destination.Data);
         if (!_networkIdOfferedToMac.TryAdd(macKey, 0))
@@ -437,25 +431,18 @@ public sealed class AndroidBluetoothTransport : ITransport
         }
     }
 
-    private sealed class ShortP2PGattServerCallback : BluetoothGattServerCallback
+    private sealed class ShortP2PGattServerCallback(AndroidBluetoothTransport owner) : BluetoothGattServerCallback
     {
-        private readonly AndroidBluetoothTransport _owner;
-
-        public ShortP2PGattServerCallback(AndroidBluetoothTransport owner)
-        {
-            _owner = owner;
-        }
-
         public override void OnServiceAdded(GattStatus status, BluetoothGattService? service)
         {
-            _owner.OnServiceAdded(status == GattStatus.Success);
+            owner.OnServiceAdded(status == GattStatus.Success);
         }
 
         public override void OnCharacteristicWriteRequest(BluetoothDevice? device, int requestId,
             BluetoothGattCharacteristic? characteristic, bool preparedWrite, bool responseNeeded, int offset,
             byte[]? value)
         {
-            if (device == null || _owner._gattServer == null)
+            if (device == null || owner._gattServer == null)
                 return;
 
             var matches = !preparedWrite
@@ -465,37 +452,29 @@ public sealed class AndroidBluetoothTransport : ITransport
                           && value != null
                           && value.Length > 0;
             if (matches)
-                _owner.OnInboundFromPeer(device, value);
+                owner.OnInboundFromPeer(device, value);
 
             if (!responseNeeded)
                 return;
 
             var st = matches ? GattStatus.Success : GattStatus.Failure;
-            _owner._gattServer.SendResponse(device, requestId, st, offset, matches ? value : null);
+            owner._gattServer.SendResponse(device, requestId, st, offset, matches ? value : null);
         }
     }
 
-    private sealed class OutboundGattCallback : BluetoothGattCallback
+    private sealed class OutboundGattCallback(AndroidBluetoothTransport owner, OutboundPeerState state)
+        : BluetoothGattCallback
     {
-        private readonly AndroidBluetoothTransport _owner;
-        private readonly OutboundPeerState _state;
-
-        public OutboundGattCallback(AndroidBluetoothTransport owner, OutboundPeerState state)
-        {
-            _owner = owner;
-            _state = state;
-        }
-
         public override void OnConnectionStateChange(BluetoothGatt? gatt, GattStatus status, ProfileState newState)
         {
             if (gatt == null)
                 return;
             if (newState != ProfileState.Connected)
             {
-                if (ReferenceEquals(_state.Gatt, gatt))
+                if (ReferenceEquals(state.Gatt, gatt))
                 {
-                    _state.PeerRx = null;
-                    _state.PeerTx = null;
+                    state.PeerRx = null;
+                    state.PeerTx = null;
                     try
                     {
                         gatt.Close();
@@ -505,47 +484,47 @@ public sealed class AndroidBluetoothTransport : ITransport
                         // ignore
                     }
 
-                    if (ReferenceEquals(_state.Gatt, gatt))
-                        _state.Gatt = null;
+                    if (ReferenceEquals(state.Gatt, gatt))
+                        state.Gatt = null;
                 }
 
-                _state.DiscoveryTcs?.TrySetResult(false);
+                state.DiscoveryTcs?.TrySetResult(false);
                 return;
             }
 
             gatt.RequestMtu(517);
             if (!gatt.DiscoverServices())
-                _state.DiscoveryTcs?.TrySetResult(false);
+                state.DiscoveryTcs?.TrySetResult(false);
         }
 
         public override void OnServicesDiscovered(BluetoothGatt? gatt, GattStatus status)
         {
             if (gatt == null || status != GattStatus.Success)
             {
-                _state.DiscoveryTcs?.TrySetResult(false);
+                state.DiscoveryTcs?.TrySetResult(false);
                 return;
             }
 
             var svc = gatt.GetService(ServiceUuidJava);
             if (svc == null)
             {
-                _state.DiscoveryTcs?.TrySetResult(false);
+                state.DiscoveryTcs?.TrySetResult(false);
                 return;
             }
 
             var rx = svc.GetCharacteristic(RxUuidJava);
             if (rx == null)
             {
-                _state.DiscoveryTcs?.TrySetResult(false);
+                state.DiscoveryTcs?.TrySetResult(false);
                 return;
             }
 
-            _state.PeerRx = rx;
-            _state.PeerTx = svc.GetCharacteristic(TxUuidJava);
-            if (_state.PeerTx != null)
+            state.PeerRx = rx;
+            state.PeerTx = svc.GetCharacteristic(TxUuidJava);
+            if (state.PeerTx != null)
             {
-                gatt.SetCharacteristicNotification(_state.PeerTx, true);
-                var cccd = _state.PeerTx.GetDescriptor(
+                gatt.SetCharacteristicNotification(state.PeerTx, true);
+                var cccd = state.PeerTx.GetDescriptor(
                     UUID.FromString("00002902-0000-1000-8000-00805f9b34fb"));
                 if (cccd != null)
                 {
@@ -554,7 +533,7 @@ public sealed class AndroidBluetoothTransport : ITransport
                 }
             }
 
-            _state.DiscoveryTcs?.TrySetResult(true);
+            state.DiscoveryTcs?.TrySetResult(true);
         }
 
         public override void OnCharacteristicChanged(BluetoothGatt? gatt, BluetoothGattCharacteristic? characteristic)
@@ -567,7 +546,7 @@ public sealed class AndroidBluetoothTransport : ITransport
             var device = gatt.Device;
             if (device == null)
                 return;
-            _owner.OnInboundFromPeer(device, value);
+            owner.OnInboundFromPeer(device, value);
         }
     }
 }

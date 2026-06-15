@@ -262,17 +262,11 @@ public partial class ChatsPage : ContentPage
     }
 }
 
-public sealed class ChatListRowVm : INotifyPropertyChanged
+public sealed class ChatListRowVm(ChatEntity chat, bool isPeerOnline) : INotifyPropertyChanged
 {
-    private bool _isPeerOnline;
+    private bool _isPeerOnline = isPeerOnline;
 
-    public ChatListRowVm(ChatEntity chat, bool isPeerOnline)
-    {
-        Chat = chat;
-        _isPeerOnline = isPeerOnline;
-    }
-
-    public ChatEntity Chat { get; }
+    public ChatEntity Chat { get; } = chat;
 
     public string PeerNickname => Chat.PeerNickname;
 

@@ -7,17 +7,14 @@ namespace ShortP2P.Discovery.Transceivers;
 ///     префикс <see cref="FrameCipher" /> к payload; на приёме отдаёт <see cref="TransportReceiveMessage" />
 ///     уже без префикса.
 /// </summary>
-public sealed class MessageTransceiver : IUnicastTransceiver<TransportReceiveMessage>
+public sealed class MessageTransceiver(
+    Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> sendRaw)
+    : IUnicastTransceiver<TransportReceiveMessage>
 {
     public const byte FrameCipher = 0x02;
 
-    private readonly Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> _sendRaw;
+    private readonly Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> _sendRaw = sendRaw ?? throw new ArgumentNullException(nameof(sendRaw));
     private bool _started;
-
-    public MessageTransceiver(Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> sendRaw)
-    {
-        _sendRaw = sendRaw ?? throw new ArgumentNullException(nameof(sendRaw));
-    }
 
     public event EventHandler<TransportReceiveMessage>? GotData;
 

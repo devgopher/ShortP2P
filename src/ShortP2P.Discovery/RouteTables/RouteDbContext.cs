@@ -3,13 +3,8 @@ using ShortP2P.Auth.Data;
 
 namespace ShortP2P.Discovery.RouteTables;
 
-public class RouteDbContext : DbContext
+public class RouteDbContext(DbContextOptions<RouteDbContext> options) : DbContext(options)
 {
-    public RouteDbContext(DbContextOptions<RouteDbContext> options)
-        : base(options)
-    {
-    }
-
     public DbSet<Route> Routes => Set<Route>();
     public DbSet<PeerChain> PeerChains => Set<PeerChain>();
 

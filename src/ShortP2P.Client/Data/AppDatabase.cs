@@ -3,15 +3,10 @@ using SQLite;
 
 namespace ShortP2P.Client.Data;
 
-public sealed class AppDatabase
+public sealed class AppDatabase(string databasePath)
 {
-    private readonly string _databasePath;
+    private readonly string _databasePath = databasePath ?? throw new ArgumentNullException(nameof(databasePath));
     private SQLiteAsyncConnection? _connection;
-
-    public AppDatabase(string databasePath)
-    {
-        _databasePath = databasePath ?? throw new ArgumentNullException(nameof(databasePath));
-    }
 
     public async Task<SQLiteAsyncConnection> GetConnectionAsync()
     {

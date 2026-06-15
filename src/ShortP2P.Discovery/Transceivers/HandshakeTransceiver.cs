@@ -6,15 +6,12 @@ namespace ShortP2P.Discovery.Transceivers;
 ///     Unicast-only приёмопередатчик handshake-кадров: 0x01 (RSA handshake, 128 байт) и 0x04
 ///     (session setup request, 16 байт Guid). Принимает датаграммы от <see cref="DataPortMultiplexer" />.
 /// </summary>
-public sealed class HandshakeTransceiver : IUnicastTransceiver<HandshakeMessage>
+public sealed class HandshakeTransceiver(
+    Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> sendRaw)
+    : IUnicastTransceiver<HandshakeMessage>
 {
-    private readonly Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> _sendRaw;
+    private readonly Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> _sendRaw = sendRaw ?? throw new ArgumentNullException(nameof(sendRaw));
     private bool _started;
-
-    public HandshakeTransceiver(Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, ValueTask> sendRaw)
-    {
-        _sendRaw = sendRaw ?? throw new ArgumentNullException(nameof(sendRaw));
-    }
 
     public event EventHandler<HandshakeMessage>? GotData;
 

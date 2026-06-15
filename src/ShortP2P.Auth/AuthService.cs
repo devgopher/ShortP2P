@@ -3,18 +3,12 @@ using ShortP2P.Crypto;
 
 namespace ShortP2P.Auth;
 
-public sealed class AuthService
+public sealed class AuthService(IUserAuthRepository users, ISessionStorage sessionStorage)
 {
     private const string SessionUserIdKey = "shortp2p_session_user_id";
-    private readonly ISessionStorage _sessionStorage;
+    private readonly ISessionStorage _sessionStorage = sessionStorage ?? throw new ArgumentNullException(nameof(sessionStorage));
 
-    private readonly IUserAuthRepository _users;
-
-    public AuthService(IUserAuthRepository users, ISessionStorage sessionStorage)
-    {
-        _users = users ?? throw new ArgumentNullException(nameof(users));
-        _sessionStorage = sessionStorage ?? throw new ArgumentNullException(nameof(sessionStorage));
-    }
+    private readonly IUserAuthRepository _users = users ?? throw new ArgumentNullException(nameof(users));
 
     public UserEntity? CurrentUser { get; private set; }
 

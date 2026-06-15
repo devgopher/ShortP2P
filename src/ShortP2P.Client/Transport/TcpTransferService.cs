@@ -96,23 +96,19 @@ public sealed class TcpTransferService
     }
 }
 
-public sealed class TcpListenerLease : IDisposable
+public sealed class TcpListenerLease(
+    TcpListener listener,
+    string transferId,
+    string token,
+    DateTimeOffset expiresAtUtc,
+    int port)
+    : IDisposable
 {
-    public TcpListenerLease(TcpListener listener, string transferId, string token, DateTimeOffset expiresAtUtc,
-        int port)
-    {
-        Listener = listener;
-        TransferId = transferId;
-        Token = token;
-        ExpiresAtUtc = expiresAtUtc;
-        Port = port;
-    }
-
-    public TcpListener Listener { get; }
-    public string TransferId { get; }
-    public string Token { get; }
-    public DateTimeOffset ExpiresAtUtc { get; }
-    public int Port { get; }
+    public TcpListener Listener { get; } = listener;
+    public string TransferId { get; } = transferId;
+    public string Token { get; } = token;
+    public DateTimeOffset ExpiresAtUtc { get; } = expiresAtUtc;
+    public int Port { get; } = port;
 
     public void Dispose()
     {
