@@ -188,13 +188,20 @@ public sealed class WindowsBluetoothTransport : ITransport
             throw new IOException("BLE write failed.");
     }
 
+    private readonly Dictionary<ulong, DateTime> _lastNetworkIdSending = new(100);
+    private readonly TimeSpan _networkIdPeriod = new(0,0, 30);
+    
+    
     private void OnAdvertisementReceived(BluetoothLEAdvertisementWatcher sender,
         BluetoothLEAdvertisementReceivedEventArgs args)
     {
         var addr = args.BluetoothAddress;
         if (addr == 0)
             return;
-
+        
+        if (_lastNetworkIdSending.ContainsKey(addr) && DateTime.UtcNow - _lastNetworkIdSending[addr] <= _networkIdPeriod)
+            return;
+                
         if (args.Advertisement.ServiceUuids.Contains(BleShortP2PGattProtocol.ServiceUuid))
         {
             var transportAddress =
@@ -207,6 +214,8 @@ public sealed class WindowsBluetoothTransport : ITransport
 
             // Делимся своим networkId
             _ = SendAsync(networkIdPacket, transportAddress);
+            
+            _lastNetworkIdSending.Add(addr, DateTime.UtcNow);
         }
     }
 }
