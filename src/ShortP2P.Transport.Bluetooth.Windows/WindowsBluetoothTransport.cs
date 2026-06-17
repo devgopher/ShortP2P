@@ -93,7 +93,7 @@ public sealed class WindowsBluetoothTransport : ITransport
         
         _advertisementWatcher = new BluetoothLEAdvertisementWatcher
         {
-            ScanningMode = BluetoothLEScanningMode.Active
+            ScanningMode = BluetoothLEScanningMode.Passive
         };
         _advertisementWatcher.Received += OnAdvertisementReceived;
         _advertisementWatcher.Start();
@@ -215,7 +215,7 @@ public sealed class WindowsBluetoothTransport : ITransport
             // Делимся своим networkId
             _ = SendAsync(networkIdPacket, transportAddress);
             
-            _lastNetworkIdSending.Add(addr, DateTime.UtcNow);
+            _lastNetworkIdSending[addr] = DateTime.UtcNow;
         }
     }
 }
