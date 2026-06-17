@@ -14,14 +14,12 @@ public static class P2PCrypto
     public static RsaKeyPair GenerateKeyPair()
     {
         // RSA key generation uses platform crypto; available in netstandard2.0.
-        using (var rsa = RSA.Create())
-        {
-            rsa.KeySize = 1024;
-            var parameters = rsa.ExportParameters(true);
-            var pub = new RsaPublicKey(parameters.Modulus, parameters.Exponent);
-            var priv = new RsaPrivateKey(parameters);
-            return new RsaKeyPair(pub, priv);
-        }
+        using var rsa = RSA.Create();
+        rsa.KeySize = 1024;
+        var parameters = rsa.ExportParameters(true);
+        var pub = new RsaPublicKey(parameters.Modulus, parameters.Exponent);
+        var priv = new RsaPrivateKey(parameters);
+        return new RsaKeyPair(pub, priv);
     }
 
     /// <summary>

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Bluetooth;
@@ -37,6 +39,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     private readonly HashSet<string> _selfUdpAddresses = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly ChatSessionCache _sessionCache;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly P2pRoutingSettingsStore _store;
     private UserEntity? _currentDataPortUser;
     private CancellationTokenSource? _dataCts;
@@ -57,7 +60,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         IDiscoveryPingStore? discoveryPingStore = null,
         IBleShortP2PPeripheralScanner? blePeripheralScanner = null,
         IBleDiscoveredPeerStore? bleDiscoveredPeerStore = null,
-        IBluetoothPresencePingTargetsProvider? bluetoothPresencePingTargetsProvider = null)
+        IBluetoothPresencePingTargetsProvider? bluetoothPresencePingTargetsProvider = null,
+        ILoggerFactory? loggerFactory = null)
     {
         _store = store;
         _auth = auth;
@@ -66,6 +70,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         UdpTransportFactory = udpTransportFactory;
         _sessionCache = sessionCache;
         _cryptoSessionCache = cryptoSessionCache;
+        _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         _bluetooth = bluetooth;
         LocalScan = new LocalNetworkScanner(Settings, udpTransportFactory, () => _bluetooth?.Current,
             additionalDiscoveryTransports, routeTableSnapshotSource, discoveryPingStore, blePeripheralScanner,
@@ -108,7 +113,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     {
         return _sessionCache.GetSession(chat.Id,
             () => ChatP2pSession.Create(chat, user, auth, repo, this, uiSync, Settings, LocalScan, _chatMedia,
-                _cryptoSessionCache),
+                _cryptoSessionCache, _loggerFactory.CreateLogger<ChatP2pSession>()),
             s => s.ApplyChatRow(chat));
     }
 

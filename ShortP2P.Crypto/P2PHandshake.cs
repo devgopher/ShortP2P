@@ -63,15 +63,13 @@ public static class P2PHandshake
             throw new ArgumentException($"Handshake packet must be exactly {HandshakePacketBytes} bytes.",
                 nameof(handshakePacket));
 
-        using (var rsa = RSA.Create())
-        {
-            rsa.ImportParameters(localPrivateKey.ToParameters());
-            var decrypted = rsa.Decrypt(handshakePacket, RSAEncryptionPadding.OaepSHA1);
-            if (decrypted.Length != SessionKeyBytes)
-                throw new CryptographicException(
-                    $"Unexpected decrypted session key length: {decrypted.Length}. Expected {SessionKeyBytes}.");
+        using var rsa = RSA.Create();
+        rsa.ImportParameters(localPrivateKey.ToParameters());
+        var decrypted = rsa.Decrypt(handshakePacket, RSAEncryptionPadding.OaepSHA1);
+        if (decrypted.Length != SessionKeyBytes)
+            throw new CryptographicException(
+                $"Unexpected decrypted session key length: {decrypted.Length}. Expected {SessionKeyBytes}.");
 
-            return decrypted;
-        }
+        return decrypted;
     }
 }

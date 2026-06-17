@@ -95,7 +95,8 @@ public static class MauiProgram
             sp.GetService<IDiscoveryPingStore>(),
             sp.GetService<IBleShortP2PPeripheralScanner>(),
             sp.GetService<IBleDiscoveredPeerStore>(),
-            sp.GetRequiredService<IBluetoothPresencePingTargetsProvider>()));
+            sp.GetRequiredService<IBluetoothPresencePingTargetsProvider>(),
+            sp.GetRequiredService<ILoggerFactory>()));
         builder.Services.AddTransient<LoginPage>();
         builder.Services.AddTransient<RegisterPage>();
         builder.Services.AddTransient<ChatsPage>();

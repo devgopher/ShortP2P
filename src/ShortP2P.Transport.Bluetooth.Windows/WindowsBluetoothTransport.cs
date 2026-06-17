@@ -5,6 +5,7 @@ using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Devices.Enumeration;
+using Windows.Foundation.Collections;
 using Windows.Storage.Streams;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Auth.Data;
@@ -43,6 +44,8 @@ public sealed class WindowsBluetoothTransport : ITransport
     public WindowsBluetoothTransport(WindowsBluetoothTransportOptions options) => _options = options;
 
     private const int DefaultChannelCapacity = 1024;
+    private const int SendMaxAttempts = 10;
+    private static readonly TimeSpan SendRetryInterval = TimeSpan.FromMilliseconds(100);
 
     public ValueTask DisposeAsync()
     {
@@ -157,35 +160,82 @@ public sealed class WindowsBluetoothTransport : ITransport
         var data = destination.Data;
         if (data.Length != BluetoothMacAddress.MacLength)
             throw new ArgumentException($"Bluetooth address must be {BluetoothMacAddress.MacLength} bytes (MAC).",
-                nameof(destination)); 
+                nameof(destination));
 
-        var device = await BluetoothLEDevice.FromBluetoothAddressAsync(BluetoothMacAddress.ToBluetoothAddress(data))
+        for (var attempt = 1; attempt <= SendMaxAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                if (await TrySendOnceAsync(payload, data, cancellationToken).ConfigureAwait(false))
+                    return;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // retry transient BLE/GATT failures
+            }
+
+            if (attempt < SendMaxAttempts)
+                await Task.Delay(SendRetryInterval, cancellationToken).ConfigureAwait(false);
+        }
+
+        throw new IOException($"BLE send failed after {SendMaxAttempts} attempts.");
+    }
+    
+    static ConcurrentDictionary<string, GattCharacteristicsResult> _results = new();
+
+    private static async ValueTask<bool> TrySendOnceAsync(ReadOnlyMemory<byte> payload, byte[] mac,
+        CancellationToken cancellationToken)
+    {
+        var device = await BluetoothLEDevice.FromBluetoothAddressAsync(BluetoothMacAddress.ToBluetoothAddress(mac))
             .AsTask(cancellationToken).ConfigureAwait(false);
         if (device == null)
-            return;
-        
+            return false;
+
         var serviceResult = await device
             .GetGattServicesForUuidAsync(BleShortP2PGattProtocol.ServiceUuid, BluetoothCacheMode.Uncached)
             .AsTask(cancellationToken)
             .ConfigureAwait(false);
-        
+
         if (serviceResult.Status != GattCommunicationStatus.Success || serviceResult.Services.Count == 0)
-            return;
+            return false;
 
         var service = serviceResult.Services[0];
-        var rxResult = await service.GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid)
-            .AsTask(cancellationToken)
-            .ConfigureAwait(false);
+        var rxResult  = _results.GetValueOrDefault(device.DeviceId);
+        
+        if (rxResult == null || rxResult.Characteristics.Count == 0)
+        {
+            rxResult = await service
+                .GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid)
+                .AsTask(cancellationToken)
+                .ConfigureAwait(false);
+
+            while (rxResult.Characteristics.Count == 0)
+            {
+                rxResult = await service
+                    .GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid)
+                    .AsTask(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            
+            _results.TryAdd(device.DeviceId, rxResult);
+        }
+
         var rx = rxResult.Characteristics.FirstOrDefault();
         if (rx == null)
-            return;
+            return false;
 
         var writer = new DataWriter();
         writer.WriteBytes(payload.ToArray());
-        var status = await rx.WriteValueAsync(writer.DetachBuffer(), GattWriteOption.WriteWithoutResponse).AsTask(cancellationToken)
+        var status = await rx.WriteValueAsync(writer.DetachBuffer(), GattWriteOption.WriteWithoutResponse)
+            .AsTask(cancellationToken)
             .ConfigureAwait(false);
-        if (status != GattCommunicationStatus.Success)
-            throw new IOException("BLE write failed.");
+        return status == GattCommunicationStatus.Success;
     }
 
     private readonly Dictionary<ulong, DateTime> _lastNetworkIdSending = new(100);

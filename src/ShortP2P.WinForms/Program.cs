@@ -72,7 +72,8 @@ internal static class Program
             sp.GetService<IDiscoveryPingStore>(),
             sp.GetRequiredService<IBleShortP2PPeripheralScanner>(),
             sp.GetRequiredService<IBleDiscoveredPeerStore>(),
-            sp.GetRequiredService<IBluetoothPresencePingTargetsProvider>()));
+            sp.GetRequiredService<IBluetoothPresencePingTargetsProvider>(),
+            sp.GetRequiredService<ILoggerFactory>()));
 
         services.AddTransient<LoginForm>();
         services.AddTransient<RegisterForm>();
