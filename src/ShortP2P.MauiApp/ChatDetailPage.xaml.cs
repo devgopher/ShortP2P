@@ -48,7 +48,7 @@ public partial class ChatDetailPage : ContentPage
     private const int MessagesPageSize = 10;
     private readonly ObservableCollection<MessageRowVm> _messageItems = [];
     private readonly List<ChatMessageEntity> _loadedRows = [];
-    private ChatP2pSession? _p2pSession;
+    private ChatP2PSession? _p2pSession;
     private string? _peerNetworkIdShort;
     private IDispatcherTimer? _presenceRefreshTimer;
     private bool _hasMoreRows = true;

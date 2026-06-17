@@ -15,9 +15,16 @@ namespace ShortP2P.Client.Services;
 /// </summary>
 public static class IncomingChatInviteHandler
 {
+    /// <param name="repo"></param>
     /// <param name="sendInviteReplyAsync">
     ///     Если задано, отправляет пиру обратное приглашение с нашим ключом (новый чат или обновление маршрута).
     /// </param>
+    /// <param name="sourceAddress"></param>
+    /// <param name="routingSettings"></param>
+    /// <param name="bluetoothAdapterMac"></param>
+    /// <param name="cancellationToken"></param>
+    /// <param name="datagram"></param>
+    /// <param name="auth"></param>
     public static async Task TryAcceptAsync(ReadOnlyMemory<byte> datagram, AuthService auth, ChatRepository repo,
         Func<ReadOnlyMemory<byte>, TransportAddress, CancellationToken, Task>? sendInviteReplyAsync,
         TransportAddress? sourceAddress = null,

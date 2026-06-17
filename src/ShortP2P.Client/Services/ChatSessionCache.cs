@@ -8,14 +8,14 @@ public sealed class ChatSessionCache
 {
     private readonly ConcurrentDictionary<int, SessionCacheEntry> _entries = new();
 
-    public ChatP2pSession GetSession(int chatId, Func<ChatP2pSession> createSession, Action<ChatP2pSession> applyChat)
+    public ChatP2PSession GetSession(int chatId, Func<ChatP2PSession> createSession, Action<ChatP2PSession> applyChat)
     {
         var entry = _entries.GetOrAdd(chatId, _ => new SessionCacheEntry(createSession()));
         applyChat(entry.Session);
         return entry.Session;
     }
 
-    public bool TryGetSession(int chatId, [NotNullWhen(true)] out ChatP2pSession? session)
+    public bool TryGetSession(int chatId, [NotNullWhen(true)] out ChatP2PSession? session)
     {
         if (_entries.TryGetValue(chatId, out var entry))
         {
@@ -38,7 +38,7 @@ public sealed class ChatSessionCache
             Interlocked.Exchange(ref entry.Started, 1);
     }
 
-    public bool TryRemove(int chatId, out ChatP2pSession? session)
+    public bool TryRemove(int chatId, out ChatP2PSession? session)
     {
         if (_entries.TryRemove(chatId, out var entry))
         {
@@ -50,16 +50,16 @@ public sealed class ChatSessionCache
         return false;
     }
 
-    public IReadOnlyList<ChatP2pSession> DrainAll()
+    public IReadOnlyList<ChatP2PSession> DrainAll()
     {
         var list = _entries.Values.Select(x => x.Session).ToList();
         _entries.Clear();
         return list;
     }
 
-    private sealed class SessionCacheEntry(ChatP2pSession session, bool isStarted = false)
+    private sealed class SessionCacheEntry(ChatP2PSession session, bool isStarted = false)
     {
         public int Started = isStarted ? 1 : 0;
-        public ChatP2pSession Session { get; } = session;
+        public ChatP2PSession Session { get; } = session;
     }
 }

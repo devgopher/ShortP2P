@@ -108,12 +108,12 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         await StopAsync().ConfigureAwait(false);
     }
 
-    public ChatP2pSession GetSession(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo,
+    public ChatP2PSession GetSession(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo,
         SynchronizationContext? uiSync)
     {
         return _sessionCache.GetSession(chat.Id,
-            () => ChatP2pSession.Create(chat, user, auth, repo, this, uiSync, Settings, LocalScan, _chatMedia,
-                _cryptoSessionCache, _loggerFactory.CreateLogger<ChatP2pSession>()),
+            () => ChatP2PSession.Create(chat, user, auth, repo, this, uiSync, Settings, LocalScan, _chatMedia,
+                _cryptoSessionCache, _loggerFactory.CreateLogger<ChatP2PSession>()),
             s => s.ApplyChatRow(chat));
     }
 

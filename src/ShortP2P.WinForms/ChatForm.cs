@@ -96,7 +96,7 @@ public sealed class ChatForm : Form
         Multiline = true,
         AcceptsTab = false,
         BorderStyle = BorderStyle.FixedSingle,
-        MaxLength = ChatP2pSession.MaxMessageChars
+        MaxLength = ChatP2PSession.MaxMessageChars
     };
 
     private readonly List<ChatMessageEntity> _loadedRows = [];
@@ -150,7 +150,7 @@ public sealed class ChatForm : Form
     private readonly object _voiceCapLock = new();
     private bool _hasMoreRows = true;
     private bool _isLoadingRows;
-    private ChatP2pSession? _p2PSession;
+    private ChatP2PSession? _p2PSession;
     private bool _pairingPromptShown;
     private volatile bool _voiceDiscardNextStop;
     private MemoryStream? _voicePlaybackMem;
