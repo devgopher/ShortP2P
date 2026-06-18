@@ -26,6 +26,9 @@ public sealed class WindowsBluetoothTransport : ITransport
     private bool _isStarted;
     private GattLocalCharacteristic? _bleRxCharacteristic;
     private readonly WindowsBluetoothTransportOptions _options;
+    private Channel<OutboundSendRequest>? _outbound;
+    private CancellationTokenSource? _runCts;
+    private Task? _sendLoopTask;
 
     static WindowsBluetoothTransport()
     {
@@ -44,8 +47,10 @@ public sealed class WindowsBluetoothTransport : ITransport
     public WindowsBluetoothTransport(WindowsBluetoothTransportOptions options) => _options = options;
 
     private const int DefaultChannelCapacity = 1024;
+    private const int OutboundQueueCapacity = 1024;
     private const int SendMaxAttempts = 10;
     private static readonly TimeSpan SendRetryInterval = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan SendThrottleInterval = TimeSpan.FromMilliseconds(100);
 
     public ValueTask DisposeAsync()
     {
@@ -59,6 +64,9 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
+        if (_isStarted)
+            return;
+
         var create = await GattServiceProvider.CreateAsync(BleShortP2PGattProtocol.ServiceUuid).AsTask(cancellationToken)
             .ConfigureAwait(false);
         if (create.Error != BluetoothError.Success || create.ServiceProvider == null)
@@ -80,6 +88,7 @@ public sealed class WindowsBluetoothTransport : ITransport
         var rxResult = await _bleServiceProvider.Service
             .CreateCharacteristicAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid, rxParameters)
             .AsTask(cancellationToken).ConfigureAwait(false);
+        
         if (rxResult.Error != BluetoothError.Success || rxResult.Characteristic == null)
             return;
         _bleRxCharacteristic = rxResult.Characteristic;
@@ -100,8 +109,17 @@ public sealed class WindowsBluetoothTransport : ITransport
         };
         _advertisementWatcher.Received += OnAdvertisementReceived;
         _advertisementWatcher.Start();
+
+        _runCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _outbound = System.Threading.Channels.Channel.CreateBounded<OutboundSendRequest>(new BoundedChannelOptions(OutboundQueueCapacity)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = true,
+            SingleWriter = false
+        });
         
         _isStarted = true;
+        _sendLoopTask = ProcessOutboundLoopAsync(_runCts.Token);
     }
 
     private async void OnBleRxWriteRequested(GattLocalCharacteristic sender, GattWriteRequestedEventArgs args)
@@ -136,19 +154,45 @@ public sealed class WindowsBluetoothTransport : ITransport
     }
 
 
-    public ValueTask StopAsync(CancellationToken cancellationToken = default)
+    public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
+        if (!_isStarted)
+            return;
+
+        _isStarted = false;
+
         try
         {
             _advertisementWatcher?.Stop();
             _bleServiceProvider?.StopAdvertising();
-        
-            _isStarted = false;
-            return ValueTask.CompletedTask;
+
+            if (_runCts != null)
+            {
+                await _runCts.CancelAsync().ConfigureAwait(false);
+                _outbound?.Writer.TryComplete();
+
+                if (_sendLoopTask != null)
+                {
+                    try
+                    {
+                        await _sendLoopTask.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // expected on stop
+                    }
+                }
+
+                while (_outbound?.Reader.TryRead(out var pending) == true)
+                    pending.Completion.TrySetCanceled(cancellationToken);
+            }
         }
-        catch (Exception exception)
+        finally
         {
-            return ValueTask.FromException(exception);
+            _runCts?.Dispose();
+            _runCts = null;
+            _sendLoopTask = null;
+            _outbound = null;
         }
     }
 
@@ -161,35 +205,66 @@ public sealed class WindowsBluetoothTransport : ITransport
         if (data.Length != BluetoothMacAddress.MacLength)
             throw new ArgumentException($"Bluetooth address must be {BluetoothMacAddress.MacLength} bytes (MAC).",
                 nameof(destination));
+        if (!_isStarted || _outbound == null)
+            throw new InvalidOperationException("Bluetooth transport is not started.");
 
-        for (var attempt = 1; attempt <= SendMaxAttempts; attempt++)
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var request = new OutboundSendRequest(payload.ToArray(), data.ToArray(), tcs);
+
+        await using var registration = cancellationToken.Register(static state =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var (pending, token) = ((OutboundSendRequest, CancellationToken))state!;
+            pending.Completion.TrySetCanceled(token);
+        }, (request, cancellationToken));
 
-            try
-            {
-                if (await TrySendOnceAsync(payload, data, cancellationToken).ConfigureAwait(false))
-                    return;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch
-            {
-                // retry transient BLE/GATT failures
-            }
-
-            if (attempt < SendMaxAttempts)
-                await Task.Delay(SendRetryInterval, cancellationToken).ConfigureAwait(false);
-        }
-
-        throw new IOException($"BLE send failed after {SendMaxAttempts} attempts.");
+        await _outbound.Writer.WriteAsync(request, cancellationToken).ConfigureAwait(false);
+        await tcs.Task.ConfigureAwait(false);
     }
-    
-    static ConcurrentDictionary<string, GattCharacteristicsResult> _results = new();
 
-    private static async ValueTask<bool> TrySendOnceAsync(ReadOnlyMemory<byte> payload, byte[] mac,
+    private async Task ProcessOutboundLoopAsync(CancellationToken cancellationToken)
+    {
+        if (_outbound == null)
+            return;
+
+        try
+        {
+            await foreach (var request in _outbound.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                try
+                {
+                    await TrySendOnceAsync(request.Payload, request.DestinationMac, cancellationToken)
+                        .ConfigureAwait(false);
+                    request.Completion.TrySetResult();
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    request.Completion.TrySetCanceled(cancellationToken);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    request.Completion.TrySetException(ex);
+                }
+
+                try
+                {
+                    await Task.Delay(SendThrottleInterval, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // expected on stop
+        }
+    }
+
+    static readonly ConcurrentDictionary<string, GattCharacteristicsResult> _results = new();
+
+    private static async ValueTask<bool> TrySendOnceAsync(byte[] payload, byte[] mac,
         CancellationToken cancellationToken)
     {
         var device = await BluetoothLEDevice.FromBluetoothAddressAsync(BluetoothMacAddress.ToBluetoothAddress(mac))
@@ -206,32 +281,32 @@ public sealed class WindowsBluetoothTransport : ITransport
             return false;
 
         var service = serviceResult.Services[0];
-        var rxResult  = _results.GetValueOrDefault(device.DeviceId);
-        
-        if (rxResult == null || rxResult.Characteristics.Count == 0)
-        {
-            rxResult = await service
+        // var rxResult  = _results.GetValueOrDefault(device.DeviceId);
+        //
+        // if (rxResult == null || rxResult.Characteristics.Count == 0)
+        // {
+        var rxResult = await service
                 .GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid)
                 .AsTask(cancellationToken)
                 .ConfigureAwait(false);
-
-            while (rxResult.Characteristics.Count == 0)
-            {
-                rxResult = await service
-                    .GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid)
-                    .AsTask(cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            
-            _results.TryAdd(device.DeviceId, rxResult);
-        }
+        //
+        //     while (rxResult.Characteristics.Count == 0)
+        //     {
+        //         rxResult = await service
+        //             .GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid)
+        //             .AsTask(cancellationToken)
+        //             .ConfigureAwait(false);
+        //     }
+        //     
+        //     _results.TryAdd(device.DeviceId, rxResult);
+        // }
 
         var rx = rxResult.Characteristics.FirstOrDefault();
         if (rx == null)
             return false;
 
         var writer = new DataWriter();
-        writer.WriteBytes(payload.ToArray());
+        writer.WriteBytes(payload);
         var status = await rx.WriteValueAsync(writer.DetachBuffer(), GattWriteOption.WriteWithoutResponse)
             .AsTask(cancellationToken)
             .ConfigureAwait(false);
@@ -251,21 +326,28 @@ public sealed class WindowsBluetoothTransport : ITransport
         
         if (_lastNetworkIdSending.ContainsKey(addr) && DateTime.UtcNow - _lastNetworkIdSending[addr] <= _networkIdPeriod)
             return;
-                
-        if (args.Advertisement.ServiceUuids.Contains(BleShortP2PGattProtocol.ServiceUuid))
-        {
-            var transportAddress =
-                new TransportAddress(TransportKind.Bluetooth, BluetoothMacAddress.FromBluetoothAddress(addr));
 
-            if (_options.LocalNetworkId is not { } localNetworkId || localNetworkId.IsEmpty)
-                return;
+        if (!args.Advertisement.ServiceUuids.Contains(BleShortP2PGattProtocol.ServiceUuid)) 
+            return;
+        
+        var transportAddress =
+            new TransportAddress(TransportKind.Bluetooth, BluetoothMacAddress.FromBluetoothAddress(addr));
 
-            var networkIdPacket = BleNetworkIdPacketCodec.BuildPacket(localNetworkId);
+        if (_options.LocalNetworkId is not { } localNetworkId || localNetworkId.IsEmpty)
+            return;
 
-            // Делимся своим networkId
-            _ = SendAsync(networkIdPacket, transportAddress);
+        var networkIdPacket = BleNetworkIdPacketCodec.BuildPacket(localNetworkId);
+
+        // Делимся своим networkId
+        _ = SendAsync(networkIdPacket, transportAddress);
             
-            _lastNetworkIdSending[addr] = DateTime.UtcNow;
-        }
+        _lastNetworkIdSending[addr] = DateTime.UtcNow;
+    }
+
+    private sealed class OutboundSendRequest(byte[] payload, byte[] destinationMac, TaskCompletionSource completion)
+    {
+        public byte[] Payload { get; } = payload;
+        public byte[] DestinationMac { get; } = destinationMac;
+        public TaskCompletionSource Completion { get; } = completion;
     }
 }

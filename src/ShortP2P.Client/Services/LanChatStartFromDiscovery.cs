@@ -12,10 +12,14 @@ namespace ShortP2P.Client.Services;
 /// <summary>Начало чата с пиром из LAN discovery: отправка ChatInvite и ожидание ответного приглашения с ключом.</summary>
 public static class LanChatStartFromDiscovery
 {
+    /// <param name="chats"></param>
     /// <param name="inviteListenerCoordinator">
     ///     Если задан и в рантайме есть общая <see cref="IUdpTransportFactory" />, инвайт уходит через тот же сокет,
     ///     что и фоновый приёмник (без stop/start). Иначе — временно освобождает порт и поднимает слушатель снова.
     /// </param>
+    /// <param name="peer"></param>
+    /// <param name="auth"></param>
+    /// <param name="cancellationToken"></param>
     public static async Task<LanChatStartResult> TryStartAsync(
         DiscoveredLocalPeer peer,
         AuthService auth,
@@ -43,16 +47,16 @@ public static class LanChatStartFromDiscovery
                 ? BluetoothTransportAddress.ToMacString(peer.SourceAddress.Data)
                 : UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address.ToString();
             var mergedHost = PeerHostList.WithPrimaryFirst(existing.PeerHost, seenIp);
-            if (!string.Equals(mergedHost, existing.PeerHost, StringComparison.Ordinal))
-            {
-                await chats.UpdateChatP2pRouteAsync(existing.Id, mergedHost, existing.PeerPort, existing.RelayRouteBlob)
-                    .ConfigureAwait(false);
-                chats.NotifyChatListChanged();
-                var fresh = await chats.GetChatAsync(existing.Id).ConfigureAwait(false);
-                return LanChatStartResult.AlreadyExists(fresh ?? existing);
-            }
+            
+            if (string.Equals(mergedHost, existing.PeerHost, StringComparison.Ordinal))
+                return LanChatStartResult.AlreadyExists(existing);
+            
+            await chats.UpdateChatP2pRouteAsync(existing.Id, mergedHost, existing.PeerPort, existing.RelayRouteBlob)
+                .ConfigureAwait(false);
+            chats.NotifyChatListChanged();
+            var fresh = await chats.GetChatAsync(existing.Id).ConfigureAwait(false);
+            return LanChatStartResult.AlreadyExists(fresh ?? existing);
 
-            return LanChatStartResult.AlreadyExists(existing);
         }
 
         var dest = peer.TransportKind == TransportKind.Bluetooth
