@@ -1936,8 +1936,8 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
         try
         {
-            _logger.LogDebug("Chat {ChatId}: follower waiting for RSA handshake (timeout 10s)", _chat.Id);
-            await waitHandshake.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
+            _logger.LogDebug("Chat {ChatId}: follower waiting for RSA handshake (timeout 60s)", _chat.Id);
+            await waitHandshake.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Chat {ChatId}: follower session setup completed", _chat.Id);
         }
         catch (TimeoutException ex)
