@@ -88,8 +88,6 @@ internal static class Program
         host.StartAsync().GetAwaiter().GetResult();
 
         var provider = host.Services;
-        var routing = provider.GetRequiredService<P2pRoutingSettingsStore>().LoadAsync().GetAwaiter().GetResult();
-        provider.GetRequiredService<BluetoothTransportRegistration>().ApplySettings(routing);
         var hostLogger = provider.GetRequiredService<ILogger<WinFormsHost>>();
         var userActionLogger = provider.GetRequiredService<ILogger<UserAction>>();
         RegisterGlobalExceptionLogging(hostLogger);
