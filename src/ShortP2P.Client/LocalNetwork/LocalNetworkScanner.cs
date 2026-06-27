@@ -478,11 +478,18 @@ public sealed class LocalNetworkScanner(
     private static DiscoveredLocalPeer MergeDiscoveredPeers(DiscoveredLocalPeer existing, DiscoveredLocalPeer incoming)
     {
         var lastSeen = incoming.LastSeenUtc > existing.LastSeenUtc ? incoming.LastSeenUtc : existing.LastSeenUtc;
-        if (existing.TransportKind == TransportKind.Udp && incoming.TransportKind == TransportKind.Bluetooth)
-            return existing with { LastSeenUtc = lastSeen };
-        if (existing.TransportKind == TransportKind.Bluetooth && incoming.TransportKind == TransportKind.Udp)
-            return incoming with { LastSeenUtc = lastSeen };
-        return incoming.LastSeenUtc >= existing.LastSeenUtc ? incoming : existing;
+        return existing.TransportKind switch
+        {
+            TransportKind.Udp when incoming.TransportKind == TransportKind.Bluetooth => existing with
+            {
+                LastSeenUtc = lastSeen
+            },
+            TransportKind.Bluetooth when incoming.TransportKind == TransportKind.Udp => incoming with
+            {
+                LastSeenUtc = lastSeen
+            },
+            _ => incoming.LastSeenUtc >= existing.LastSeenUtc ? incoming : existing
+        };
     }
 
     private static async Task PresenceReceiveLoopAsync(ITransport transport, PresencePingCodec.Transceiver transceiver,
@@ -491,7 +498,10 @@ public sealed class LocalNetworkScanner(
         try
         {
             await foreach (var msg in transport.Inbound.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
                 transceiver.HandleIncoming(msg);
+                await Task.Delay(500, cancellationToken);
+            }
         }
         catch (OperationCanceledException)
         {
