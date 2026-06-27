@@ -1,15 +1,9 @@
-using System.Collections.Concurrent;
 using System.Runtime.Versioning;
 using System.Threading.Channels;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
-using Windows.Devices.Enumeration;
-using Windows.Foundation.Collections;
 using Windows.Storage.Streams;
-using Microsoft.Extensions.Logging;
-using ShortP2P.Auth.Data;
-using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
@@ -21,36 +15,42 @@ namespace ShortP2P.Transport.Bluetooth.Windows;
 [SupportedOSPlatform("windows10.0.18362.0")]
 public sealed class WindowsBluetoothTransport : ITransport
 {
-    private GattServiceProvider? _bleServiceProvider;
-    private BluetoothLEAdvertisementWatcher? _advertisementWatcher;
-    private bool _isStarted;
-    private GattLocalCharacteristic? _bleRxCharacteristic;
+    private const int DefaultChannelCapacity = 1024;
+    private const int OutboundQueueCapacity = 1024;
+    private static readonly TimeSpan SendThrottleInterval = TimeSpan.FromMilliseconds(100);
+
+    private readonly Dictionary<ulong, DateTime> _lastNetworkIdSending = new(100);
+    private readonly TimeSpan _networkIdPeriod = new(0, 0, 30);
     private readonly WindowsBluetoothTransportOptions _options;
+    private BluetoothLEAdvertisementWatcher? _advertisementWatcher;
+    private GattLocalCharacteristic? _bleRxCharacteristic;
+    private GattServiceProvider? _bleServiceProvider;
+    private bool _isStarted;
     private Channel<OutboundSendRequest>? _outbound;
     private CancellationTokenSource? _runCts;
     private Task? _sendLoopTask;
 
     static WindowsBluetoothTransport()
     {
-        Channel = System.Threading.Channels.Channel.CreateBounded<TransportReceiveMessage>(new BoundedChannelOptions(DefaultChannelCapacity)
-        {
-            FullMode = BoundedChannelFullMode.DropOldest,
-            SingleReader = true,
-            SingleWriter = false
-        });
+        Channel = System.Threading.Channels.Channel.CreateBounded<TransportReceiveMessage>(
+            new BoundedChannelOptions(DefaultChannelCapacity)
+            {
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleReader = true,
+                SingleWriter = false
+            });
     }
-    
+
     /// <summary>
     ///     Bluetooth Low Energy (GATT) на Windows через WinRT: исходящие записи в RX-характеристику пира
     ///     и входящие записи через локальный GATT-сервер.
     /// </summary>
-    public WindowsBluetoothTransport(WindowsBluetoothTransportOptions options) => _options = options;
+    public WindowsBluetoothTransport(WindowsBluetoothTransportOptions options)
+    {
+        _options = options;
+    }
 
-    private const int DefaultChannelCapacity = 1024;
-    private const int OutboundQueueCapacity = 1024;
-    private const int SendMaxAttempts = 10;
-    private static readonly TimeSpan SendRetryInterval = TimeSpan.FromMilliseconds(100);
-    private static readonly TimeSpan SendThrottleInterval = TimeSpan.FromMilliseconds(100);
+    private static Channel<TransportReceiveMessage> Channel { get; }
 
     public ValueTask DisposeAsync()
     {
@@ -60,14 +60,13 @@ public sealed class WindowsBluetoothTransport : ITransport
     public TransportKind Kind => TransportKind.Bluetooth;
     public ChannelReader<TransportReceiveMessage> Inbound => Channel.Reader;
 
-    private static Channel<TransportReceiveMessage> Channel { get; }
-
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
         if (_isStarted)
             return;
 
-        var create = await GattServiceProvider.CreateAsync(BleShortP2PGattProtocol.ServiceUuid).AsTask(cancellationToken)
+        var create = await GattServiceProvider.CreateAsync(BleShortP2PGattProtocol.ServiceUuid)
+            .AsTask(cancellationToken)
             .ConfigureAwait(false);
         if (create.Error != BluetoothError.Success || create.ServiceProvider == null)
             return;
@@ -82,13 +81,13 @@ public sealed class WindowsBluetoothTransport : ITransport
             ReadProtectionLevel = GattProtectionLevel.Plain,
             UserDescription = "ShortP2P BLE RX"
         };
-        
+
         _bleServiceProvider = create.ServiceProvider;
-        
+
         var rxResult = await _bleServiceProvider.Service
             .CreateCharacteristicAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid, rxParameters)
             .AsTask(cancellationToken).ConfigureAwait(false);
-        
+
         if (rxResult.Error != BluetoothError.Success || rxResult.Characteristic == null)
             return;
         _bleRxCharacteristic = rxResult.Characteristic;
@@ -102,7 +101,7 @@ public sealed class WindowsBluetoothTransport : ITransport
         };
 
         _bleServiceProvider.StartAdvertising(advertising);
-        
+
         _advertisementWatcher = new BluetoothLEAdvertisementWatcher
         {
             ScanningMode = BluetoothLEScanningMode.Passive
@@ -111,46 +110,16 @@ public sealed class WindowsBluetoothTransport : ITransport
         _advertisementWatcher.Start();
 
         _runCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _outbound = System.Threading.Channels.Channel.CreateBounded<OutboundSendRequest>(new BoundedChannelOptions(OutboundQueueCapacity)
-        {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleReader = true,
-            SingleWriter = false
-        });
-        
+        _outbound = System.Threading.Channels.Channel.CreateBounded<OutboundSendRequest>(
+            new BoundedChannelOptions(OutboundQueueCapacity)
+            {
+                FullMode = BoundedChannelFullMode.Wait,
+                SingleReader = true,
+                SingleWriter = false
+            });
+
         _isStarted = true;
         _sendLoopTask = ProcessOutboundLoopAsync(_runCts.Token);
-    }
-
-    private async void OnBleRxWriteRequested(GattLocalCharacteristic sender, GattWriteRequestedEventArgs args)
-    {
-        try
-        {
-            using var deferral = args.GetDeferral();
-            var req = await args.GetRequestAsync();
-            if (req == null)
-                return;
-            var reader = DataReader.FromBuffer(req.Value);
-            var data = new byte[reader.UnconsumedBufferLength];
-            reader.ReadBytes(data);
-            if (data.Length == 0)
-                return;
-            if (req.Option == GattWriteOption.WriteWithResponse)
-                req.Respond();
-
-            var device = await BluetoothLEDevice.FromIdAsync(args.Session.DeviceId.Id);
-
-            if (device == null)
-                return;
-            
-            var addr = new TransportAddress(TransportKind.Bluetooth, BluetoothMacAddress.FromBluetoothAddress(device.BluetoothAddress));
-
-            await Channel.Writer.WriteAsync(new TransportReceiveMessage(data, addr)).ConfigureAwait(false);
-        }
-        catch
-        {
-            // ignore malformed writes
-        }
     }
 
 
@@ -172,7 +141,6 @@ public sealed class WindowsBluetoothTransport : ITransport
                 _outbound?.Writer.TryComplete();
 
                 if (_sendLoopTask != null)
-                {
                     try
                     {
                         await _sendLoopTask.ConfigureAwait(false);
@@ -181,7 +149,6 @@ public sealed class WindowsBluetoothTransport : ITransport
                     {
                         // expected on stop
                     }
-                }
 
                 while (_outbound?.Reader.TryRead(out var pending) == true)
                     pending.Completion.TrySetCanceled(cancellationToken);
@@ -219,6 +186,38 @@ public sealed class WindowsBluetoothTransport : ITransport
 
         await _outbound.Writer.WriteAsync(request, cancellationToken).ConfigureAwait(false);
         await tcs.Task.ConfigureAwait(false);
+    }
+
+    private async void OnBleRxWriteRequested(GattLocalCharacteristic sender, GattWriteRequestedEventArgs args)
+    {
+        try
+        {
+            using var deferral = args.GetDeferral();
+            var req = await args.GetRequestAsync();
+            if (req == null)
+                return;
+            var reader = DataReader.FromBuffer(req.Value);
+            var data = new byte[reader.UnconsumedBufferLength];
+            reader.ReadBytes(data);
+            if (data.Length == 0)
+                return;
+            if (req.Option == GattWriteOption.WriteWithResponse)
+                req.Respond();
+
+            var device = await BluetoothLEDevice.FromIdAsync(args.Session.DeviceId.Id);
+
+            if (device == null)
+                return;
+
+            var addr = new TransportAddress(TransportKind.Bluetooth,
+                BluetoothMacAddress.FromBluetoothAddress(device.BluetoothAddress));
+
+            await Channel.Writer.WriteAsync(new TransportReceiveMessage(data, addr)).ConfigureAwait(false);
+        }
+        catch
+        {
+            // ignore malformed writes
+        }
     }
 
     private async Task ProcessOutboundLoopAsync(CancellationToken cancellationToken)
@@ -262,8 +261,6 @@ public sealed class WindowsBluetoothTransport : ITransport
         }
     }
 
-    static readonly ConcurrentDictionary<string, GattCharacteristicsResult> _results = new();
-
     private static async ValueTask<bool> TrySendOnceAsync(byte[] payload, byte[] mac,
         CancellationToken cancellationToken)
     {
@@ -286,9 +283,9 @@ public sealed class WindowsBluetoothTransport : ITransport
         // if (rxResult == null || rxResult.Characteristics.Count == 0)
         // {
         var rxResult = await service
-                .GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid)
-                .AsTask(cancellationToken)
-                .ConfigureAwait(false);
+            .GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid)
+            .AsTask(cancellationToken)
+            .ConfigureAwait(false);
         //
         //     while (rxResult.Characteristics.Count == 0)
         //     {
@@ -313,34 +310,32 @@ public sealed class WindowsBluetoothTransport : ITransport
         return status == GattCommunicationStatus.Success;
     }
 
-    private readonly Dictionary<ulong, DateTime> _lastNetworkIdSending = new(100);
-    private readonly TimeSpan _networkIdPeriod = new(0,0, 30);
-    
-    
+
     private void OnAdvertisementReceived(BluetoothLEAdvertisementWatcher sender,
         BluetoothLEAdvertisementReceivedEventArgs args)
     {
+        if (_options.LocalNetworkId is not { } localNetworkId || localNetworkId.IsEmpty)
+            return;
+
         var addr = args.BluetoothAddress;
         if (addr == 0)
             return;
-        
-        if (_lastNetworkIdSending.ContainsKey(addr) && DateTime.UtcNow - _lastNetworkIdSending[addr] <= _networkIdPeriod)
+
+        if (_lastNetworkIdSending.ContainsKey(addr) &&
+            DateTime.UtcNow - _lastNetworkIdSending[addr] <= _networkIdPeriod)
             return;
 
-        if (!args.Advertisement.ServiceUuids.Contains(BleShortP2PGattProtocol.ServiceUuid)) 
+        if (!args.Advertisement.ServiceUuids.Contains(BleShortP2PGattProtocol.ServiceUuid))
             return;
-        
+
         var transportAddress =
             new TransportAddress(TransportKind.Bluetooth, BluetoothMacAddress.FromBluetoothAddress(addr));
-
-        if (_options.LocalNetworkId is not { } localNetworkId || localNetworkId.IsEmpty)
-            return;
 
         var networkIdPacket = BleNetworkIdPacketCodec.BuildPacket(localNetworkId);
 
         // Делимся своим networkId
         _ = SendAsync(networkIdPacket, transportAddress);
-            
+
         _lastNetworkIdSending[addr] = DateTime.UtcNow;
     }
 

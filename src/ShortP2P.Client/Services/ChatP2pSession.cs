@@ -1623,7 +1623,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 return;
 
             _logger.LogInformation("Chat {ChatId}: starting crypto probe round-trip confirmation", _chat.Id);
-            var okWait = TimeSpan.FromSeconds(10);
+            var okWait = TimeSpan.FromSeconds(60);
 
             while (!cancellationToken.IsCancellationRequested && !_cryptoProbeRoundTripOk)
             {
@@ -1882,78 +1882,77 @@ public sealed class ChatP2PSession : IAsyncDisposable
             }
 
             _logger.LogInformation("Chat {ChatId}: leader session setup completed", _chat.Id);
-            return;
         }
 
-        if (IsFollowerCryptoReady())
-        {
-            _logger.LogDebug("Chat {ChatId}: follower crypto already ready", _chat.Id);
-            return;
-        }
-
-        TaskCompletionSource<bool> waitHandshake;
-        var shouldSendSessionRequest = false;
-        lock (_sync)
-        {
-            if (IsFollowerCryptoReadyCore())
-                return;
-
-            if (_followerHandshakeTcs is { Task.IsCompleted: false })
-            {
-                _logger.LogDebug("Chat {ChatId}: follower waiting on existing handshake flight", _chat.Id);
-                waitHandshake = _followerHandshakeTcs;
-            }
-            else
-            {
-                waitHandshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                _followerHandshakeTcs = waitHandshake;
-                shouldSendSessionRequest = true;
-            }
-        }
-
-        if (IsFollowerCryptoReady())
-        {
-            SignalFollowerHandshakeSuccess(waitHandshake);
-            return;
-        }
-
-        if (shouldSendSessionRequest)
-            try
-            {
-                await SendSessionSetupRequestPacketAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                SignalFollowerHandshakeFailure(ex, waitHandshake);
-                throw;
-            }
-
-        if (IsFollowerCryptoReady())
-        {
-            SignalFollowerHandshakeSuccess(waitHandshake);
-            return;
-        }
-
-        try
-        {
-            _logger.LogDebug("Chat {ChatId}: follower waiting for RSA handshake (timeout 10s)", _chat.Id);
-            await waitHandshake.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation("Chat {ChatId}: follower session setup completed", _chat.Id);
-        }
-        catch (TimeoutException ex)
-        {
-            _logger.LogWarning(ex, "Chat {ChatId}: follower handshake wait timed out", _chat.Id);
-            SignalFollowerHandshakeFailure(ex, waitHandshake);
-            throw;
-        }
-        finally
-        {
-            lock (_sync)
-            {
-                if (ReferenceEquals(_followerHandshakeTcs, waitHandshake))
-                    _followerHandshakeTcs = null;
-            }
-        }
+        // if (IsFollowerCryptoReady())
+        // {
+        //     _logger.LogDebug("Chat {ChatId}: follower crypto already ready", _chat.Id);
+        //     return;
+        // }
+        //
+        // TaskCompletionSource<bool> waitHandshake;
+        // var shouldSendSessionRequest = false;
+        // lock (_sync)
+        // {
+        //     if (IsFollowerCryptoReadyCore())
+        //         return;
+        //
+        //     if (_followerHandshakeTcs is { Task.IsCompleted: false })
+        //     {
+        //         _logger.LogDebug("Chat {ChatId}: follower waiting on existing handshake flight", _chat.Id);
+        //         waitHandshake = _followerHandshakeTcs;
+        //     }
+        //     else
+        //     {
+        //         waitHandshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        //         _followerHandshakeTcs = waitHandshake;
+        //         shouldSendSessionRequest = true;
+        //     }
+        // }
+        //
+        // if (IsFollowerCryptoReady())
+        // {
+        //     SignalFollowerHandshakeSuccess(waitHandshake);
+        //     return;
+        // }
+        //
+        // if (shouldSendSessionRequest)
+        //     try
+        //     {
+        //         await SendSessionSetupRequestPacketAsync(cancellationToken).ConfigureAwait(false);
+        //     }
+        //     catch (Exception ex)
+        //     {
+        //         SignalFollowerHandshakeFailure(ex, waitHandshake);
+        //         throw;
+        //     }
+        //
+        // if (IsFollowerCryptoReady())
+        // {
+        //     SignalFollowerHandshakeSuccess(waitHandshake);
+        //     return;
+        // }
+        //
+        // try
+        // {
+        //     _logger.LogDebug("Chat {ChatId}: follower waiting for RSA handshake (timeout 60s)", _chat.Id);
+        //     await waitHandshake.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken).ConfigureAwait(false);
+        //     _logger.LogInformation("Chat {ChatId}: follower session setup completed", _chat.Id);
+        // }
+        // catch (TimeoutException ex)
+        // {
+        //     _logger.LogWarning(ex, "Chat {ChatId}: follower handshake wait timed out", _chat.Id);
+        //     SignalFollowerHandshakeFailure(ex, waitHandshake);
+        //     throw;
+        // }
+        // finally
+        // {
+        //     lock (_sync)
+        //     {
+        //         if (ReferenceEquals(_followerHandshakeTcs, waitHandshake))
+        //             _followerHandshakeTcs = null;
+        //     }
+        // }
     }
 
     private async Task EnsureMessengerStartedForExistingSessionAsync(CancellationToken cancellationToken)

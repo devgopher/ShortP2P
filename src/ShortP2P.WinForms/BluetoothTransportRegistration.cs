@@ -72,20 +72,22 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
     {
         lock (_sync)
         {
-            if (_instance != null)
+            if (_instance != null && _localNetworkId != null)
             {
                 return;
             }
 
             if (!settings.EnableBluetoothTransport)
                 return;
-
-            _instance = new WindowsBluetoothTransport(new WindowsBluetoothTransportOptions(
+            
+            if (_localNetworkId != null)
+                _instance = new WindowsBluetoothTransport(new WindowsBluetoothTransportOptions(
                 true,
                 null,
                 _localNetworkId,
                 OnPeerNetworkIdReceived,
                 _transportLogger));
+            
         }
     }
 
