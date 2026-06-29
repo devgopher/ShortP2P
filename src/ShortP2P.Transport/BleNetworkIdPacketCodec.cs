@@ -10,11 +10,11 @@ public static class BleNetworkIdPacketCodec
 {
     public static ReadOnlySpan<byte> Prefix => [0x33, 0x55];
 
-    public const int PrefixLength = 2;
+    private const int PrefixLength = 2;
 
-    public const int PacketLength = PrefixLength + CompressedNetworkId.WireLength;
+    private const int PacketLength = PrefixLength + CompressedNetworkId.WireLength;
 
-    public static bool IsPrefixedPacket(ReadOnlySpan<byte> data)
+    private static bool IsPrefixedPacket(ReadOnlySpan<byte> data)
     {
         return data.Length >= PrefixLength && data[0] == Prefix[0] && data[1] == Prefix[1];
     }

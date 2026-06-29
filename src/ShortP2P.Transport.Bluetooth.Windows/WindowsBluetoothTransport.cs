@@ -231,7 +231,7 @@ public sealed class WindowsBluetoothTransport : ITransport
             {
                 try
                 {
-                    await TrySendOnceAsync(request.Payload, request.DestinationMac, cancellationToken)
+                    await TrySendOnceAsync(request.Payload, request.DestinationAddress, cancellationToken)
                         .ConfigureAwait(false);
                     request.Completion.TrySetResult();
                 }
@@ -339,10 +339,10 @@ public sealed class WindowsBluetoothTransport : ITransport
         _lastNetworkIdSending[addr] = DateTime.UtcNow;
     }
 
-    private sealed class OutboundSendRequest(byte[] payload, byte[] destinationMac, TaskCompletionSource completion)
+    private sealed class OutboundSendRequest(byte[] payload, byte[] destinationAddress, TaskCompletionSource completion)
     {
         public byte[] Payload { get; } = payload;
-        public byte[] DestinationMac { get; } = destinationMac;
+        public byte[] DestinationAddress { get; } = destinationAddress;
         public TaskCompletionSource Completion { get; } = completion;
     }
 }

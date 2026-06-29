@@ -400,6 +400,16 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
             LocalScan.RememberBluetoothPeer(msg.RemoteAddress);
             await LocalScan.SendUnicastPresencePingAsync(msg.RemoteAddress, cancellationToken).ConfigureAwait(false);
+
+            var shortId = msg.NetworkId.ToShortString();
+            var chat = await _chats.FindChatByPeerNetworkIdAsync(user.Id, shortId).ConfigureAwait(false);
+            if (chat == null)
+                return;
+
+            var seenDirect = BluetoothTransportAddress.ToMacString(msg.RemoteAddress.Data);
+            await ApplyDiscoveryPingRouteAsync(chat, TransportKind.Bluetooth, seenDirect, cancellationToken)
+                .ConfigureAwait(false);
+            await TryEnsureChatSessionStartedAsync(chat.Id, null, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

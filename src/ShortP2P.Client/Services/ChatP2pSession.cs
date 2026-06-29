@@ -1582,6 +1582,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
     private List<TransportAddress> BuildOrderedDirectPeerAddresses()
     {
+        //в _peerAddress должен записываться адрес, который приходит в пакете с networkId
         var list = new List<TransportAddress>();
         if (_peerAddress != null && IsTransportEnabled(_peerAddress.Kind))
             list.Add(_peerAddress);
