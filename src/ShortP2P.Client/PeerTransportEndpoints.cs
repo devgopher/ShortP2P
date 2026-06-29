@@ -18,7 +18,7 @@ public static class PeerTransportEndpoints
                 var list = new List<TransportAddress>(arr.Count);
                 foreach (var x in arr)
                 {
-                    if (!Enum.IsDefined(typeof(TransportKind), x.K))
+                    if (!Enum.IsDefined(typeof(TransportKind), (byte)x.K))
                         continue;
                     var data = Convert.FromBase64String(x.D);
                     list.Add(new TransportAddress((TransportKind)x.K, data));

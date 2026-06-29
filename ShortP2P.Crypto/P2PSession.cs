@@ -128,13 +128,11 @@ public sealed class P2PSession
     private byte[] ComputeTag(byte[] iv, byte[] ciphertext)
     {
         var input = CryptoPrimitives.Concat(iv, ciphertext);
-        using (var hmac = new HMACSHA256(_macKey))
-        {
-            var full = hmac.ComputeHash(input);
-            var tag = new byte[TagBytes];
-            Buffer.BlockCopy(full, 0, tag, 0, TagBytes);
+        using var hmac = new HMACSHA256(_macKey);
+        var full = hmac.ComputeHash(input);
+        var tag = new byte[TagBytes];
+        Buffer.BlockCopy(full, 0, tag, 0, TagBytes);
 
-            return tag;
-        }
+        return tag;
     }
 }

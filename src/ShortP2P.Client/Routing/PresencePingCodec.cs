@@ -61,7 +61,7 @@ public static class PresencePingCodec
         return buf;
     }
 
-    public static bool TryParse(ReadOnlySpan<byte> datagram, out CompressedNetworkId networkId, out string nickname,
+    private static bool TryParse(ReadOnlySpan<byte> datagram, out CompressedNetworkId networkId, out string nickname,
         out int dataUdpPort, out LinkTechnologyPreset advertisedLink,
         out PresencePeerCapabilities advertisedCapabilities)
     {

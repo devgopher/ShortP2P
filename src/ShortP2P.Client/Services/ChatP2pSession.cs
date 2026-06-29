@@ -90,14 +90,14 @@ public sealed class ChatP2PSession : IAsyncDisposable
         P2pCryptoSessionCache? cryptoSessionCache = null,
         ILogger<ChatP2PSession>? logger = null)
     {
-        this._chat = chat;
-        this._user = user;
-        this._auth = auth;
-        this._repo = repo;
+        _chat = chat;
+        _user = user;
+        _auth = auth;
+        _repo = repo;
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
-        this._uiSynchronizationContext = uiSynchronizationContext;
-        this._routingSettings = routingSettings;
-        this._localNetworkScanner = localNetworkScanner;
+        _uiSynchronizationContext = uiSynchronizationContext;
+        _routingSettings = routingSettings;
+        _localNetworkScanner = localNetworkScanner;
         _cryptoSessionCache = cryptoSessionCache ?? new P2pCryptoSessionCache();
         _media = chatMediaOptions ?? new ChatMediaOptions();
         _logger = logger ?? NullLogger<ChatP2PSession>.Instance;
