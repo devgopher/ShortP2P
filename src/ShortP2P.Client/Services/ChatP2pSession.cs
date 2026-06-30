@@ -1031,8 +1031,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
     {
         using var linkedCts = CreateOutboundLinkedCts(cancellationToken, _outboundCts);
         var deliveryToken = linkedCts?.Token ?? cancellationToken;
-
-        var ackTimeout = (_routingSettings?.LinkTechnology ?? LinkTechnologyPreset.Unlimited).GetMessageAckTimeout();
+        
         await _guaranteedDelivery.ExecuteAsync(
             async ct =>
             {

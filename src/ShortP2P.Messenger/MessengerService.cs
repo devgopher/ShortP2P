@@ -89,8 +89,7 @@ public sealed class MessengerService(
     }
 
     /// <summary>
-    ///     Отправляет по очереди на каждый адрес, пока не придёт квитанция <paramref name="ackTimeout" /> или не
-    ///     закончатся адреса.
+    ///     Шифрует сообщение один раз и отправляет чанки параллельно на все адреса.
     /// </summary>
     public async ValueTask SendBinaryAsyncExpectAck(byte[] data, IReadOnlyList<TransportAddress> destinationsInOrder, CancellationToken cancellationToken = default)
     {
@@ -103,18 +102,26 @@ public sealed class MessengerService(
                 nameof(data));
 
         var messageId = Guid.NewGuid();
-        foreach (var dest in destinationsInOrder)
-            try
-            {
-                await SendChunksForMessageAsync(data, messageId, dest, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                // TODO: логирование
-            }
+        var prepared = await PrepareEncryptedChunksAsync(data, messageId, cancellationToken).ConfigureAwait(false);
+
+        var sendTasks = destinationsInOrder.Select(dest => SendPreparedChunksToDestinationAsync(
+            prepared, messageId, dest, cancellationToken));
+
+        await Task.WhenAll(sendTasks).ConfigureAwait(false);
+
+        CacheOutboundChunks(messageId, destinationsInOrder[0], prepared);
     }
 
     private async ValueTask SendChunksForMessageAsync(byte[] data, Guid messageId, TransportAddress destination,
+        CancellationToken cancellationToken)
+    {
+        var prepared = await PrepareEncryptedChunksAsync(data, messageId, cancellationToken).ConfigureAwait(false);
+        await SendPreparedChunksToDestinationAsync(prepared, messageId, destination, cancellationToken)
+            .ConfigureAwait(false);
+        CacheOutboundChunks(messageId, destination, prepared);
+    }
+
+    private async ValueTask<byte[][]> PrepareEncryptedChunksAsync(byte[] data, Guid messageId,
         CancellationToken cancellationToken)
     {
         if (data.Length > _options.MaxBinaryMessageBytes)
@@ -133,9 +140,6 @@ public sealed class MessengerService(
         }
 
         var encryptedChunks = new byte[totalChunks][];
-        Console.WriteLine(
-            $"{DateTime.UtcNow.ToString(CultureInfo.InvariantCulture)} sending to {FormatDestinationForLog(destination)}");
-
         for (var i = 0; i < totalChunks; i++)
         {
             var offset = i * maxPayload;
@@ -144,11 +148,35 @@ public sealed class MessengerService(
             if (len > 0)
                 Buffer.BlockCopy(data, offset, sliceBytes, 0, len);
             var plain = ChunkCodec.BuildChunk(messageId, i, totalChunks, sliceBytes);
-            var encrypted = session.Encrypt(plain);
-            encryptedChunks[i] = encrypted;
-            await _sendCipherAsync(encrypted, destination, cancellationToken).ConfigureAwait(false);
+            encryptedChunks[i] = session.Encrypt(plain);
         }
 
+        return encryptedChunks;
+    }
+
+    private async Task SendPreparedChunksToDestinationAsync(byte[][] encryptedChunks, Guid messageId,
+        TransportAddress destination, CancellationToken cancellationToken)
+    {
+        Console.WriteLine(
+            $"{DateTime.UtcNow.ToString(CultureInfo.InvariantCulture)} sending to {FormatDestinationForLog(destination)}");
+
+        try
+        {
+            for (var i = 0; i < encryptedChunks.Length; i++)
+                await _sendCipherAsync(encryptedChunks[i], destination, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // TODO: логирование
+        }
+        catch (Exception)
+        {
+            // TODO: логирование
+        }
+    }
+
+    private void CacheOutboundChunks(Guid messageId, TransportAddress destination, byte[][] encryptedChunks)
+    {
         lock (_sync)
         {
             _outboundChunks[messageId] = new OutboundCacheEntry(destination, encryptedChunks);
