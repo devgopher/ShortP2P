@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Globalization;
 using System.Security.Cryptography;
 using ShortP2P.Crypto;
 using ShortP2P.Transport.Abstractions;
@@ -157,9 +156,6 @@ public sealed class MessengerService(
     private async Task SendPreparedChunksToDestinationAsync(byte[][] encryptedChunks, Guid messageId,
         TransportAddress destination, CancellationToken cancellationToken)
     {
-        Console.WriteLine(
-            $"{DateTime.UtcNow.ToString(CultureInfo.InvariantCulture)} sending to {FormatDestinationForLog(destination)}");
-
         try
         {
             for (var i = 0; i < encryptedChunks.Length; i++)
@@ -180,18 +176,6 @@ public sealed class MessengerService(
         lock (_sync)
         {
             _outboundChunks[messageId] = new OutboundCacheEntry(destination, encryptedChunks);
-        }
-    }
-
-    private static string FormatDestinationForLog(TransportAddress destination)
-    {
-        try
-        {
-            return destination.ToIpAddress();
-        }
-        catch (InvalidOperationException)
-        {
-            return $"{destination.Kind}";
         }
     }
 

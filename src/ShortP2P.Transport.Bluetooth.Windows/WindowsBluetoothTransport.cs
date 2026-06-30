@@ -1,9 +1,11 @@
 using System.Runtime.Versioning;
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Storage.Streams;
+using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
@@ -168,15 +170,15 @@ public sealed class WindowsBluetoothTransport : ITransport
     {
         if (destination.Kind != TransportKind.Bluetooth)
             throw new ArgumentException("Destination must be Bluetooth transport.", nameof(destination));
-        var data = destination.Data;
-        if (data.Length != BluetoothMacAddress.MacLength)
+        var destinationData = destination.Data;
+        if (destinationData.Length != BluetoothMacAddress.MacLength)
             throw new ArgumentException($"Bluetooth address must be {BluetoothMacAddress.MacLength} bytes (MAC).",
                 nameof(destination));
         if (!_isStarted || _outbound == null)
             throw new InvalidOperationException("Bluetooth transport is not started.");
 
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var request = new OutboundSendRequest(payload.ToArray(), data.ToArray(), tcs);
+        var request = new OutboundSendRequest(payload.ToArray(), destinationData.ToArray(), tcs);
 
         await using var registration = cancellationToken.Register(static state =>
         {
@@ -211,6 +213,8 @@ public sealed class WindowsBluetoothTransport : ITransport
 
             var addr = new TransportAddress(TransportKind.Bluetooth,
                 BluetoothMacAddress.FromBluetoothAddress(device.BluetoothAddress));
+
+            TransportTrafficLog.LogReceive(_options.Logger, addr, LocalBluetoothEndpoint(), data);
 
             await Channel.Writer.WriteAsync(new TransportReceiveMessage(data, addr)).ConfigureAwait(false);
         }
@@ -261,9 +265,12 @@ public sealed class WindowsBluetoothTransport : ITransport
         }
     }
 
-    private static async ValueTask<bool> TrySendOnceAsync(byte[] payload, byte[] mac,
+    private async ValueTask<bool> TrySendOnceAsync(byte[] payload, byte[] mac,
         CancellationToken cancellationToken)
     {
+        var destination = new TransportAddress(TransportKind.Bluetooth, mac);
+        TransportTrafficLog.LogSend(_options.Logger, LocalBluetoothEndpoint(), destination, payload);
+
         var device = await BluetoothLEDevice.FromBluetoothAddressAsync(BluetoothMacAddress.ToBluetoothAddress(mac))
             .AsTask(cancellationToken).ConfigureAwait(false);
         if (device == null)
@@ -278,25 +285,10 @@ public sealed class WindowsBluetoothTransport : ITransport
             return false;
 
         var service = serviceResult.Services[0];
-        // var rxResult  = _results.GetValueOrDefault(device.DeviceId);
-        //
-        // if (rxResult == null || rxResult.Characteristics.Count == 0)
-        // {
         var rxResult = await service
             .GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid)
             .AsTask(cancellationToken)
             .ConfigureAwait(false);
-        //
-        //     while (rxResult.Characteristics.Count == 0)
-        //     {
-        //         rxResult = await service
-        //             .GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerRxCharacteristicUuid)
-        //             .AsTask(cancellationToken)
-        //             .ConfigureAwait(false);
-        //     }
-        //     
-        //     _results.TryAdd(device.DeviceId, rxResult);
-        // }
 
         var rx = rxResult.Characteristics.FirstOrDefault();
         if (rx == null)
@@ -337,6 +329,24 @@ public sealed class WindowsBluetoothTransport : ITransport
         _ = SendAsync(networkIdPacket, transportAddress);
 
         _lastNetworkIdSending[addr] = DateTime.UtcNow;
+    }
+
+    private string LocalBluetoothEndpoint()
+    {
+        if (_options.LocalAdapterBluetoothAddress is ulong adapterAddr && adapterAddr != 0)
+        {
+            try
+            {
+                return BluetoothTransportAddress.ToMacString(
+                    BluetoothMacAddress.FromBluetoothAddress(adapterAddr));
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        return "BLE:local";
     }
 
     private sealed class OutboundSendRequest(byte[] payload, byte[] destinationAddress, TaskCompletionSource completion)

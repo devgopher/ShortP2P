@@ -103,6 +103,30 @@ public sealed class ChatRepository(AppDatabase db)
         return list.OrderByDescending(c => c.UpdatedUtcTicks).FirstOrDefault();
     }
 
+    public async Task ReplaceChatBluetoothMacAsync(int chatId, string mac)
+    {
+        if (!BluetoothTransportAddress.TryParseMac(mac, out var macBytes))
+            return;
+
+        var conn = await _db.GetConnectionAsync();
+        var chat = await conn.FindAsync<ChatEntity>(chatId);
+        if (chat == null)
+            return;
+
+        var newHost = PeerHostList.ReplaceBluetoothMac(chat.PeerHost, mac);
+        var btEndpoint = BluetoothTransportAddress.FromMac(macBytes);
+        var newEndpointsJson = PeerTransportEndpoints.ReplaceBluetooth(PeerTransportEndpoints.Parse(chat), btEndpoint);
+
+        if (string.Equals(newHost, chat.PeerHost, StringComparison.Ordinal)
+            && string.Equals(newEndpointsJson, chat.PeerEndpointsJson, StringComparison.Ordinal))
+            return;
+
+        chat.PeerHost = newHost;
+        chat.PeerEndpointsJson = newEndpointsJson;
+        chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
+        await conn.UpdateAsync(chat);
+    }
+
     public async Task UpdateChatP2pRouteAsync(int chatId, string peerHost, int peerPort, string? relayRouteBlob,
         string? peerRsaPublicJson = null)
     {

@@ -24,6 +24,7 @@ namespace ShortP2P.Client.Services;
 public sealed class UserP2pRuntime : IAsyncDisposable
 {
     private readonly AuthService _auth;
+    private readonly IBleDiscoveredPeerStore? _bleDiscoveredPeerStore;
     private readonly IBluetoothTransportProvider? _bluetooth;
     private readonly ChatMediaOptions _chatMedia;
     private readonly ChatRepository _chats;
@@ -65,6 +66,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     {
         _store = store;
         _auth = auth;
+        _bleDiscoveredPeerStore = bleDiscoveredPeerStore;
         _chats = chats;
         _chatMedia = chatMedia;
         UdpTransportFactory = udpTransportFactory;
@@ -398,6 +400,11 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             if (msg.NetworkId.ToShortString() == user.NetworkIdShort)
                 return;
 
+            if (_bleDiscoveredPeerStore != null)
+                await _bleDiscoveredPeerStore
+                    .RecordDataPortNetworkIdAsync(msg.RemoteAddress, msg.NetworkId, cancellationToken)
+                    .ConfigureAwait(false);
+
             LocalScan.RememberBluetoothPeer(msg.RemoteAddress);
             await LocalScan.SendUnicastPresencePingAsync(msg.RemoteAddress, cancellationToken).ConfigureAwait(false);
 
@@ -407,8 +414,9 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 return;
 
             var seenDirect = BluetoothTransportAddress.ToMacString(msg.RemoteAddress.Data);
-            await ApplyDiscoveryPingRouteAsync(chat, TransportKind.Bluetooth, seenDirect, cancellationToken)
-                .ConfigureAwait(false);
+            await _chats.ReplaceChatBluetoothMacAsync(chat.Id, seenDirect).ConfigureAwait(false);
+            _chats.NotifyChatListChanged();
+            await RefreshSessionChatRowAsync(chat.Id, cancellationToken).ConfigureAwait(false);
             await TryEnsureChatSessionStartedAsync(chat.Id, null, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)

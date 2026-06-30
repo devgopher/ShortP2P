@@ -81,6 +81,20 @@ public static class PeerHostList
         return string.Join(", ", list);
     }
 
+    /// <summary>Оставляет IP и network id; все MAC Bluetooth заменяются одним указанным (он первый в списке).</summary>
+    public static string ReplaceBluetoothMac(string? existingPeerHost, string mac)
+    {
+        if (!BluetoothTransportAddress.TryParseMac(mac, out var macBytes))
+            return existingPeerHost?.Trim() ?? "";
+
+        var normalizedMac = BluetoothTransportAddress.ToMacString(macBytes);
+        var nonBt = ParseEndpointCandidates(existingPeerHost)
+            .Where(token => !BluetoothTransportAddress.TryParseMac(token, out _))
+            .ToList();
+        nonBt.Insert(0, normalizedMac);
+        return string.Join(", ", nonBt);
+    }
+
     /// <summary>Указанный адрес становится первым (основной для доставки), остальные прежние кандидаты сохраняются.</summary>
     public static string WithPrimaryFirst(string? existingPeerHost, string primaryHost)
     {

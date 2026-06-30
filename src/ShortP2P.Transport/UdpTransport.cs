@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport;
@@ -21,6 +22,8 @@ public sealed class UdpTransport : ITransport
     private readonly Channel<TransportReceiveMessage> _channel = Channel.CreateUnbounded<TransportReceiveMessage>();
     private readonly bool _enableBroadcast;
     private readonly int _listenPort;
+    private readonly ILogger? _logger;
+    private readonly string _localEndpoint;
     private readonly SemaphoreSlim _receiveGate = new(1, 1);
     private readonly SemaphoreSlim _sendGate = new(MaxConcurrentUdpSends, MaxConcurrentUdpSends);
 
@@ -28,11 +31,13 @@ public sealed class UdpTransport : ITransport
     private Task? _receiveTask;
     private UdpClient _udp;
 
-    private UdpTransport(IPAddress bindAddress, int listenPort, bool enableBroadcast)
+    private UdpTransport(IPAddress bindAddress, int listenPort, bool enableBroadcast, ILogger? logger)
     {
         _bindAddress = bindAddress;
         _listenPort = listenPort;
         _enableBroadcast = enableBroadcast;
+        _logger = logger;
+        _localEndpoint = $"{bindAddress}:{listenPort}";
         _udp = CreateClient(bindAddress, listenPort, enableBroadcast);
     }
 
@@ -89,6 +94,8 @@ public sealed class UdpTransport : ITransport
         {
             var ep = UdpTransportAddress.ToIPEndPoint(destination);
 
+            TransportTrafficLog.LogSend(_logger, _localEndpoint, destination, payload.Span);
+
             try
             {
                 await _udp.SendAsync(payload.ToArray(), ep, cancellationToken).ConfigureAwait(false);
@@ -114,12 +121,13 @@ public sealed class UdpTransport : ITransport
     /// <param name="ip">Адрес привязки (часто <see cref="IPAddress.Any" />).</param>
     /// <param name="port">Локальный порт прослушивания.</param>
     /// <param name="enableBroadcast">Разрешить широковещательные исходящие датаграммы.</param>
-    public static UdpTransport CreateUdpTransport(IPAddress ip, int port, bool enableBroadcast = false)
+    public static UdpTransport CreateUdpTransport(IPAddress ip, int port, bool enableBroadcast = false,
+        ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(ip);
         ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
-        return new UdpTransport(ip, port, enableBroadcast);
+        return new UdpTransport(ip, port, enableBroadcast, logger);
     }
 
     private static UdpClient CreateClient(IPAddress bindAddress, int listenPort, bool enableBroadcast)
@@ -143,6 +151,7 @@ public sealed class UdpTransport : ITransport
                 {
                     var result = await _udp.ReceiveAsync(cancellationToken).ConfigureAwait(false);
                     var addr = UdpTransportAddress.FromIPEndPoint(result.RemoteEndPoint);
+                    TransportTrafficLog.LogReceive(_logger, addr, _localEndpoint, result.Buffer);
                     await _channel.Writer
                         .WriteAsync(new TransportReceiveMessage(result.Buffer, addr), cancellationToken)
                         .ConfigureAwait(false);

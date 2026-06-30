@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
 
 namespace ShortP2P.Transport;
 
@@ -17,8 +18,9 @@ public interface IUdpTransportFactory
     ValueTask ReleaseAsync(UdpTransport transport, CancellationToken cancellationToken = default);
 }
 
-public sealed class UdpTransportFactory : IUdpTransportFactory
+public sealed class UdpTransportFactory(ILoggerFactory? loggerFactory = null) : IUdpTransportFactory
 {
+    private readonly ILogger? _udpLogger = loggerFactory?.CreateLogger<UdpTransport>();
     private readonly ConcurrentDictionary<UdpTransportCacheKey, CacheEntry> _entries = new();
 
     public UdpTransport Acquire(IPAddress ip, int port, bool enableBroadcast = false)
@@ -28,8 +30,8 @@ public sealed class UdpTransportFactory : IUdpTransportFactory
         ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
 
         var key = new UdpTransportCacheKey(ip, port, enableBroadcast);
-        var entry = _entries.GetOrAdd(key, static k =>
-            new CacheEntry(UdpTransport.CreateUdpTransport(k.Ip, k.Port, k.EnableBroadcast)));
+        var entry = _entries.GetOrAdd(key, k =>
+            new CacheEntry(UdpTransport.CreateUdpTransport(k.Ip, k.Port, k.EnableBroadcast, _udpLogger)));
         lock (entry.Gate)
         {
             entry.RefCount++;

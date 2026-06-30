@@ -13,4 +13,10 @@ public interface IBleDiscoveredPeerStore
 
     ValueTask RecordPingAsync(TransportAddress bluetoothMac, CompressedNetworkId peerNetworkId, string nickname,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    ///     NetworkId с data-порта BLE: сохраняет MAC и удаляет прочие MAC с тем же network id.
+    /// </summary>
+    ValueTask RecordDataPortNetworkIdAsync(TransportAddress bluetoothMac, CompressedNetworkId peerNetworkId,
+        CancellationToken cancellationToken = default);
 }

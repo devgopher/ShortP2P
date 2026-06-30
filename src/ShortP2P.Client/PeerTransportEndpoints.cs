@@ -43,6 +43,13 @@ public static class PeerTransportEndpoints
         return legacy;
     }
 
+    public static string ReplaceBluetooth(IEnumerable<TransportAddress> endpoints, TransportAddress bluetoothEndpoint)
+    {
+        var list = endpoints.Where(e => e.Kind != TransportKind.Bluetooth).ToList();
+        list.Add(bluetoothEndpoint);
+        return Serialize(list);
+    }
+
     public static string Serialize(IEnumerable<TransportAddress> endpoints)
     {
         var arr = endpoints

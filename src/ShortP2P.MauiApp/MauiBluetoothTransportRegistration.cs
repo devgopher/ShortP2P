@@ -18,6 +18,8 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
 {
 #if WINDOWS
     private readonly ILogger<WindowsBluetoothTransport> _transportLogger;
+#elif ANDROID
+    private readonly ILogger<AndroidBluetoothTransport> _transportLogger;
 #endif
     private readonly object _sync = new();
     private ITransport? _instance;
@@ -41,6 +43,8 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
         _bleDiscoveredPeerStore = bleDiscoveredPeerStore;
 #if WINDOWS
         _transportLogger = loggerFactory.CreateLogger<WindowsBluetoothTransport>();
+#elif ANDROID
+        _transportLogger = loggerFactory.CreateLogger<AndroidBluetoothTransport>();
 #endif
         try
         {
@@ -105,7 +109,8 @@ internal sealed class MauiBluetoothTransportRegistration : IAsyncDisposable, IBl
                 new AndroidBluetoothTransportOptions(
                     GattDiscoverable: true,
                     LocalNetworkId: _localNetworkId,
-                    OnPeerNetworkIdReceived: OnPeerNetworkIdReceived));
+                    OnPeerNetworkIdReceived: OnPeerNetworkIdReceived,
+                    Logger: _transportLogger));
 #endif
         }
     }

@@ -5,6 +5,7 @@ using Android.Bluetooth.LE;
 using Android.Content;
 using Android.OS;
 using Java.Util;
+using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport.Bluetooth.Android;
@@ -218,6 +219,7 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
         }
 
         var bytes = payload.ToArray();
+        TransportTrafficLog.LogSend(options.Logger, LocalBluetoothEndpoint(), destination, bytes);
         if (!state.PeerRx.SetValue(bytes))
             throw new IOException("Failed to set characteristic value.");
         state.PeerRx.WriteType = GattWriteType.NoResponse;
@@ -257,7 +259,14 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
             }
         }
 
+        TransportTrafficLog.LogReceive(options.Logger, addr, LocalBluetoothEndpoint(), value);
         _ = _inbound.Writer.TryWrite(new TransportReceiveMessage(value, addr));
+    }
+
+    private string LocalBluetoothEndpoint()
+    {
+        var addr = _adapter?.Address;
+        return string.IsNullOrWhiteSpace(addr) ? "BLE:local" : addr.Replace('-', ':', StringComparison.Ordinal);
     }
 
     private async Task PushNetworkIdToBondedPeersAsync(CancellationToken ct)

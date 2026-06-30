@@ -130,4 +130,44 @@ public sealed class SqliteBleDiscoveredPeerStore(AppDatabase db) : IBleDiscovere
             await conn.UpdateAsync(row).ConfigureAwait(false);
         }
     }
+
+    public async ValueTask RecordDataPortNetworkIdAsync(TransportAddress bluetoothMac,
+        CompressedNetworkId peerNetworkId, CancellationToken cancellationToken = default)
+    {
+        if (bluetoothMac.Kind != TransportKind.Bluetooth ||
+            bluetoothMac.Data.Length != BluetoothTransportAddress.MacLength)
+            return;
+
+        if (peerNetworkId.IsEmpty)
+            return;
+
+        var mac = BluetoothTransportAddress.ToMacString(bluetoothMac.Data);
+        var idShort = peerNetworkId.ToShortString();
+
+        var conn = await db.GetConnectionAsync().ConfigureAwait(false);
+        var now = DateTime.UtcNow.Ticks;
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await conn.ExecuteAsync(
+                "DELETE FROM ble_discovered_peers WHERE PeerNetworkIdShort = ? AND MacNormalized != ? COLLATE NOCASE",
+                idShort, mac)
+            .ConfigureAwait(false);
+
+        var row = await conn.FindAsync<BleDiscoveredPeerEntity>(mac).ConfigureAwait(false);
+        if (row == null)
+        {
+            await conn.InsertAsync(new BleDiscoveredPeerEntity
+            {
+                MacNormalized = mac,
+                LastSeenScanUtcTicks = now,
+                PeerNetworkIdShort = idShort
+            }).ConfigureAwait(false);
+        }
+        else
+        {
+            row.LastSeenScanUtcTicks = now;
+            row.PeerNetworkIdShort = idShort;
+            await conn.UpdateAsync(row).ConfigureAwait(false);
+        }
+    }
 }
