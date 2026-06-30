@@ -92,8 +92,7 @@ public sealed class MessengerService(
     ///     Отправляет по очереди на каждый адрес, пока не придёт квитанция <paramref name="ackTimeout" /> или не
     ///     закончатся адреса.
     /// </summary>
-    public async ValueTask SendBinaryAsyncExpectAck(byte[] data, IReadOnlyList<TransportAddress> destinationsInOrder,
-        TimeSpan ackTimeout, CancellationToken cancellationToken = default)
+    public async ValueTask SendBinaryAsyncExpectAck(byte[] data, IReadOnlyList<TransportAddress> destinationsInOrder, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(data);
         if (destinationsInOrder.Count == 0)
@@ -103,51 +102,16 @@ public sealed class MessengerService(
             throw new ArgumentException($"Message exceeds MaxBinaryMessageBytes ({_options.MaxBinaryMessageBytes}).",
                 nameof(data));
 
-        Exception? last = null;
         var messageId = Guid.NewGuid();
-        var waiter = new AckWaiter();
-        _ackWaiters[messageId] = waiter;
-        try
-        {
-            foreach (var dest in destinationsInOrder)
+        foreach (var dest in destinationsInOrder)
+            try
             {
-                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeoutCts.CancelAfter(ackTimeout);
-                try
-                {
-                    await SendChunksForMessageAsync(data, messageId, dest, cancellationToken).ConfigureAwait(false);
-                    await waiter.Task.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
-                    return;
-                }
-                catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested &&
-                                                            !cancellationToken.IsCancellationRequested)
-                {
-                    last = ex;
-                    if (waiter.NackObserved)
-                    {
-                        using var nackWaitCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                        nackWaitCts.CancelAfter(ackTimeout);
-                        try
-                        {
-                            await waiter.Task.WaitAsync(nackWaitCts.Token).ConfigureAwait(false);
-                            return;
-                        }
-                        catch (OperationCanceledException nackEx) when (nackWaitCts.IsCancellationRequested &&
-                                                                        !cancellationToken.IsCancellationRequested)
-                        {
-                            last = nackEx;
-                            break;
-                        }
-                    }
-                }
+                await SendChunksForMessageAsync(data, messageId, dest, cancellationToken).ConfigureAwait(false);
             }
-
-            throw new IOException("Peer did not acknowledge message delivery on any address.", last);
-        }
-        finally
-        {
-            _ackWaiters.TryRemove(messageId, out _);
-        }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // TODO: логирование
+            }
     }
 
     private async ValueTask SendChunksForMessageAsync(byte[] data, Guid messageId, TransportAddress destination,

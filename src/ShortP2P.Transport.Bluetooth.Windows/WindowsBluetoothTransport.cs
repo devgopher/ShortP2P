@@ -104,7 +104,7 @@ public sealed class WindowsBluetoothTransport : ITransport
 
         _advertisementWatcher = new BluetoothLEAdvertisementWatcher
         {
-            ScanningMode = BluetoothLEScanningMode.Passive
+            ScanningMode = BluetoothLEScanningMode.Active
         };
         _advertisementWatcher.Received += OnAdvertisementReceived;
         _advertisementWatcher.Start();

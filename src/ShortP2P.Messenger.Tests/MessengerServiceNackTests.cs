@@ -85,7 +85,7 @@ public class MessengerServiceNackTests
         try
         {
             var message = RandomBytes(10 * 1024 + 123);
-            await alice.SendBinaryAsyncExpectAck(message, [bobAddress], TimeSpan.FromSeconds(3));
+            await alice.SendBinaryAsyncExpectAck(message, [bobAddress]);
 
             var received = await bobReceivedPayload.Task.WaitAsync(TimeSpan.FromSeconds(3));
             Assert.Equal(message, received);

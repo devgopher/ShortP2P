@@ -1043,7 +1043,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 if (string.IsNullOrEmpty(_chat.RelayRouteBlob))
                 {
                     var dests = BuildOrderedDirectPeerAddresses();
-                    await _messenger!.SendBinaryAsyncExpectAck(wire, dests, ackTimeout, ct).ConfigureAwait(false);
+                    await _messenger!.SendBinaryAsyncExpectAck(wire, dests, ct).ConfigureAwait(false);
                 }
                 else
                 {
@@ -1075,7 +1075,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 if (string.IsNullOrEmpty(_chat.RelayRouteBlob))
                 {
                     var dests = BuildOrderedDirectPeerAddresses();
-                    await _messenger!.SendBinaryAsyncExpectAck(wire, dests, ackTimeout, ct).ConfigureAwait(false);
+                    await _messenger!.SendBinaryAsyncExpectAck(wire, dests, ct).ConfigureAwait(false);
                 }
                 else
                 {
