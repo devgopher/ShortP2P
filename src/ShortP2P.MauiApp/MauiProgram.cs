@@ -5,6 +5,7 @@ using NLog.Extensions.Logging;
 using NLog.Targets;
 using NLog.Targets.Wrappers;
 using ShortP2P.Auth;
+using ShortP2P.Crypto;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
@@ -114,6 +115,7 @@ public static class MauiProgram
         var app = builder.Build();
         Services = app.Services;
         Services.ApplyRouteDatabaseMigrationsAsync().GetAwaiter().GetResult();
+        P2PSession.TrafficLogger = Services.GetRequiredService<ILoggerFactory>().CreateLogger<P2PSession>();
 #if ANDROID || WINDOWS
         var routing = Services.GetRequiredService<P2pRoutingSettingsStore>().LoadAsync().GetAwaiter().GetResult();
         Services.GetRequiredService<MauiBluetoothTransportRegistration>().ApplySettings(routing);

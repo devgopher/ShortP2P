@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Microsoft.Extensions.Logging;
 
 namespace ShortP2P.Crypto;
 
@@ -16,6 +17,9 @@ public sealed class P2PSession
 
     private readonly byte[] _aesKey; // 16 bytes (AES-128)
     private readonly byte[] _macKey; // 32 bytes (for HMAC-SHA256)
+
+    /// <summary>Опциональный логгер plaintext при <see cref="Encrypt" /> / <see cref="Decrypt" />.</summary>
+    public static ILogger? TrafficLogger { get; set; }
 
     internal P2PSession(byte[] aesKey, byte[] macKey)
     {
@@ -43,6 +47,8 @@ public sealed class P2PSession
             throw new ArgumentException(
                 $"Plaintext is too large. Max is {MaxPlaintextBytes} bytes for <= {MaxEncryptedPacketBytes}-byte packets.",
                 nameof(plaintext));
+
+        CryptoTrafficLog.LogEncryptPlaintext(TrafficLogger, plaintext);
 
         var iv = new byte[IvBytes];
         using (var rng = RandomNumberGenerator.Create())
@@ -120,7 +126,9 @@ public sealed class P2PSession
 
             using (var decryptor = aes.CreateDecryptor())
             {
-                return decryptor.TransformFinalBlock(ciphertext, 0, ciphertext.Length);
+                var plaintext = decryptor.TransformFinalBlock(ciphertext, 0, ciphertext.Length);
+                CryptoTrafficLog.LogDecryptPlaintext(TrafficLogger, plaintext);
+                return plaintext;
             }
         }
     }

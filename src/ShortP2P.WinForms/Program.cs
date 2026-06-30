@@ -5,6 +5,7 @@ using NLog;
 using NLog.Config;
 using NLog.Extensions.Logging;
 using ShortP2P.Auth;
+using ShortP2P.Crypto;
 using ShortP2P.Client;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.ChatMedia;
@@ -86,6 +87,8 @@ internal static class Program
         using var host = builder.Build();
         host.Services.ApplyRouteDatabaseMigrationsAsync().GetAwaiter().GetResult();
         host.StartAsync().GetAwaiter().GetResult();
+
+        P2PSession.TrafficLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger<P2PSession>();
 
         var provider = host.Services;
         var hostLogger = provider.GetRequiredService<ILogger<WinFormsHost>>();
