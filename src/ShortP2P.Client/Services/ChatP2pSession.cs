@@ -139,6 +139,97 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
     private string SessionRoleLabel() => IsCryptoSessionLeader() ? "leader" : "follower";
 
+    private string PeerSessionRoleLabel() => IsCryptoSessionLeader() ? "follower" : "leader";
+
+    private (string LocalRole, string PeerRole) GetCryptoSessionRoles() =>
+        (SessionRoleLabel(), PeerSessionRoleLabel());
+
+    private bool TryGetLocalBluetoothMac(out byte[] mac)
+    {
+        mac = [];
+        if (_routingSettings?.EnableBluetoothTransport == false)
+            return false;
+        var macText = _routingSettings?.SelectedBluetoothAdapterMac;
+        return !string.IsNullOrWhiteSpace(macText)
+               && BluetoothTransportAddress.TryParseMac(macText.Trim(), out mac);
+    }
+
+    private bool TryGetPeerBluetoothMac(out byte[] mac)
+    {
+        mac = [];
+        foreach (var ep in _peerEndpoints)
+        {
+            if (ep.Kind != TransportKind.Bluetooth || ep.Data.Length != BluetoothTransportAddress.MacLength)
+                continue;
+            mac = ep.Data.ToArray();
+            return true;
+        }
+
+        foreach (var token in PeerHostList.ParseEndpointCandidates(_chat.PeerHost))
+        {
+            if (!BluetoothTransportAddress.TryParseMac(token, out mac))
+                continue;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Больший MAC — BLE leader (инициирует ConnectGatt); меньший — BLE follower (ждёт входящее).</summary>
+    private bool IsBleConnectionLeader()
+    {
+        if (!TryGetLocalBluetoothMac(out var local) || !TryGetPeerBluetoothMac(out var peer))
+            return false;
+        return BluetoothTransportAddress.ShouldInitiateBleConnection(local, peer);
+    }
+
+    private string? BleSessionRoleLabel() =>
+        TryGetLocalBluetoothMac(out _) && TryGetPeerBluetoothMac(out _)
+            ? IsBleConnectionLeader() ? "leader" : "follower"
+            : null;
+
+    private string? PeerBleSessionRoleLabel()
+    {
+        var local = BleSessionRoleLabel();
+        return local switch
+        {
+            "leader" => "follower",
+            "follower" => "leader",
+            _ => null
+        };
+    }
+
+    private (string? LocalMac, string? PeerMac, string? LocalRole, string? PeerRole) GetBleSessionRoles()
+    {
+        if (!TryGetLocalBluetoothMac(out var localBytes) || !TryGetPeerBluetoothMac(out var peerBytes))
+            return (null, null, null, null);
+
+        var localMac = BluetoothTransportAddress.ToMacString(localBytes);
+        var peerMac = BluetoothTransportAddress.ToMacString(peerBytes);
+        var localRole = BluetoothTransportAddress.ShouldInitiateBleConnection(localBytes, peerBytes)
+            ? "leader"
+            : "follower";
+        var peerRole = localRole == "leader" ? "follower" : "leader";
+        return (localMac, peerMac, localRole, peerRole);
+    }
+
+    private void LogSessionRoleContext(string eventName, LogLevel level = LogLevel.Information)
+    {
+        var (cryptoLocal, cryptoPeer) = GetCryptoSessionRoles();
+        var (bleLocalMac, blePeerMac, bleLocalRole, blePeerRole) = GetBleSessionRoles();
+        if (bleLocalRole != null)
+        {
+            _logger.Log(level,
+                "Chat {ChatId}: {Event} — crypto local={Role} peer={PeerRole}; BLE local={BleRole} (mac={LocalBleMac}) peer={BlePeerRole} (mac={PeerBleMac})",
+                _chat.Id, eventName, cryptoLocal, cryptoPeer, bleLocalRole, bleLocalMac, blePeerRole, blePeerMac);
+            return;
+        }
+
+        _logger.Log(level,
+            "Chat {ChatId}: {Event} — crypto local={Role} peer={PeerRole}; BLE roles unavailable (mac unknown)",
+            _chat.Id, eventName, cryptoLocal, cryptoPeer);
+    }
+
     private static string FormatTransportAddress(TransportAddress address)
     {
         try
@@ -164,7 +255,8 @@ public sealed class ChatP2PSession : IAsyncDisposable
     private void ClearCryptoSession()
     {
         if (_cryptoSessionCache.TryRemove(_chat.Id, out _))
-            _logger.LogInformation("Chat {ChatId}: crypto session cleared from cache", _chat.Id);
+            _logger.LogInformation("Chat {ChatId}: crypto session cleared from cache (role={Role})", _chat.Id,
+                SessionRoleLabel());
     }
 
     /// <summary>Follower (больший NetworkId): сессия и messenger готовы к обмену cipher.</summary>
@@ -347,9 +439,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
         RebuildRouteFromChat();
-        _logger.LogInformation(
-            "Chat {ChatId}: P2P session starting as {Role} (local={LocalNetworkId}, peer={PeerNetworkId})",
-            _chat.Id, SessionRoleLabel(), _user.NetworkIdShort, _chat.PeerNetworkIdShort);
+        LogSessionRoleContext("P2P session starting");
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         ResetOutboundCts();
@@ -377,7 +467,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
         _ = TryConfirmCryptoSessionAsync(cancellationToken);
 
         HookPresenceForPendingFlush();
-        _logger.LogInformation("Chat {ChatId}: P2P session start completed", _chat.Id);
+        LogSessionRoleContext("P2P session start completed");
     }
 
     private void SubscribeToTransceivers()
@@ -741,7 +831,9 @@ public sealed class ChatP2PSession : IAsyncDisposable
     {
         if (IsCryptoSessionLeader())
         {
-            _logger.LogInformation("Chat {ChatId}: post-invite session negotiation as leader", _chat.Id);
+            _logger.LogInformation(
+                "Chat {ChatId}: post-invite session negotiation as leader (crypto peer role={PeerRole}, BLE role={BleRole})",
+                _chat.Id, PeerSessionRoleLabel(), BleSessionRoleLabel() ?? "n/a");
             await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -755,7 +847,9 @@ public sealed class ChatP2PSession : IAsyncDisposable
             return;
         }
 
-        _logger.LogInformation("Chat {ChatId}: post-invite session negotiation as follower (send 0x04)", _chat.Id);
+        _logger.LogInformation(
+            "Chat {ChatId}: post-invite session negotiation as follower (crypto peer role={PeerRole}, BLE role={BleRole}, send 0x04)",
+            _chat.Id, PeerSessionRoleLabel(), BleSessionRoleLabel() ?? "n/a");
         await SendSessionSetupRequestPacketAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -1372,7 +1466,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
     private async Task ResetCryptoStateAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Chat {ChatId}: resetting crypto state", _chat.Id);
+        _logger.LogInformation("Chat {ChatId}: resetting crypto state (role={Role})", _chat.Id, SessionRoleLabel());
         if (_messenger != null)
         {
             _messenger.GotData -= OnMessengerGotData;
@@ -1624,7 +1718,9 @@ public sealed class ChatP2PSession : IAsyncDisposable
             if (!_handshakeWeInitiated)
                 return;
 
-            _logger.LogInformation("Chat {ChatId}: starting crypto probe round-trip confirmation", _chat.Id);
+            _logger.LogInformation(
+                "Chat {ChatId}: starting crypto probe round-trip confirmation (role={Role})",
+                _chat.Id, SessionRoleLabel());
             var okWait = TimeSpan.FromSeconds(60);
 
             while (!cancellationToken.IsCancellationRequested && !_cryptoProbeRoundTripOk)
@@ -1802,7 +1898,9 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
     private async Task SendSessionSetupRequestPacketAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Chat {ChatId}: sending session setup request (0x04)", _chat.Id);
+        _logger.LogInformation(
+            "Chat {ChatId}: sending session setup request (0x04), crypto role={Role}, BLE role={BleRole}",
+            _chat.Id, SessionRoleLabel(), BleSessionRoleLabel() ?? "n/a");
         var id = CompressedNetworkId.FromShortString(_user.NetworkIdShort.Trim());
         var buf = new byte[1 + CompressedNetworkId.WireLength];
         buf[0] = FrameSessionSetupRequest;
@@ -1827,8 +1925,8 @@ public sealed class ChatP2PSession : IAsyncDisposable
             }
 
         _logger.LogInformation(
-            "Chat {ChatId}: leader sending RSA handshake (0x01), force={ForceSendHandshake}",
-            _chat.Id, forceSendHandshake);
+            "Chat {ChatId}: leader sending RSA handshake (0x01), crypto role={Role}, BLE role={BleRole}, force={ForceSendHandshake}",
+            _chat.Id, SessionRoleLabel(), BleSessionRoleLabel() ?? "n/a", forceSendHandshake);
         var hs = P2PCrypto.CreateHandshakeInitiation(_peerPublicKey!);
         var packet = new byte[129];
         packet[0] = FrameHandshake;
@@ -1845,7 +1943,8 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 ClearCryptoSession();
 
             _ = _cryptoSessionCache.GetSession(_chat.Id, () => hs.Session);
-            _logger.LogInformation("Chat {ChatId}: leader crypto session created in cache", _chat.Id);
+            _logger.LogInformation("Chat {ChatId}: leader crypto session created in cache (role={Role})", _chat.Id,
+                SessionRoleLabel());
             if (_messenger == null)
             {
                 _messenger =
@@ -1861,7 +1960,8 @@ public sealed class ChatP2PSession : IAsyncDisposable
         if (ms != null)
         {
             await ms.StartAsync(cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation("Chat {ChatId}: messenger started (leader)", _chat.Id);
+            _logger.LogInformation("Chat {ChatId}: messenger started (crypto role={Role}, BLE role={BleRole})",
+                _chat.Id, SessionRoleLabel(), BleSessionRoleLabel() ?? "n/a");
         }
     }
 
@@ -1883,7 +1983,8 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 _sessionSetup.Release();
             }
 
-            _logger.LogInformation("Chat {ChatId}: leader session setup completed", _chat.Id);
+            _logger.LogInformation("Chat {ChatId}: leader session setup completed (role={Role})", _chat.Id,
+                SessionRoleLabel());
         }
 
         // if (IsFollowerCryptoReady())
@@ -1973,8 +2074,8 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
         await created.StartAsync(cancellationToken).ConfigureAwait(false);
         _logger.LogInformation(
-            "Chat {ChatId}: messenger started ({Role}) from cached crypto session",
-            _chat.Id, _handshakeWeInitiated ? "leader" : "follower");
+            "Chat {ChatId}: messenger started (crypto role={Role}, BLE role={BleRole}) from cached crypto session",
+            _chat.Id, SessionRoleLabel(), BleSessionRoleLabel() ?? "n/a");
     }
 
     private MessengerOptions CreateMessengerOptions()
@@ -1984,7 +2085,9 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
     private async Task HandleResponderHandshakeAsync(byte[] handshakePacket, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Chat {ChatId}: follower processing RSA handshake packet", _chat.Id);
+        _logger.LogInformation(
+            "Chat {ChatId}: processing RSA handshake packet (crypto role={Role}, BLE role={BleRole})",
+            _chat.Id, SessionRoleLabel(), BleSessionRoleLabel() ?? "n/a");
         await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -2001,7 +2104,9 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 var localPrivate = _auth.GetCurrentPrivateKey();
                 _ = _cryptoSessionCache.GetSession(_chat.Id,
                     () => P2PCrypto.CreateSession(localPrivate, handshakePacket));
-                _logger.LogInformation("Chat {ChatId}: follower crypto session created from handshake", _chat.Id);
+                _logger.LogInformation(
+                    "Chat {ChatId}: crypto session created from handshake (role={Role})",
+                    _chat.Id, SessionRoleLabel());
 
                 _handshakeWeInitiated = false;
                 if (_messenger == null)
@@ -2017,7 +2122,8 @@ public sealed class ChatP2PSession : IAsyncDisposable
             if (created != null)
             {
                 await created.StartAsync(cancellationToken).ConfigureAwait(false);
-                _logger.LogInformation("Chat {ChatId}: messenger started (follower)", _chat.Id);
+                _logger.LogInformation("Chat {ChatId}: messenger started (crypto role={Role}, BLE role={BleRole})",
+                _chat.Id, SessionRoleLabel(), BleSessionRoleLabel() ?? "n/a");
             }
 
             SignalFollowerHandshakeSuccess();
@@ -2030,7 +2136,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Chat {ChatId}: P2P session stopping", _chat.Id);
+        LogSessionRoleContext("P2P session stopping");
         UnhookPresenceAndClearPending();
         UnsubscribeFromTransceivers();
 
@@ -2058,7 +2164,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
         _messenger = null;
         ClearCryptoSession();
-        _logger.LogInformation("Chat {ChatId}: P2P session stopped", _chat.Id);
+        LogSessionRoleContext("P2P session stopped");
     }
 
     private bool IsTransportEnabled(TransportKind kind)
