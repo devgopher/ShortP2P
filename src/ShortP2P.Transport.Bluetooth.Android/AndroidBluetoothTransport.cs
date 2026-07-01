@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Threading.Channels;
 using Android.Bluetooth;
 using Android.Bluetooth.LE;
@@ -40,6 +41,9 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
     private readonly ConcurrentDictionary<string, byte> _networkIdOfferedToMac = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly ConcurrentDictionary<string, OutboundPeerState> _outbound = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly ConcurrentDictionary<string, BluetoothDevice> _serverConnectedPeers =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private readonly TaskCompletionSource<bool> _serviceAddedTcs =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -202,6 +206,17 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
     private async Task SendLockedAsync(ReadOnlyMemory<byte> payload, byte[] mac6, OutboundPeerState state,
         CancellationToken cancellationToken)
     {
+        var bytes = payload.ToArray();
+        var destination = new TransportAddress(TransportKind.Bluetooth, mac6);
+        if (TrySendViaServerNotify(bytes, mac6))
+        {
+            TransportTrafficLog.LogSend(options.Logger, LocalBluetoothEndpoint(), destination, bytes);
+            return;
+        }
+
+        if (!ShouldUseCentralConnection(mac6))
+            throw new IOException("BLE peer not connected via GATT server; cannot initiate central connection.");
+
         var device = ResolveRemoteDevice(mac6);
         if (state.Gatt == null || state.PeerRx == null)
         {
@@ -218,13 +233,49 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
                 throw new IOException("BLE service/RX characteristic not found on peer.");
         }
 
-        var bytes = payload.ToArray();
         TransportTrafficLog.LogSend(options.Logger, LocalBluetoothEndpoint(), destination, bytes);
         if (!state.PeerRx.SetValue(bytes))
             throw new IOException("Failed to set characteristic value.");
         state.PeerRx.WriteType = GattWriteType.NoResponse;
         if (!state.Gatt!.WriteCharacteristic(state.PeerRx))
             throw new IOException("BLE write to peer RX failed.");
+    }
+
+    private bool ShouldUseCentralConnection(byte[] peerMac)
+    {
+        if (!TryGetLocalMacBytes(out var local))
+            return true;
+        return BluetoothTransportAddress.ShouldInitiateBleConnection(local, peerMac);
+    }
+
+    private bool TryGetLocalMacBytes(out byte[] mac)
+    {
+        mac = [];
+        var addr = _adapter?.Address;
+        if (string.IsNullOrWhiteSpace(addr))
+            return false;
+        return BluetoothTransportAddress.TryParseMac(addr.Replace('-', ':'), out mac);
+    }
+
+    private bool TrySendViaServerNotify(byte[] payload, byte[] mac6)
+    {
+        var server = _gattServer;
+        if (server == null)
+            return false;
+
+        var macKey = BluetoothTransportAddress.ToMacString(mac6);
+        if (!_serverConnectedPeers.TryGetValue(macKey, out var device))
+            return false;
+
+        var service = server.GetService(ServiceUuidJava);
+        var tx = service?.GetCharacteristic(TxUuidJava);
+        if (tx == null)
+            return false;
+
+        if (!tx.SetValue(payload))
+            return false;
+
+        return server.NotifyCharacteristicChanged(device, tx, false);
     }
 
     private BluetoothDevice ResolveRemoteDevice(byte[] mac6)
@@ -236,6 +287,14 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
         for (var i = 0; i < mac6.Length; i++) rev[i] = mac6[^(i + 1)];
         return _adapter.GetRemoteDevice(rev)
                ?? throw new IOException("GetRemoteDevice failed for MAC.");
+    }
+
+    internal void RegisterServerConnectedPeer(BluetoothDevice device)
+    {
+        if (!DeviceToTransportAddress(device, out var addr))
+            return;
+        var macKey = BluetoothTransportAddress.ToMacString(addr.Data);
+        _serverConnectedPeers[macKey] = device;
     }
 
     internal void OnInboundFromPeer(BluetoothDevice device, byte[] value)
@@ -356,6 +415,7 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
 
         _advertiseCallback = null;
         _networkIdOfferedToMac.Clear();
+        _serverConnectedPeers.Clear();
 
         foreach (var kv in _outbound.ToArray())
         {
@@ -461,7 +521,10 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
                           && value != null
                           && value.Length > 0;
             if (matches)
+            {
+                RegisterServerConnectedPeer(device);
                 owner.OnInboundFromPeer(device, value);
+            }
 
             if (!responseNeeded)
                 return;

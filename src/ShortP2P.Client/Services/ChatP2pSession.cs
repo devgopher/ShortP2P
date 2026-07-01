@@ -25,6 +25,8 @@ namespace ShortP2P.Client.Services;
 /// <summary>
 ///     Чат: UDP/Bluetooth, RSA-handshake (0x01) только у пира с меньшим network id (сравнение Guid);
 ///     второй шлёт запрос 0x04+16 байт id и ждёт handshake. Шифрокадры 0x02.
+///     Leader и follower обмениваются сообщениями; BLE ConnectGatt — только у узла с большим MAC
+///     (ответы — через GATT notify на уже открытой сессии, см. Bluetooth-транспорт).
 /// </summary>
 public sealed class ChatP2PSession : IAsyncDisposable
 {

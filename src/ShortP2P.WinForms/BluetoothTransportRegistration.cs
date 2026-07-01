@@ -81,12 +81,26 @@ internal sealed class BluetoothTransportRegistration : IAsyncDisposable, IBlueto
                 return;
             
             if (_localNetworkId != null)
+            {
+                ulong? localAddr = null;
+                try
+                {
+                    localAddr = LocalAdapterBluetoothMac
+                        .TryGetAdapterAddressAsync(settings.SelectedBluetoothAdapterDeviceId)
+                        .GetAwaiter().GetResult();
+                }
+                catch
+                {
+                    // ignore
+                }
+
                 _instance = new WindowsBluetoothTransport(new WindowsBluetoothTransportOptions(
-                true,
-                null,
-                _localNetworkId,
-                OnPeerNetworkIdReceived,
-                _transportLogger));
+                    true,
+                    localAddr,
+                    _localNetworkId,
+                    OnPeerNetworkIdReceived,
+                    _transportLogger));
+            }
             
         }
     }

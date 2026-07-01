@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.IO;
 using System.Runtime.Versioning;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -22,10 +24,13 @@ public sealed class WindowsBluetoothTransport : ITransport
     private static readonly TimeSpan SendThrottleInterval = TimeSpan.FromMilliseconds(100);
 
     private readonly Dictionary<ulong, DateTime> _lastNetworkIdSending = new(100);
+    private readonly ConcurrentDictionary<ulong, GattSession> _peerServerSessions = new();
+    private readonly ConcurrentDictionary<ulong, GattCharacteristic> _centralPeerTxCharacteristics = new();
     private readonly TimeSpan _networkIdPeriod = new(0, 0, 30);
     private readonly WindowsBluetoothTransportOptions _options;
     private BluetoothLEAdvertisementWatcher? _advertisementWatcher;
     private GattLocalCharacteristic? _bleRxCharacteristic;
+    private GattLocalCharacteristic? _bleTxCharacteristic;
     private GattServiceProvider? _bleServiceProvider;
     private bool _isStarted;
     private Channel<OutboundSendRequest>? _outbound;
@@ -94,6 +99,21 @@ public sealed class WindowsBluetoothTransport : ITransport
             return;
         _bleRxCharacteristic = rxResult.Characteristic;
         _bleRxCharacteristic.WriteRequested += OnBleRxWriteRequested;
+
+        var txParameters = new GattLocalCharacteristicParameters
+        {
+            CharacteristicProperties = GattCharacteristicProperties.Notify | GattCharacteristicProperties.Read,
+            WriteProtectionLevel = GattProtectionLevel.Plain,
+            ReadProtectionLevel = GattProtectionLevel.Plain,
+            UserDescription = "ShortP2P BLE TX"
+        };
+
+        var txResult = await _bleServiceProvider.Service
+            .CreateCharacteristicAsync(BleShortP2PGattProtocol.PeerTxCharacteristicUuid, txParameters)
+            .AsTask(cancellationToken).ConfigureAwait(false);
+        if (txResult.Error != BluetoothError.Success || txResult.Characteristic == null)
+            return;
+        _bleTxCharacteristic = txResult.Characteristic;
 
 
         var advertising = new GattServiceProviderAdvertisingParameters
@@ -214,6 +234,8 @@ public sealed class WindowsBluetoothTransport : ITransport
             var addr = new TransportAddress(TransportKind.Bluetooth,
                 BluetoothMacAddress.FromBluetoothAddress(device.BluetoothAddress));
 
+            _peerServerSessions[device.BluetoothAddress] = args.Session;
+
             TransportTrafficLog.LogReceive(_options.Logger, addr, LocalBluetoothEndpoint(), data);
 
             await Channel.Writer.WriteAsync(new TransportReceiveMessage(data, addr)).ConfigureAwait(false);
@@ -235,8 +257,10 @@ public sealed class WindowsBluetoothTransport : ITransport
             {
                 try
                 {
-                    await TrySendOnceAsync(request.Payload, request.DestinationAddress, cancellationToken)
+                    var sent = await TrySendOnceAsync(request.Payload, request.DestinationAddress, cancellationToken)
                         .ConfigureAwait(false);
+                    if (!sent)
+                        throw new IOException("BLE send failed: peer not reachable via GATT server notify or central.");
                     request.Completion.TrySetResult();
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -268,6 +292,60 @@ public sealed class WindowsBluetoothTransport : ITransport
     private async ValueTask<bool> TrySendOnceAsync(byte[] payload, byte[] mac,
         CancellationToken cancellationToken)
     {
+        if (await TrySendViaServerNotifyAsync(payload, mac, cancellationToken).ConfigureAwait(false))
+            return true;
+
+        if (!ShouldUseCentralConnection(mac))
+            return false;
+
+        return await TrySendViaCentralAsync(payload, mac, cancellationToken).ConfigureAwait(false);
+    }
+
+    private bool ShouldUseCentralConnection(byte[] peerMac)
+    {
+        if (!TryGetLocalMacBytes(out var local))
+            return true;
+        return BluetoothTransportAddress.ShouldInitiateBleConnection(local, peerMac);
+    }
+
+    private bool TryGetLocalMacBytes(out byte[] mac)
+    {
+        mac = [];
+        if (_options.LocalAdapterBluetoothAddress is not ulong addr || addr == 0)
+            return false;
+        mac = BluetoothMacAddress.FromBluetoothAddress(addr);
+        return mac.Length == BluetoothTransportAddress.MacLength;
+    }
+
+    private async ValueTask<bool> TrySendViaServerNotifyAsync(byte[] payload, byte[] mac,
+        CancellationToken cancellationToken)
+    {
+        var tx = _bleTxCharacteristic;
+        if (tx == null)
+            return false;
+
+        var btAddr = BluetoothMacAddress.ToBluetoothAddress(mac);
+        if (!_peerServerSessions.TryGetValue(btAddr, out var session))
+            return false;
+
+        var client = tx.SubscribedClients.FirstOrDefault(c =>
+            string.Equals(c.Session?.DeviceId?.Id, session.DeviceId?.Id, StringComparison.OrdinalIgnoreCase));
+        if (client == null)
+            return false;
+
+        var destination = new TransportAddress(TransportKind.Bluetooth, mac);
+        TransportTrafficLog.LogSend(_options.Logger, LocalBluetoothEndpoint(), destination, payload);
+
+        var writer = new DataWriter();
+        writer.WriteBytes(payload);
+        var notifyResult = await tx.NotifyValueAsync(writer.DetachBuffer(), client).AsTask(cancellationToken)
+            .ConfigureAwait(false);
+        return notifyResult.Status == GattCommunicationStatus.Success;
+    }
+
+    private async ValueTask<bool> TrySendViaCentralAsync(byte[] payload, byte[] mac,
+        CancellationToken cancellationToken)
+    {
         var destination = new TransportAddress(TransportKind.Bluetooth, mac);
         TransportTrafficLog.LogSend(_options.Logger, LocalBluetoothEndpoint(), destination, payload);
 
@@ -294,12 +372,68 @@ public sealed class WindowsBluetoothTransport : ITransport
         if (rx == null)
             return false;
 
+        await EnsureCentralPeerTxSubscriptionAsync(device.BluetoothAddress, service, cancellationToken)
+            .ConfigureAwait(false);
+
         var writer = new DataWriter();
         writer.WriteBytes(payload);
         var status = await rx.WriteValueAsync(writer.DetachBuffer(), GattWriteOption.WriteWithoutResponse)
             .AsTask(cancellationToken)
             .ConfigureAwait(false);
         return status == GattCommunicationStatus.Success;
+    }
+
+    private async Task EnsureCentralPeerTxSubscriptionAsync(ulong peerBluetoothAddress, GattDeviceService service,
+        CancellationToken cancellationToken)
+    {
+        if (_centralPeerTxCharacteristics.ContainsKey(peerBluetoothAddress))
+            return;
+
+        var txResult = await service
+            .GetCharacteristicsForUuidAsync(BleShortP2PGattProtocol.PeerTxCharacteristicUuid)
+            .AsTask(cancellationToken)
+            .ConfigureAwait(false);
+        var tx = txResult.Characteristics.FirstOrDefault();
+        if (tx == null)
+            return;
+
+        var status = await tx.WriteClientCharacteristicConfigurationDescriptorAsync(
+                GattClientCharacteristicConfigurationDescriptorValue.Notify)
+            .AsTask(cancellationToken)
+            .ConfigureAwait(false);
+        if (status != GattCommunicationStatus.Success)
+            return;
+
+        tx.ValueChanged += OnCentralPeerTxValueChanged;
+        if (_centralPeerTxCharacteristics.TryAdd(peerBluetoothAddress, tx))
+            return;
+
+        tx.ValueChanged -= OnCentralPeerTxValueChanged;
+    }
+
+    private void OnCentralPeerTxValueChanged(GattCharacteristic sender, GattValueChangedEventArgs args)
+    {
+        try
+        {
+            var peerAddr = sender.Service?.Device?.BluetoothAddress ?? 0;
+            if (peerAddr == 0)
+                return;
+
+            var reader = DataReader.FromBuffer(args.CharacteristicValue);
+            var data = new byte[reader.UnconsumedBufferLength];
+            if (data.Length == 0)
+                return;
+            reader.ReadBytes(data);
+
+            var addr = new TransportAddress(TransportKind.Bluetooth,
+                BluetoothMacAddress.FromBluetoothAddress(peerAddr));
+            TransportTrafficLog.LogReceive(_options.Logger, addr, LocalBluetoothEndpoint(), data);
+            _ = Channel.Writer.WriteAsync(new TransportReceiveMessage(data, addr));
+        }
+        catch
+        {
+            // ignore malformed notify
+        }
     }
 
 

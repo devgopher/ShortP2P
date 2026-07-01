@@ -57,4 +57,18 @@ public static class BluetoothTransportAddress
             }
         });
     }
+
+    /// <summary>Лексикографическое сравнение MAC (6 байт); для tie-break при выборе инициатора BLE.</summary>
+    public static int CompareMac(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
+    {
+        if (left.Length != MacLength)
+            throw new ArgumentException($"MAC must be {MacLength} bytes.", nameof(left));
+        if (right.Length != MacLength)
+            throw new ArgumentException($"MAC must be {MacLength} bytes.", nameof(right));
+        return left.SequenceCompareTo(right);
+    }
+
+    /// <summary>True, если этот узел должен инициировать исходящее BLE-подключение к пиру (локальный MAC строго больше).</summary>
+    public static bool ShouldInitiateBleConnection(ReadOnlySpan<byte> localMac, ReadOnlySpan<byte> peerMac) =>
+        CompareMac(localMac, peerMac) > 0;
 }
