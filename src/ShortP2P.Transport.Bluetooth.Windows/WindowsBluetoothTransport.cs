@@ -24,7 +24,7 @@ public sealed class WindowsBluetoothTransport : ITransport
     private static readonly TimeSpan SendThrottleInterval = TimeSpan.FromMilliseconds(100);
 
     private readonly Dictionary<ulong, DateTime> _lastNetworkIdSending = new(100);
-    private readonly ConcurrentDictionary<ulong, GattSession> _peerServerSessions = new();
+    private readonly ConcurrentDictionary<ulong, LocalGattSession> _peerServerSessions = new();
     private readonly ConcurrentDictionary<ulong, GattCharacteristic> _centralPeerTxCharacteristics = new();
     private readonly TimeSpan _networkIdPeriod = new(0, 0, 30);
     private readonly WindowsBluetoothTransportOptions _options;
@@ -234,7 +234,7 @@ public sealed class WindowsBluetoothTransport : ITransport
             var addr = new TransportAddress(TransportKind.Bluetooth,
                 BluetoothMacAddress.FromBluetoothAddress(device.BluetoothAddress));
 
-            _peerServerSessions[device.BluetoothAddress] = args.Session;
+            _peerServerSessions[device.BluetoothAddress] = LocalGattSession.FromGattSession(args.Session);
 
             TransportTrafficLog.LogReceive(_options.Logger, addr, LocalBluetoothEndpoint(), data);
 
@@ -303,15 +303,14 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     private bool ShouldUseCentralConnection(byte[] peerMac)
     {
-        if (!TryGetLocalMacBytes(out var local))
-            return true;
-        return BluetoothTransportAddress.ShouldInitiateBleConnection(local, peerMac);
+        return !TryGetLocalMacBytes(out var local) ||
+               BluetoothTransportAddress.ShouldInitiateBleConnection(local, peerMac);
     }
 
     private bool TryGetLocalMacBytes(out byte[] mac)
     {
         mac = [];
-        if (_options.LocalAdapterBluetoothAddress is not ulong addr || addr == 0)
+        if (_options.LocalAdapterBluetoothAddress is not { } addr || addr == 0)
             return false;
         mac = BluetoothMacAddress.FromBluetoothAddress(addr);
         return mac.Length == BluetoothTransportAddress.MacLength;
@@ -329,7 +328,7 @@ public sealed class WindowsBluetoothTransport : ITransport
             return false;
 
         var client = tx.SubscribedClients.FirstOrDefault(c =>
-            string.Equals(c.Session?.DeviceId?.Id, session.DeviceId?.Id, StringComparison.OrdinalIgnoreCase));
+            string.Equals(c.Session?.DeviceId?.Id, session.DeviceId, StringComparison.OrdinalIgnoreCase));
         if (client == null)
             return false;
 
