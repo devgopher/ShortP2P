@@ -32,6 +32,8 @@ public sealed class WindowsBluetoothTransport : ITransport
     private GattLocalCharacteristic? _bleRxCharacteristic;
     private GattLocalCharacteristic? _bleTxCharacteristic;
     private GattServiceProvider? _bleServiceProvider;
+    private GattServiceProviderAdvertisingParameters? _advertisingParams;
+    private Task? _advertisingDutyCycleTask;
     private bool _isStarted;
     private Channel<OutboundSendRequest>? _outbound;
     private CancellationTokenSource? _runCts;
@@ -116,13 +118,11 @@ public sealed class WindowsBluetoothTransport : ITransport
         _bleTxCharacteristic = txResult.Characteristic;
 
 
-        var advertising = new GattServiceProviderAdvertisingParameters
+        _advertisingParams = new GattServiceProviderAdvertisingParameters
         {
             IsDiscoverable = true,
             IsConnectable = true
         };
-
-        _bleServiceProvider.StartAdvertising(advertising);
 
         _advertisementWatcher = new BluetoothLEAdvertisementWatcher
         {
@@ -132,6 +132,7 @@ public sealed class WindowsBluetoothTransport : ITransport
         _advertisementWatcher.Start();
 
         _runCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _advertisingDutyCycleTask = RunAdvertisingDutyCycleAsync(_runCts.Token);
         _outbound = System.Threading.Channels.Channel.CreateBounded<OutboundSendRequest>(
             new BoundedChannelOptions(OutboundQueueCapacity)
             {
@@ -172,6 +173,16 @@ public sealed class WindowsBluetoothTransport : ITransport
                         // expected on stop
                     }
 
+                if (_advertisingDutyCycleTask != null)
+                    try
+                    {
+                        await _advertisingDutyCycleTask.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // expected on stop
+                    }
+
                 while (_outbound?.Reader.TryRead(out var pending) == true)
                     pending.Completion.TrySetCanceled(cancellationToken);
             }
@@ -181,7 +192,32 @@ public sealed class WindowsBluetoothTransport : ITransport
             _runCts?.Dispose();
             _runCts = null;
             _sendLoopTask = null;
+            _advertisingDutyCycleTask = null;
             _outbound = null;
+        }
+    }
+
+    /// <summary>5 с реклама GATT-сервиса, затем пауза ~50 с (только скан через watcher).</summary>
+    private async Task RunAdvertisingDutyCycleAsync(CancellationToken cancellationToken)
+    {
+        if (_bleServiceProvider == null || _advertisingParams == null)
+            return;
+
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                _bleServiceProvider.StartAdvertising(_advertisingParams);
+                await Task.Delay(BleAdvertisementDutyCycle.AdvertiseOnDuration, cancellationToken)
+                    .ConfigureAwait(false);
+                _bleServiceProvider.StopAdvertising();
+                await Task.Delay(BleAdvertisementDutyCycle.NextListenOnlyDurationMs(), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // expected on stop
         }
     }
 
