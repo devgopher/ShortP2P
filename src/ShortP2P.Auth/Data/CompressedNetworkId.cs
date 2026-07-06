@@ -8,7 +8,7 @@ namespace ShortP2P.Auth.Data;
 /// </summary>
 public readonly struct CompressedNetworkId : IEquatable<CompressedNetworkId>, IComparable<CompressedNetworkId>
 {
-    public const int WireLength = 12;
+    public const int WireLength = 16;
 
     private readonly ulong _part0;
     private readonly uint _part1;

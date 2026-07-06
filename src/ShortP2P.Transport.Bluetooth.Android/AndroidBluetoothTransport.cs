@@ -50,6 +50,10 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
 
     private BluetoothAdapter? _adapter;
     private AdvertiseCallbackImpl? _advertiseCallback;
+    private AdvertiseData? _advertiseData;
+    private AdvertiseSettings? _advertiseSettings;
+    private AdvertiseData? _advertiseScanRsp;
+    private Task? _advertisingDutyCycleTask;
     private BluetoothLeAdvertiser? _advertiser;
     private BluetoothManager? _btManager;
     private bool _disposed;
@@ -136,21 +140,21 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
             _advertiser = _adapter.BluetoothLeAdvertiser;
             if (_advertiser != null)
             {
-                var settings = new AdvertiseSettings.Builder()!
+                _advertiseSettings = new AdvertiseSettings.Builder()!
                     .SetAdvertiseMode(AdvertiseMode.Balanced)!
                     .SetTxPowerLevel((AdvertiseTx)(int)AdvertiseTxPower.Medium)!
                     .SetConnectable(true)!
                     .Build();
-                var data = new AdvertiseData.Builder()!
+                _advertiseData = new AdvertiseData.Builder()!
                     .AddServiceUuid(new ParcelUuid(ServiceUuidJava))!
                     .Build();
                 var scanRspBuilder = new AdvertiseData.Builder()!;
 
                 if (options.GattDiscoverable)
                     scanRspBuilder.SetIncludeDeviceName(true);
-                var scanRsp = scanRspBuilder.Build();
+                _advertiseScanRsp = scanRspBuilder.Build();
                 _advertiseCallback = new AdvertiseCallbackImpl();
-                _advertiser.StartAdvertising(settings, data, scanRsp, _advertiseCallback);
+                _advertisingDutyCycleTask = RunAdvertisingDutyCycleAsync(ct);
             }
 
             _started = true;
@@ -391,6 +395,38 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
         return true;
     }
 
+    private async Task RunAdvertisingDutyCycleAsync(CancellationToken cancellationToken)
+    {
+        if (_advertiser == null || _advertiseSettings == null || _advertiseData == null ||
+            _advertiseScanRsp == null || _advertiseCallback == null)
+            return;
+
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                _advertiser.StartAdvertising(_advertiseSettings, _advertiseData, _advertiseScanRsp, _advertiseCallback);
+                await Task.Delay(BleAdvertisementDutyCycle.AdvertiseOnDuration, cancellationToken)
+                    .ConfigureAwait(false);
+                try
+                {
+                    _advertiser.StopAdvertising(_advertiseCallback);
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                await Task.Delay(BleAdvertisementDutyCycle.NextListenOnlyDurationMs(), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // expected on stop
+        }
+    }
+
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
         _started = false;
@@ -413,7 +449,21 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
                 // ignore
             }
 
+        if (_advertisingDutyCycleTask != null)
+            try
+            {
+                await _advertisingDutyCycleTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // expected on stop
+            }
+
+        _advertisingDutyCycleTask = null;
         _advertiseCallback = null;
+        _advertiseSettings = null;
+        _advertiseData = null;
+        _advertiseScanRsp = null;
         _networkIdOfferedToMac.Clear();
         _serverConnectedPeers.Clear();
 
