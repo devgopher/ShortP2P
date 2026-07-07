@@ -403,6 +403,9 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
 
         try
         {
+            await Task.Delay(BleAdvertisementDutyCycle.NextStartupPhaseOffsetMs(), cancellationToken)
+                .ConfigureAwait(false);
+
             while (!cancellationToken.IsCancellationRequested)
             {
                 _advertiser.StartAdvertising(_advertiseSettings, _advertiseData, _advertiseScanRsp, _advertiseCallback);

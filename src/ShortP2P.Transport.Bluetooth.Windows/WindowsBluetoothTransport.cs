@@ -1,13 +1,10 @@
 using System.Collections.Concurrent;
-using System.IO;
 using System.Runtime.Versioning;
 using System.Threading.Channels;
-using Microsoft.Extensions.Logging;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Storage.Streams;
-using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport.Bluetooth.Windows;
@@ -53,7 +50,7 @@ public sealed class WindowsBluetoothTransport : ITransport
     /// <summary>
     ///     Bluetooth Low Energy (GATT) на Windows через WinRT: исходящие записи в RX-характеристику пира
     ///     и входящие записи через локальный GATT-сервер.
-    /// </summary>
+    /// </summary>.
     public WindowsBluetoothTransport(WindowsBluetoothTransportOptions options)
     {
         _options = options;
@@ -126,7 +123,13 @@ public sealed class WindowsBluetoothTransport : ITransport
 
         _advertisementWatcher = new BluetoothLEAdvertisementWatcher
         {
-            ScanningMode = BluetoothLEScanningMode.Active
+            AdvertisementFilter = null,
+            AllowExtendedAdvertisements = false,
+            ScanningMode = BluetoothLEScanningMode.Passive,
+            SignalStrengthFilter =
+            {
+                SamplingInterval = TimeSpan.FromMilliseconds(0)
+            }
         };
         _advertisementWatcher.Received += OnAdvertisementReceived;
         _advertisementWatcher.Start();
@@ -197,7 +200,7 @@ public sealed class WindowsBluetoothTransport : ITransport
         }
     }
 
-    /// <summary>5 с реклама GATT-сервиса, затем пауза ~50 с (только скан через watcher).</summary>
+    /// <summary>Реклама GATT-сервиса, затем пауза (только скан через watcher).</summary>
     private async Task RunAdvertisingDutyCycleAsync(CancellationToken cancellationToken)
     {
         if (_bleServiceProvider == null || _advertisingParams == null)
@@ -205,6 +208,9 @@ public sealed class WindowsBluetoothTransport : ITransport
 
         try
         {
+            await Task.Delay(BleAdvertisementDutyCycle.NextStartupPhaseOffsetMs(), cancellationToken)
+                .ConfigureAwait(false);
+
             while (!cancellationToken.IsCancellationRequested)
             {
                 _bleServiceProvider.StartAdvertising(_advertisingParams);

@@ -27,7 +27,7 @@ public sealed class WindowsBluetoothLeShortP2PScanner(ILogger<WindowsBluetoothLe
             ScanningMode = BluetoothLEScanningMode.Passive,
             SignalStrengthFilter =
             {
-                SamplingInterval = TimeSpan.FromMilliseconds(500)
+                SamplingInterval = TimeSpan.FromMilliseconds(0)
             }
         };
         var seen = new Dictionary<ulong, BleAdScanResult>();
