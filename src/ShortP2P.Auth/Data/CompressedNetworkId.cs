@@ -8,7 +8,7 @@ namespace ShortP2P.Auth.Data;
 /// </summary>
 public readonly struct CompressedNetworkId : IEquatable<CompressedNetworkId>, IComparable<CompressedNetworkId>
 {
-    public const int WireLength = 16;
+    public const int WireLength = 12;
 
     private readonly ulong _part0;
     private readonly uint _part1;
@@ -142,7 +142,7 @@ public readonly struct CompressedNetworkId : IEquatable<CompressedNetworkId>, IC
 
         var bytes = Convert.FromBase64String(t);
         return bytes.Length != WireLength
-            ? throw new FormatException($"Decoded id must be {WireLength} bytes.")
+            ? throw new FormatException($"Decoded id must be {WireLength} bytes, but here: {bytes.Length}.")
             : bytes;
     }
 }
