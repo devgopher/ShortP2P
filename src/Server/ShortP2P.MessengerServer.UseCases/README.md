@@ -22,7 +22,7 @@
 | Send / Submit receipt | Перед записью в кеш проверяется `IsWriteAvailable`. Пишем в включённые/доступные хранилища. Оба недоступны → `Unavailable` |
 | Get messages / receipts | Сначала кеш (если включён); если пусто/недоступен — репозиторий. После выдачи — best-effort удаление из доступных хранилищ |
 | Настройки | `CacheEnabled` / `RepositoryEnabled` (оба default **true**). Оба false → ошибка Validation |
-| TTL (`TimeToLive`, default **60 с**) | `ExpiredCachePromotionHostedService` (poll default **10 с**) работает только если включены **оба** хранилища; при сбое записи в БД элемент возвращается в кеш |
+| TTL (`TimeToLive`, default **60 с**) | `ListExpired` → запись в репозиторий → при успехе удаление из кеша; при сбое БД элемент остаётся в кеше |
 
 Зарегистрировать в host: `services.AddHostedService<ExpiredCachePromotionHostedService>()`.
 

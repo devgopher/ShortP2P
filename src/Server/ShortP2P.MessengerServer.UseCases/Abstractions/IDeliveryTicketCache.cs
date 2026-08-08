@@ -19,9 +19,9 @@ public interface IDeliveryTicketCache
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Removes expired cache entries and returns them for promotion to the durable repository.
+    /// Lists expired cache entries without removing them.
     /// </summary>
-    Task<IReadOnlyList<CachedDeliveryTicket>> TakeExpiredAsync(
+    Task<IReadOnlyList<CachedDeliveryTicket>> ListExpiredAsync(
         DateTime olderThanUtc,
         CancellationToken cancellationToken = default);
 }

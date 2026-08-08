@@ -59,25 +59,16 @@ public sealed class InMemoryMessageCache(InMemoryCacheMemoryTracker memory, IClo
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<Message>> TakeExpiredAsync(
+    public Task<IReadOnlyList<Message>> ListExpiredAsync(
         DateTime olderThanUtc,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var expired = new List<Message>();
-        foreach (var pair in _entries)
-        {
-            if (pair.Value.CachedAtUtc >= olderThanUtc)
-                continue;
-
-            if (_entries.TryRemove(pair.Key, out var entry))
-            {
-                memory.Release(entry.SizeBytes);
-                expired.Add(entry.Message);
-            }
-        }
-
-        return Task.FromResult<IReadOnlyList<Message>>(expired);
+        IReadOnlyList<Message> expired = _entries.Values
+            .Where(e => e.CachedAtUtc < olderThanUtc)
+            .Select(e => e.Message)
+            .ToArray();
+        return Task.FromResult(expired);
     }
 
     private sealed record CacheEntry(Message Message, DateTime CachedAtUtc, long SizeBytes);

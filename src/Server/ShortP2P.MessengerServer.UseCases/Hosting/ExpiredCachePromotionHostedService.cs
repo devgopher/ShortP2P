@@ -5,7 +5,7 @@ namespace ShortP2P.MessengerServer.UseCases.Hosting;
 
 /// <summary>
 /// Periodically promotes messages and delivery tickets that exceeded cache TTL
-/// into the durable repositories and removes them from cache.
+/// into the durable repositories and removes them from cache after a successful write.
 /// Runs only when both cache and repository are enabled in settings.
 /// </summary>
 public sealed class ExpiredCachePromotionHostedService(
@@ -55,7 +55,7 @@ public sealed class ExpiredCachePromotionHostedService(
         var olderThan = clock.UtcNow - ttl;
 
         var expiredMessages = await StorageAccess
-            .TryListAsync(() => messageCache.TakeExpiredAsync(olderThan, cancellationToken), cancellationToken)
+            .TryListAsync(() => messageCache.ListExpiredAsync(olderThan, cancellationToken), cancellationToken)
             .ConfigureAwait(false);
 
         foreach (var message in expiredMessages)
@@ -72,20 +72,18 @@ public sealed class ExpiredCachePromotionHostedService(
                     cancellationToken)
                 .ConfigureAwait(false);
 
-            if (!written)
+            if (written)
             {
                 await StorageAccess
-                    .TryWriteToCacheAsync(
-                        cacheEnabled: true,
-                        () => messageCache.IsWriteAvailable,
-                        () => messageCache.AddAsync(message, cancellationToken),
+                    .TryExecuteAsync(
+                        () => messageCache.RemoveByIdsAsync([message.MessageId], cancellationToken),
                         cancellationToken)
                     .ConfigureAwait(false);
             }
         }
 
         var expiredTickets = await StorageAccess
-            .TryListAsync(() => ticketCache.TakeExpiredAsync(olderThan, cancellationToken), cancellationToken)
+            .TryListAsync(() => ticketCache.ListExpiredAsync(olderThan, cancellationToken), cancellationToken)
             .ConfigureAwait(false);
 
         foreach (var expired in expiredTickets)
@@ -94,13 +92,13 @@ public sealed class ExpiredCachePromotionHostedService(
                 .TryWriteAsync(() => tickets.AddAsync(expired.Ticket, cancellationToken), cancellationToken)
                 .ConfigureAwait(false);
 
-            if (!written)
+            if (written)
             {
                 await StorageAccess
-                    .TryWriteToCacheAsync(
-                        cacheEnabled: true,
-                        () => ticketCache.IsWriteAvailable,
-                        () => ticketCache.AddAsync(expired, cancellationToken),
+                    .TryExecuteAsync(
+                        () => ticketCache.RemoveByMessageIdsAsync(
+                            [expired.Ticket.MessageId],
+                            cancellationToken),
                         cancellationToken)
                     .ConfigureAwait(false);
             }

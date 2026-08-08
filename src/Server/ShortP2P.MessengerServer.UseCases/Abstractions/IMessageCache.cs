@@ -19,10 +19,10 @@ public interface IMessageCache
     Task RemoveByIdsAsync(IReadOnlyCollection<string> messageIds, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Removes entries whose cache age exceeds <paramref name="olderThanUtc"/> (cachedAt &lt; olderThanUtc)
-    /// and returns them so the caller can ensure they exist in the durable repository.
+    /// Lists entries whose cache age exceeds <paramref name="olderThanUtc"/> (cachedAt &lt; olderThanUtc)
+    /// without removing them.
     /// </summary>
-    Task<IReadOnlyList<Message>> TakeExpiredAsync(
+    Task<IReadOnlyList<Message>> ListExpiredAsync(
         DateTime olderThanUtc,
         CancellationToken cancellationToken = default);
 }

@@ -56,24 +56,16 @@ public sealed class InMemoryDeliveryTicketCache(InMemoryCacheMemoryTracker memor
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<CachedDeliveryTicket>> TakeExpiredAsync(
+    public Task<IReadOnlyList<CachedDeliveryTicket>> ListExpiredAsync(
         DateTime olderThanUtc,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var expired = new List<CachedDeliveryTicket>();
-        foreach (var pair in _entries)
-        {
-            if (pair.Value.CachedAtUtc >= olderThanUtc)
-                continue;
-
-            if (!_entries.TryRemove(pair.Key, out var entry)) 
-                continue;
-            memory.Release(entry.SizeBytes);
-            expired.Add(entry.Value);
-        }
-
-        return Task.FromResult<IReadOnlyList<CachedDeliveryTicket>>(expired);
+        IReadOnlyList<CachedDeliveryTicket> expired = _entries.Values
+            .Where(e => e.CachedAtUtc < olderThanUtc)
+            .Select(e => e.Value)
+            .ToArray();
+        return Task.FromResult(expired);
     }
 
     private sealed record CacheEntry(CachedDeliveryTicket Value, DateTime CachedAtUtc, long SizeBytes);

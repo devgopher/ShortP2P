@@ -17,7 +17,7 @@
 
 ```csharp
 services.AddSingleton<IClock, SystemClock>();
-services.AddInMemoryMessengerCaches(o => o.MaxMemoryMegabytes = 64); // optional
+services.AddInMemoryMessengerCaches(o => o.MaxMemoryMegabytes = 1024); // optional
 ```
 
 ## Сборка

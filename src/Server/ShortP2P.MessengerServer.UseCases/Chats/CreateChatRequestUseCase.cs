@@ -32,7 +32,7 @@ public sealed class CreateChatRequestUseCase(
                 new Chat
                 {
                     ChatId = Guid.NewGuid().ToString("N"),
-                    NetworkIds = new[] { caller, target },
+                    NetworkIds = [caller, target],
                     CreatedAtUtc = now
                 },
                 cancellationToken).ConfigureAwait(false);
