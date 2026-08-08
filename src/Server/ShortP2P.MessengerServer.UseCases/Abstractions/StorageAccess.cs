@@ -71,6 +71,31 @@ public static class StorageAccess
         }
     }
 
+    /// <summary>
+    /// Writes to cache only when enabled and <paramref name="isWriteAvailable"/> is true.
+    /// </summary>
+    public static async Task<bool> TryWriteToCacheAsync(
+        bool cacheEnabled,
+        Func<bool> isWriteAvailable,
+        Func<Task> addAsync,
+        CancellationToken cancellationToken = default)
+    {
+        if (!cacheEnabled)
+            return false;
+
+        try
+        {
+            if (!isWriteAvailable())
+                return false;
+        }
+        catch
+        {
+            return false;
+        }
+
+        return await TryWriteAsync(addAsync, cancellationToken).ConfigureAwait(false);
+    }
+
     public static void EnsureAnyStoreEnabled(MessengerCacheOptions options)
     {
         if (!options.CacheEnabled && !options.RepositoryEnabled)

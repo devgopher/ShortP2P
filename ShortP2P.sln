@@ -43,6 +43,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShortP2P.MessengerServer.Do
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShortP2P.MessengerServer.UseCases", "src\Server\ShortP2P.MessengerServer.UseCases\ShortP2P.MessengerServer.UseCases.csproj", "{DA16F54F-8B7B-4A8C-A745-1904B394D420}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShortP2P.MessengerServer.Infrastructure", "src\Server\ShortP2P.MessengerServer.Infrastructure\ShortP2P.MessengerServer.Infrastructure.csproj", "{3F5569BD-EA83-46C4-8A3F-8A3ECE1E40B3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -269,6 +271,18 @@ Global
 		{DA16F54F-8B7B-4A8C-A745-1904B394D420}.Release|x64.Build.0 = Release|Any CPU
 		{DA16F54F-8B7B-4A8C-A745-1904B394D420}.Release|x86.ActiveCfg = Release|Any CPU
 		{DA16F54F-8B7B-4A8C-A745-1904B394D420}.Release|x86.Build.0 = Release|Any CPU
+		{3F5569BD-EA83-46C4-8A3F-8A3ECE1E40B3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3F5569BD-EA83-46C4-8A3F-8A3ECE1E40B3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3F5569BD-EA83-46C4-8A3F-8A3ECE1E40B3}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{3F5569BD-EA83-46C4-8A3F-8A3ECE1E40B3}.Debug|x64.Build.0 = Debug|Any CPU
+		{3F5569BD-EA83-46C4-8A3F-8A3ECE1E40B3}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{3F5569BD-EA83-46C4-8A3F-8A3ECE1E40B3}.Debug|x86.Build.0 = Debug|Any CPU
+		{3F5569BD-EA83-46C4-8A3F-8A3ECE1E40B3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3F5569BD-EA83-46C4-8A3F-8A3ECE1E40B3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3F5569BD-EA83-46C4-8A3F-8A3ECE1E40B3}.Release|x64.ActiveCfg = Release|Any CPU
+		{3F5569BD-EA83-46C4-8A3F-8A3ECE1E40B3}.Release|x64.Build.0 = Release|Any CPU
+		{3F5569BD-EA83-46C4-8A3F-8A3ECE1E40B3}.Release|x86.ActiveCfg = Release|Any CPU
+		{3F5569BD-EA83-46C4-8A3F-8A3ECE1E40B3}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -293,5 +307,6 @@ Global
 		{2B817EE1-DD61-4D87-81CF-734061D49B4E} = {E6B48023-E680-40DA-9E17-319585C26937}
 		{F5133724-1E66-4628-8706-717899CF3371} = {E6B48023-E680-40DA-9E17-319585C26937}
 		{DA16F54F-8B7B-4A8C-A745-1904B394D420} = {E6B48023-E680-40DA-9E17-319585C26937}
+		{3F5569BD-EA83-46C4-8A3F-8A3ECE1E40B3} = {E6B48023-E680-40DA-9E17-319585C26937}
 	EndGlobalSection
 EndGlobal

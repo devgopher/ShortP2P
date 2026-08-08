@@ -19,9 +19,10 @@
 
 | Операция | Поведение |
 |----------|-----------|
-| Send / Submit receipt | Параллельная запись в **кеш** и **репозиторий** |
-| Get messages / receipts | Сначала кеш; если пусто — репозиторий. После выдачи — **удаление** из кеша и репозитория |
-| TTL (`MessengerCacheOptions.TimeToLive`, default **60 с**) | `ExpiredCachePromotionHostedService` (poll default **10 с**) переносит expired в репозиторий и чистит кеш |
+| Send / Submit receipt | Перед записью в кеш проверяется `IsWriteAvailable`. Пишем в включённые/доступные хранилища. Оба недоступны → `Unavailable` |
+| Get messages / receipts | Сначала кеш (если включён); если пусто/недоступен — репозиторий. После выдачи — best-effort удаление из доступных хранилищ |
+| Настройки | `CacheEnabled` / `RepositoryEnabled` (оба default **true**). Оба false → ошибка Validation |
+| TTL (`TimeToLive`, default **60 с**) | `ExpiredCachePromotionHostedService` (poll default **10 с**) работает только если включены **оба** хранилища; при сбое записи в БД элемент возвращается в кеш |
 
 Зарегистрировать в host: `services.AddHostedService<ExpiredCachePromotionHostedService>()`.
 

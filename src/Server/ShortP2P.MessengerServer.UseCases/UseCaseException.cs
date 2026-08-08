@@ -18,4 +18,6 @@ public sealed class UseCaseException : Exception
     public static UseCaseException NotFound(string message) => new("NotFound", message);
 
     public static UseCaseException Unauthorized(string message) => new("Unauthorized", message);
+
+    public static UseCaseException Unavailable(string message) => new("Unavailable", message);
 }

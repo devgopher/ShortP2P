@@ -5,7 +5,8 @@ namespace ShortP2P.MessengerServer.UseCases.Messages;
 
 public sealed class GetDeliveryReceiptsUseCase(
     IDeliveryTicketRepository tickets,
-    IDeliveryTicketCache ticketCache)
+    IDeliveryTicketCache ticketCache,
+    MessengerCacheOptions options)
 {
     public async Task<IReadOnlyList<DeliveryTicket>> ExecuteAsync(
         GetDeliveryReceiptsQuery query,
@@ -14,21 +15,35 @@ public sealed class GetDeliveryReceiptsUseCase(
         if (string.IsNullOrWhiteSpace(query.CallerNetworkId))
             throw UseCaseException.Validation("CallerNetworkId is required.");
 
-        var caller = query.CallerNetworkId.Trim();
+        StorageAccess.EnsureAnyStoreEnabled(options);
 
-        var cached = await ticketCache.ListForSourceNetworkIdAsync(caller, cancellationToken)
-            .ConfigureAwait(false);
-        var result = cached.Count > 0
-            ? cached
-            : await tickets.ListForSourceNetworkIdAsync(caller, cancellationToken).ConfigureAwait(false);
+        var caller = query.CallerNetworkId.Trim();
+        IReadOnlyList<DeliveryTicket> result = Array.Empty<DeliveryTicket>();
+
+        if (options.CacheEnabled)
+        {
+            result = await StorageAccess
+                .TryListAsync(() => ticketCache.ListForSourceNetworkIdAsync(caller, cancellationToken), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (result.Count == 0 && options.RepositoryEnabled)
+        {
+            result = await StorageAccess
+                .TryListAsync(() => tickets.ListForSourceNetworkIdAsync(caller, cancellationToken), cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         if (result.Count == 0)
             return result;
 
         var ids = result.Select(t => t.MessageId).ToArray();
-        await Task.WhenAll(
-            ticketCache.RemoveByMessageIdsAsync(ids, cancellationToken),
-            tickets.RemoveByMessageIdsAsync(ids, cancellationToken)).ConfigureAwait(false);
+        var removals = new List<Task>(2);
+        if (options.CacheEnabled)
+            removals.Add(StorageAccess.TryExecuteAsync(() => ticketCache.RemoveByMessageIdsAsync(ids, cancellationToken), cancellationToken));
+        if (options.RepositoryEnabled)
+            removals.Add(StorageAccess.TryExecuteAsync(() => tickets.RemoveByMessageIdsAsync(ids, cancellationToken), cancellationToken));
+        await Task.WhenAll(removals).ConfigureAwait(false);
 
         return result;
     }

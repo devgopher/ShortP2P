@@ -5,6 +5,9 @@ namespace ShortP2P.MessengerServer.UseCases.Abstractions;
 /// <summary>Hot cache for store-and-forward messages.</summary>
 public interface IMessageCache
 {
+    /// <summary>Whether the cache can accept new writes (e.g. under memory limit).</summary>
+    bool IsWriteAvailable { get; }
+
     Task AddAsync(Message message, CancellationToken cancellationToken = default);
 
     Task<Message?> FindByIdAsync(string messageId, CancellationToken cancellationToken = default);

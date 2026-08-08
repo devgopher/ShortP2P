@@ -3,7 +3,10 @@ using ShortP2P.MessengerServer.UseCases.Abstractions;
 
 namespace ShortP2P.MessengerServer.UseCases.Messages;
 
-public sealed class GetMessagesUseCase(IMessageRepository messages, IMessageCache messageCache)
+public sealed class GetMessagesUseCase(
+    IMessageRepository messages,
+    IMessageCache messageCache,
+    MessengerCacheOptions options)
 {
     public async Task<IReadOnlyList<Message>> ExecuteAsync(
         GetMessagesQuery query,
@@ -12,21 +15,35 @@ public sealed class GetMessagesUseCase(IMessageRepository messages, IMessageCach
         if (string.IsNullOrWhiteSpace(query.CallerNetworkId))
             throw UseCaseException.Validation("CallerNetworkId is required.");
 
-        var caller = query.CallerNetworkId.Trim();
+        StorageAccess.EnsureAnyStoreEnabled(options);
 
-        var cached = await messageCache.ListByTargetNetworkIdAsync(caller, cancellationToken)
-            .ConfigureAwait(false);
-        var result = cached.Count > 0
-            ? cached
-            : await messages.ListByTargetNetworkIdAsync(caller, cancellationToken).ConfigureAwait(false);
+        var caller = query.CallerNetworkId.Trim();
+        IReadOnlyList<Message> result = Array.Empty<Message>();
+
+        if (options.CacheEnabled)
+        {
+            result = await StorageAccess
+                .TryListAsync(() => messageCache.ListByTargetNetworkIdAsync(caller, cancellationToken), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (result.Count == 0 && options.RepositoryEnabled)
+        {
+            result = await StorageAccess
+                .TryListAsync(() => messages.ListByTargetNetworkIdAsync(caller, cancellationToken), cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         if (result.Count == 0)
             return result;
 
         var ids = result.Select(m => m.MessageId).ToArray();
-        await Task.WhenAll(
-            messageCache.RemoveByIdsAsync(ids, cancellationToken),
-            messages.RemoveByIdsAsync(ids, cancellationToken)).ConfigureAwait(false);
+        var removals = new List<Task>(2);
+        if (options.CacheEnabled)
+            removals.Add(StorageAccess.TryExecuteAsync(() => messageCache.RemoveByIdsAsync(ids, cancellationToken), cancellationToken));
+        if (options.RepositoryEnabled)
+            removals.Add(StorageAccess.TryExecuteAsync(() => messages.RemoveByIdsAsync(ids, cancellationToken), cancellationToken));
+        await Task.WhenAll(removals).ConfigureAwait(false);
 
         return result;
     }
