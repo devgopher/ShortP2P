@@ -9,6 +9,8 @@
 | `Message` | messageId, srcNetworkId, tgtNetworkId, createdUtc, updatedUtc, encryptedDataBase64 |
 | `DeliveryTicket` | messageId, receivedAtUtc |
 | `Chat` | chatId, networkIds, createdAtUtc |
+| `ChatRequest` | requesterNetworkId, targetNetworkId, publicKey, createdAtUtc |
+| `ClientAccount` | nick, networkId, passwordSalt, passwordHash, createdAtUtc |
 | `ClientStatuses` | networkId, status (`Online`/`Offline`), createdAtUtc |
 | `CryptoKeys` | srcNetworkId, tgtNetworkId, publicKey |
 
