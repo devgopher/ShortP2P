@@ -1,0 +1,344 @@
+openapi: 3.0.3
+info:
+  title: ShortP2P Messenger Server API
+  version: 1.0.0
+  description: |
+    HTTPS JSON contract for the central messenger server (store-and-forward).
+    EncryptedData is opaque; the server does not decrypt payloads.
+    networkId is the short client id (base64url).
+servers:
+  - url: https://{host}
+    variables:
+      host:
+        default: localhost:5001
+paths:
+  /api/v1/auth/register:
+    post:
+      operationId: register
+      summary: Register client
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Registered
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: NetworkId or nick already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      summary: Authorize client
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/server/certificate:
+    get:
+      operationId: getServerCertificate
+      summary: Server certificate fingerprint
+      tags: [Server]
+      responses:
+        '200':
+          description: Certificate fingerprint for pinning
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerCertificateResponse'
+
+  /api/v1/chats/requests:
+    post:
+      operationId: createChatRequest
+      summary: Request a new chat with a subscriber
+      tags: [Chats]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequestCreateRequest'
+      responses:
+        '202':
+          description: Accepted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    get:
+      operationId: getChatRequests
+      summary: Pending chat requests for the current client
+      tags: [Chats]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Requesters' networkId and public keys
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatRequestDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/messages:
+    get:
+      operationId: getMessages
+      summary: Messages addressed to the current client's networkId
+      tags: [Messages]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Message array
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MessageDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: sendMessage
+      summary: Send encrypted message
+      tags: [Messages]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageDto'
+      responses:
+        '202':
+          description: Accepted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/messages/receipts:
+    post:
+      operationId: submitDeliveryReceipt
+      summary: Submit a delivery receipt
+      tags: [Messages]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryReceiptRequest'
+      responses:
+        '202':
+          description: Accepted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    get:
+      operationId: getDeliveryReceipts
+      summary: All delivery receipts for the current client's networkId
+      tags: [Messages]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Receipt array for this client
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeliveryReceiptDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/keepalive:
+    post:
+      operationId: keepAlive
+      summary: Presence keep-alive
+      tags: [Presence]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KeepAliveRequest'
+      responses:
+        '204':
+          description: No content
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: Missing or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [nick, networkId, password]
+      properties:
+        nick:
+          type: string
+        networkId:
+          type: string
+          description: Short network id (base64url)
+        password:
+          type: string
+          format: password
+
+    LoginRequest:
+      type: object
+      required: [networkId, password]
+      properties:
+        networkId:
+          type: string
+        password:
+          type: string
+          format: password
+
+    LoginResponse:
+      type: object
+      required: [token, expiresAtUtc]
+      properties:
+        token:
+          type: string
+        expiresAtUtc:
+          type: string
+          format: date-time
+
+    ServerCertificateResponse:
+      type: object
+      required: [fingerprintSha256]
+      properties:
+        fingerprintSha256:
+          type: string
+        subject:
+          type: string
+          nullable: true
+        notAfterUtc:
+          type: string
+          format: date-time
+          nullable: true
+
+    ChatRequestCreateRequest:
+      type: object
+      required: [publicKey, targetNetworkId]
+      properties:
+        publicKey:
+          type: string
+        targetNetworkId:
+          type: string
+
+    ChatRequestDto:
+      type: object
+      required: [networkId, publicKey]
+      properties:
+        networkId:
+          type: string
+        publicKey:
+          type: string
+
+    MessageDto:
+      type: object
+      required: [messageId, srcNetworkId, tgtNetworkId, createdUtc, updatedUtc, encryptedDataBase64]
+      properties:
+        messageId:
+          type: string
+        srcNetworkId:
+          type: string
+        tgtNetworkId:
+          type: string
+        createdUtc:
+          type: string
+          format: date-time
+        updatedUtc:
+          type: string
+          format: date-time
+        encryptedDataBase64:
+          type: string
+          description: Opaque ciphertext, base64
+
+    DeliveryReceiptRequest:
+      type: object
+      required: [messageId, receivedAtUtc]
+      properties:
+        messageId:
+          type: string
+        receivedAtUtc:
+          type: string
+          format: date-time
+
+    DeliveryReceiptDto:
+      type: object
+      required: [messageId, receivedAtUtc]
+      properties:
+        messageId:
+          type: string
+        receivedAtUtc:
+          type: string
+          format: date-time
+
+    KeepAliveRequest:
+      type: object
+      required: [networkId]
+      properties:
+        networkId:
+          type: string
+
+    ApiError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
