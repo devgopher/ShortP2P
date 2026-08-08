@@ -1,0 +1,11 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>$(NetCoreTargetFramework)</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>ShortP2P.MessengerServer.Domain</RootNamespace>
+    <Description>Domain model for the ShortP2P messenger server.</Description>
+  </PropertyGroup>
+
+</Project>

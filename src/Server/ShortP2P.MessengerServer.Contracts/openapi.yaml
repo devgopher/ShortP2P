@@ -73,6 +73,34 @@ paths:
               schema:
                 $ref: '#/components/schemas/ServerCertificateResponse'
 
+  /api/v1/chats:
+    get:
+      operationId: getChats
+      summary: List chats for a client
+      tags: [Chats]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: networkId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Short network id of the client
+      responses:
+        '200':
+          description: Chats that include the given networkId
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatDto'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /api/v1/chats/requests:
     post:
       operationId: createChatRequest
@@ -268,6 +296,27 @@ components:
           type: string
           format: date-time
           nullable: true
+
+    GetChatsRequest:
+      type: object
+      required: [networkId]
+      properties:
+        networkId:
+          type: string
+
+    ChatDto:
+      type: object
+      required: [chatId, networkIds, createdAtUtc]
+      properties:
+        chatId:
+          type: string
+        networkIds:
+          type: array
+          items:
+            type: string
+        createdAtUtc:
+          type: string
+          format: date-time
 
     ChatRequestCreateRequest:
       type: object

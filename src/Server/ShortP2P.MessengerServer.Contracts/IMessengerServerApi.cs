@@ -17,6 +17,9 @@ public interface IMessengerServerApi
     /// <summary>GET <see cref="ApiRoutes.ServerCertificate"/> — server TLS certificate fingerprint.</summary>
     Task<ServerCertificateResponse> GetServerCertificateAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>GET <see cref="ApiRoutes.Chats"/> — chats for the given networkId.</summary>
+    Task<IReadOnlyList<ChatDto>> GetChatsAsync(GetChatsRequest request, CancellationToken cancellationToken = default);
+
     /// <summary>POST <see cref="ApiRoutes.ChatRequests"/> — request a new chat with target subscriber.</summary>
     Task CreateChatRequestAsync(ChatRequestCreateRequest request, CancellationToken cancellationToken = default);
 

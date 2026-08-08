@@ -19,6 +19,7 @@
 | `POST` | `/api/v1/auth/register` | Регистрация (nick, networkId, password) |
 | `POST` | `/api/v1/auth/login` | Авторизация (networkId, password) → token |
 | `GET` | `/api/v1/server/certificate` | Fingerprint сертификата сервера |
+| `GET` | `/api/v1/chats?networkId=` | Список чатов клиента |
 | `POST` | `/api/v1/chats/requests` | Запрос чата (publicKey, targetNetworkId) |
 | `GET` | `/api/v1/chats/requests` | Входящие запросы чата |
 | `GET` | `/api/v1/messages` | Сообщения для текущего networkId |

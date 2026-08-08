@@ -10,6 +10,7 @@ public static class ApiRoutes
 
     public const string ServerCertificate = Prefix + "/server/certificate";
 
+    public const string Chats = Prefix + "/chats";
     public const string ChatRequests = Prefix + "/chats/requests";
 
     public const string Messages = Prefix + "/messages";
