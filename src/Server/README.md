@@ -4,7 +4,7 @@
 
 Сервер принимает **уже зашифрованные** полезные нагрузки (`encryptedDataBase64` — opaque), регистрирует клиентов по `networkId` (короткий id в base64url), хранит чаты/запросы/ключи, доставляет сообщения и квитанции, ведёт presence (keep-alive).
 
-> **Важно:** в этой папке **нет ASP.NET host-проекта**. Есть контракт API, домен, use cases, in-memory кеш и PostgreSQL-репозитории. HTTP/JWT/TLS-пиннинг реализуются в отдельном хосте, который подключает эти проекты.
+Executable-хост: **`ShortP2P.MessengerServer.Api`** (Kestrel + Swagger + HTTPS + JWT). Библиотечные слои: контракт, домен, use cases, in-memory кеш, PostgreSQL.
 
 Подробности по каждому проекту — в его собственном `README.md`.
 
@@ -29,6 +29,7 @@
 
 ```
 src/Server/
+├── ShortP2P.MessengerServer.Api/            # Kestrel host: HTTPS, Swagger, JWT
 ├── ShortP2P.MessengerServer.Contracts/      # DTO, маршруты, OpenAPI, IMessengerServerApi
 ├── ShortP2P.MessengerServer.Domain/         # Доменные сущности (без зависимостей)
 ├── ShortP2P.MessengerServer.UseCases/       # Application-слой + порты + TTL-hosted service
@@ -36,7 +37,7 @@ src/Server/
 └── ShortP2P.MessengerServer.Persistence.Psql/ # EF Core + Npgsql + миграции
 ```
 
-Все пять проектов входят в `ShortP2P.sln`.
+Все проекты входят в `ShortP2P.sln`.
 
 ---
 
@@ -44,8 +45,8 @@ src/Server/
 
 ```
                     ┌─────────────────────────┐
-                    │      Host (вне папки)    │
-                    │  HTTPS, JWT, DI wiring  │
+                    │  MessengerServer.Api    │
+                    │  HTTPS, JWT, Swagger    │
                     └───────────┬─────────────┘
                                 │
          ┌──────────────────────┼──────────────────────┐
@@ -201,45 +202,35 @@ EF Core 8 + Npgsql: сущности-записи, репозитории, ми�
 
 ---
 
-## Порты (Abstractions), которые обязан закрыть host
+## Порты (Abstractions)
 
-| Порт | Где реализация сейчас |
-|------|------------------------|
+| Порт | Реализация |
+|------|------------|
 | `IMessageCache` / `IDeliveryTicketCache` | Infrastructure (in-memory) |
-| `IMessageRepository`, `IDeliveryTicketRepository`, `IClientAccountRepository`, `IChatRepository`, `IChatRequestRepository`, `ICryptoKeysRepository`, `IClientStatusRepository` | Persistence.Psql |
+| Репозитории | Persistence.Psql **или** in-memory в Api при `Persistence:Enabled=false` |
 | `IClock` | Infrastructure (`SystemClock`) |
-| `IPasswordHasher` | **host** (пока нет в Server) |
-| `IAuthTokenService` | **host** (JWT) |
-| `IServerCertificateReader` | **host** (TLS cert) |
+| `IPasswordHasher` | Api (`CryptoPasswordHasher` / PBKDF2 salt+hash) |
+| `IAuthTokenService` | Api (`JwtAuthTokenService`) |
+| `IServerCertificateReader` | Api (`KestrelServerCertificateReader`) |
 
 ---
 
-## Регистрация в DI (пример для host)
+## Регистрация в DI (host)
+
+См. `ShortP2P.MessengerServer.Api/Program.cs`:
 
 ```csharp
-// Кеш + часы
-services.AddSingleton<IClock, SystemClock>();
-services.AddInMemoryMessengerCaches(o => o.MaxMemoryMegabytes = 1024); // optional
+builder.Services
+    .AddInfrastructure(builder.Configuration)
+    .WithInMemoryCache()
+    .WithCachePromotion();
 
-services.AddSingleton(new MessengerCacheOptions
-{
-    CacheEnabled = true,
-    RepositoryEnabled = true,
-    TimeToLive = TimeSpan.FromSeconds(60),
-    PollInterval = TimeSpan.FromSeconds(10)
-});
-services.AddHostedService<ExpiredCachePromotionHostedService>();
-
-// PostgreSQL
-services.AddMessengerPostgres(
-    connectionString: "Host=localhost;Port=5432;Database=shortp2p_messenger;Username=postgres;Password=postgres",
-    applyMigrationsOnStartup: true);
-
-// Use cases — зарегистрировать вручную в host, например:
-// services.AddScoped<RegisterClientUseCase>();
-// ... + IPasswordHasher, IAuthTokenService, IServerCertificateReader
+builder.Services.AddPersistence(builder.Configuration);
+builder.Services.AddAuth(builder.Configuration);
+builder.Services.AddMessengerUseCases();
 ```
 
+При `Persistence:Enabled=false` Postgres не регистрируется, `RepositoryEnabled=false`, аккаунты/чаты идут в in-memory store.
 ---
 
 ## PostgreSQL
@@ -285,10 +276,8 @@ dotnet build src/Server/ShortP2P.MessengerServer.Persistence.Psql
 
 ---
 
-## Что ещё не в этой папке
+## Что ещё не сделано
 
-- ASP.NET Core Minimal API / Controllers, маппинг `UseCaseException` → HTTP.
-- Реализации `IPasswordHasher`, `IAuthTokenService` (JWT), `IServerCertificateReader`.
 - Клиентский HTTP SDK (можно опираться на `IMessengerServerApi` + OpenAPI).
 - Интеграционные/юнит-тесты серверного слоя.
 
@@ -296,6 +285,7 @@ dotnet build src/Server/ShortP2P.MessengerServer.Persistence.Psql
 
 ## Связанные README
 
+- [Api](ShortP2P.MessengerServer.Api/README.md)
 - [Contracts](ShortP2P.MessengerServer.Contracts/README.md)
 - [Domain](ShortP2P.MessengerServer.Domain/README.md)
 - [UseCases](ShortP2P.MessengerServer.UseCases/README.md)

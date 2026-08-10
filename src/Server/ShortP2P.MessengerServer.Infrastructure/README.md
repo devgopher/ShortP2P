@@ -9,6 +9,7 @@
 | `InMemoryMessageCache` | `IMessageCache` |
 | `InMemoryDeliveryTicketCache` | `IDeliveryTicketCache` |
 | `InMemoryCacheMemoryTracker` | общий счётчик памяти |
+| `InMemoryMessengerCacheOptions.Section` | имя секции appsettings (`InMemoryCacheOptions`) |
 | `InMemoryMessengerCacheOptions.MaxMemoryMegabytes` | лимит в МБ; `null`/≤0 — без ограничений |
 
 `IsWriteAvailable` = нет лимита **или** текущий объём &lt; лимита.

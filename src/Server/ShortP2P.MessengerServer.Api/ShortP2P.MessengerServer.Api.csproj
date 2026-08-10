@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>$(NetCoreTargetFramework)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ShortP2P.MessengerServer.Api</RootNamespace>
+    <Description>HTTPS API host (Kestrel) for the ShortP2P messenger server.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="$(MicrosoftExtensionsVersion)" />
+    <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.14.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ShortP2P.MessengerServer.Contracts\ShortP2P.MessengerServer.Contracts.csproj" />
+    <ProjectReference Include="..\ShortP2P.MessengerServer.Domain\ShortP2P.MessengerServer.Domain.csproj" />
+    <ProjectReference Include="..\ShortP2P.MessengerServer.UseCases\ShortP2P.MessengerServer.UseCases.csproj" />
+    <ProjectReference Include="..\ShortP2P.MessengerServer.Infrastructure\ShortP2P.MessengerServer.Infrastructure.csproj" />
+    <ProjectReference Include="..\ShortP2P.MessengerServer.Persistence.Psql\ShortP2P.MessengerServer.Persistence.Psql.csproj" />
+    <ProjectReference Include="..\..\..\ShortP2P.Crypto\ShortP2P.Crypto.csproj" />
+  </ItemGroup>
+
+</Project>
