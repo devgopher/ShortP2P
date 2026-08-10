@@ -5,7 +5,6 @@ namespace ShortP2P.MessengerServer.Persistence.Psql;
 
 public sealed class MessengerDbContext(DbContextOptions<MessengerDbContext> options) : DbContext(options)
 {
-    public DbSet<ClientAccountRecord> ClientAccounts => Set<ClientAccountRecord>();
     public DbSet<ChatRecord> Chats => Set<ChatRecord>();
     public DbSet<ChatRequestRecord> ChatRequests => Set<ChatRequestRecord>();
     public DbSet<CryptoKeysRecord> CryptoKeys => Set<CryptoKeysRecord>();
@@ -15,17 +14,6 @@ public sealed class MessengerDbContext(DbContextOptions<MessengerDbContext> opti
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<ClientAccountRecord>(e =>
-        {
-            e.ToTable("client_accounts");
-            e.HasKey(x => x.NetworkId);
-            e.HasIndex(x => x.Nick).IsUnique();
-            e.Property(x => x.NetworkId).HasMaxLength(64);
-            e.Property(x => x.Nick).HasMaxLength(256);
-            e.Property(x => x.PasswordSalt).HasMaxLength(128);
-            e.Property(x => x.PasswordHash).HasMaxLength(128);
-        });
-
         modelBuilder.Entity<ChatRecord>(e =>
         {
             e.ToTable("chats");

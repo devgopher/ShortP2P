@@ -1,6 +1,6 @@
 using ShortP2P.MessengerServer.UseCases.Abstractions;
 
-namespace ShortP2P.MessengerServer.Api.Auth;
+namespace ShortP2P.MessengerServer.Auth;
 
 /// <summary>PBKDF2 password hasher (salt + hash) via <see cref="ShortP2P.Crypto.PasswordHasher"/>.</summary>
 public sealed class CryptoPasswordHasher : IPasswordHasher

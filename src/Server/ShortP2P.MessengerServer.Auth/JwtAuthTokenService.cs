@@ -3,10 +3,10 @@ using System.Security.Claims;
 using System.Text;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
-using ShortP2P.MessengerServer.Api.Options;
+using ShortP2P.MessengerServer.Auth.Options;
 using ShortP2P.MessengerServer.UseCases.Abstractions;
 
-namespace ShortP2P.MessengerServer.Api.Auth;
+namespace ShortP2P.MessengerServer.Auth;
 
 public sealed class JwtAuthTokenService(IOptions<AuthOptions> options, IClock clock) : IAuthTokenService
 {

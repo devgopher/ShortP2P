@@ -1,18 +1,15 @@
 using System.Collections.Concurrent;
 using ShortP2P.MessengerServer.Domain;
-using ShortP2P.MessengerServer.UseCases.Abstractions;
 
 namespace ShortP2P.MessengerServer.Api.Persistence.InMemory;
 
-/// <summary>Shared in-memory store used when PostgreSQL persistence is disabled.</summary>
+/// <summary>Shared in-memory store used when PostgreSQL messenger persistence is disabled.</summary>
 public sealed class InMemoryMessengerStore
 {
     private readonly object _chatRequestsGate = new();
     private readonly List<(long Id, ChatRequest Request)> _chatRequests = [];
     private long _chatRequestSeq;
 
-    public ConcurrentDictionary<string, ClientAccount> AccountsByNetworkId { get; } = new(StringComparer.Ordinal);
-    public ConcurrentDictionary<string, string> NetworkIdByNick { get; } = new(StringComparer.OrdinalIgnoreCase);
     public ConcurrentDictionary<string, ClientStatuses> Statuses { get; } = new(StringComparer.Ordinal);
     public ConcurrentDictionary<string, Chat> Chats { get; } = new(StringComparer.Ordinal);
     public ConcurrentDictionary<(string Src, string Tgt), CryptoKeys> CryptoKeys { get; } = new();

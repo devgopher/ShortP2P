@@ -29,12 +29,15 @@ Executable-хост: **`ShortP2P.MessengerServer.Api`** (Kestrel + Swagger + HTT
 
 ```
 src/Server/
-├── ShortP2P.MessengerServer.Api/            # Kestrel host: HTTPS, Swagger, JWT
-├── ShortP2P.MessengerServer.Contracts/      # DTO, маршруты, OpenAPI, IMessengerServerApi
-├── ShortP2P.MessengerServer.Domain/         # Доменные сущности (без зависимостей)
-├── ShortP2P.MessengerServer.UseCases/       # Application-слой + порты + TTL-hosted service
-├── ShortP2P.MessengerServer.Infrastructure/ # In-memory кеш, SystemClock
-└── ShortP2P.MessengerServer.Persistence.Psql/ # EF Core + Npgsql + миграции
+├── ShortP2P.MessengerServer.Api/                 # Kestrel host: HTTPS, Swagger, JWT
+├── ShortP2P.MessengerServer.Auth/                # JWT, hasher, AddAuth()
+├── ShortP2P.MessengerServer.Auth.EntityFramework/ # EF Core accounts + migrations
+├── ShortP2P.MessengerServer.Auth.LiteDB/         # LiteDB accounts
+├── ShortP2P.MessengerServer.Contracts/           # DTO, маршруты, OpenAPI
+├── ShortP2P.MessengerServer.Domain/              # Доменные сущности
+├── ShortP2P.MessengerServer.UseCases/            # Application-слой
+├── ShortP2P.MessengerServer.Infrastructure/      # In-memory кеш, SystemClock
+└── ShortP2P.MessengerServer.Persistence.Psql/    # Messenger Postgres (без аккаунтов)
 ```
 
 Все проекты входят в `ShortP2P.sln`.
@@ -209,8 +212,8 @@ EF Core 8 + Npgsql: сущности-записи, репозитории, ми�
 | `IMessageCache` / `IDeliveryTicketCache` | Infrastructure (in-memory) |
 | Репозитории | Persistence.Psql **или** in-memory в Api при `Persistence:Enabled=false` |
 | `IClock` | Infrastructure (`SystemClock`) |
-| `IPasswordHasher` | Api (`CryptoPasswordHasher` / PBKDF2 salt+hash) |
-| `IAuthTokenService` | Api (`JwtAuthTokenService`) |
+| `IPasswordHasher` / `IAuthTokenService` | Auth |
+| `IClientAccountRepository` | Auth.EntityFramework / Auth.LiteDB |
 | `IServerCertificateReader` | Api (`KestrelServerCertificateReader`) |
 
 ---
@@ -226,11 +229,17 @@ builder.Services
     .WithCachePromotion();
 
 builder.Services.AddPersistence(builder.Configuration);
-builder.Services.AddAuth(builder.Configuration);
+
+builder.Services
+    .AddAuth(builder.Configuration)
+    .WithLiteDb(); // или .WithEntityFrameworkDb();
+
+builder.Services.AddServerCertificateReader();
 builder.Services.AddMessengerUseCases();
 ```
 
-При `Persistence:Enabled=false` Postgres не регистрируется, `RepositoryEnabled=false`, аккаунты/чаты идут в in-memory store.
+При `Persistence:Enabled=false` messenger-репозитории — in-memory; аккаунты всегда через Auth (`WithLiteDb` / `WithEntityFrameworkDb`).
+
 ---
 
 ## PostgreSQL
@@ -239,13 +248,14 @@ builder.Services.AddMessengerUseCases();
 
 | Таблица | PK / индексы |
 |-------|---------------|
-| `client_accounts` | PK `network_id`; unique `nick` |
 | `chats` | PK `chat_id`; `network_ids` как **jsonb** |
 | `chat_requests` | PK `id` (identity); index по `target`; index пары requester+target |
 | `crypto_keys` | PK (`src_network_id`, `tgt_network_id`) |
 | `client_statuses` | PK `network_id`; status как string |
 | `messages` | PK `message_id`; indexes по src/tgt |
 | `delivery_tickets` | PK `message_id` |
+
+Аккаунты: таблица `auth_accounts` в Auth.EntityFramework (отдельная БД).
 
 ### Миграции
 
@@ -286,6 +296,9 @@ dotnet build src/Server/ShortP2P.MessengerServer.Persistence.Psql
 ## Связанные README
 
 - [Api](ShortP2P.MessengerServer.Api/README.md)
+- [Auth](ShortP2P.MessengerServer.Auth/README.md)
+- [Auth.EntityFramework](ShortP2P.MessengerServer.Auth.EntityFramework/README.md)
+- [Auth.LiteDB](ShortP2P.MessengerServer.Auth.LiteDB/README.md)
 - [Contracts](ShortP2P.MessengerServer.Contracts/README.md)
 - [Domain](ShortP2P.MessengerServer.Domain/README.md)
 - [UseCases](ShortP2P.MessengerServer.UseCases/README.md)

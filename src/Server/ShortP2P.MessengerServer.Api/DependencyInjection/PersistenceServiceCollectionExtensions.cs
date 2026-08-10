@@ -8,8 +8,9 @@ namespace ShortP2P.MessengerServer.Api.DependencyInjection;
 public static class PersistenceServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers persistence from the <c>Persistence</c> configuration section.
-    /// When <see cref="PersistenceOptions.Enabled"/> is false, in-memory repositories are used
+    /// Registers messenger persistence from the <c>Persistence</c> section.
+    /// Accounts are registered separately via <c>AddAuth().With*Db()</c>.
+    /// When <see cref="PersistenceOptions.Enabled"/> is false, in-memory messenger repos are used
     /// and <see cref="MessengerCacheOptions.RepositoryEnabled"/> is set to false.
     /// </summary>
     public static IServiceCollection AddPersistence(this IServiceCollection services, IConfiguration configuration)
@@ -22,7 +23,6 @@ public static class PersistenceServiceCollectionExtensions
         var options = new PersistenceOptions();
         configuration.GetSection(PersistenceOptions.Section).Bind(options);
 
-        // Align message store-and-forward durable flag with Persistence.Enabled.
         foreach (var descriptor in services)
         {
             if (descriptor.ImplementationInstance is MessengerCacheOptions cacheOptions)
@@ -42,7 +42,6 @@ public static class PersistenceServiceCollectionExtensions
         else
         {
             services.AddSingleton<InMemoryMessengerStore>();
-            services.AddSingleton<IClientAccountRepository, InMemoryClientAccountRepository>();
             services.AddSingleton<IClientStatusRepository, InMemoryClientStatusRepository>();
             services.AddSingleton<IChatRepository, InMemoryChatRepository>();
             services.AddSingleton<IChatRequestRepository, InMemoryChatRequestRepository>();

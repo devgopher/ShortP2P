@@ -1,11 +1,12 @@
 using ShortP2P.MessengerServer.Api.DependencyInjection;
 using ShortP2P.MessengerServer.Api.Endpoints;
+using ShortP2P.MessengerServer.Auth.DependencyInjection;
+using ShortP2P.MessengerServer.Auth.LiteDB.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.WebHost.ConfigureKestrel(options =>
 {
-    // Endpoints come from configuration (Kestrel section) / launchSettings.
     options.AddServerHeader = false;
 });
 
@@ -15,7 +16,12 @@ builder.Services
     .WithCachePromotion();
 
 builder.Services.AddPersistence(builder.Configuration);
-builder.Services.AddAuth(builder.Configuration);
+
+builder.Services
+    .AddAuth(builder.Configuration)
+    .WithLiteDb();
+
+builder.Services.AddServerCertificateReader();
 builder.Services.AddMessengerUseCases();
 builder.Services.AddMessengerSwagger();
 

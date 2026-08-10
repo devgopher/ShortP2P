@@ -22,4 +22,6 @@ Design-time connection: env `MESSENGER_DB` или localhost default в `Messenge
 
 ## Таблицы
 
-`client_accounts`, `chats`, `chat_requests`, `crypto_keys`, `client_statuses`, `messages`, `delivery_tickets`
+`chats`, `chat_requests`, `crypto_keys`, `client_statuses`, `messages`, `delivery_tickets`
+
+Аккаунты вынесены в Auth (таблица `auth_accounts` / LiteDB).

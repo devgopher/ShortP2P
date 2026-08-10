@@ -1,20 +1,20 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi;
-using ShortP2P.MessengerServer.Api.Auth;
-using ShortP2P.MessengerServer.Api.Options;
+using ShortP2P.MessengerServer.Auth.Options;
 using ShortP2P.MessengerServer.UseCases.Abstractions;
 
-namespace ShortP2P.MessengerServer.Api.DependencyInjection;
+namespace ShortP2P.MessengerServer.Auth.DependencyInjection;
 
 public static class AuthServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers password hashing (salt+hash), JWT token service, certificate reader,
-    /// and JWT bearer authentication from the <c>Auth</c> configuration section.
+    /// Registers password hashing (salt+hash) and JWT bearer authentication from the <c>Auth</c> section.
+    /// Continue with a persistence provider: <c>WithEntityFrameworkDb()</c> or <c>WithLiteDb()</c>.
     /// </summary>
-    public static IServiceCollection AddAuth(this IServiceCollection services, IConfiguration configuration)
+    public static AuthBuilder AddAuth(this IServiceCollection services, IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -29,7 +29,6 @@ public static class AuthServiceCollectionExtensions
 
         services.AddSingleton<IPasswordHasher, CryptoPasswordHasher>();
         services.AddSingleton<IAuthTokenService, JwtAuthTokenService>();
-        services.AddSingleton<IServerCertificateReader, KestrelServerCertificateReader>();
 
         services
             .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -50,38 +49,6 @@ public static class AuthServiceCollectionExtensions
             });
 
         services.AddAuthorization();
-        return services;
-    }
-
-    /// <summary>Adds Swagger with JWT bearer security scheme.</summary>
-    public static IServiceCollection AddMessengerSwagger(this IServiceCollection services)
-    {
-        services.AddEndpointsApiExplorer();
-        services.AddSwaggerGen(c =>
-        {
-            c.SwaggerDoc("v1", new OpenApiInfo
-            {
-                Title = "ShortP2P Messenger Server API",
-                Version = "v1",
-                Description = "HTTPS store-and-forward messenger API."
-            });
-
-            c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-            {
-                Description = "JWT Authorization header using the Bearer scheme. Example: \"Bearer {token}\"",
-                Name = "Authorization",
-                In = ParameterLocation.Header,
-                Type = SecuritySchemeType.Http,
-                Scheme = "bearer",
-                BearerFormat = "JWT"
-            });
-
-            c.AddSecurityRequirement(document => new OpenApiSecurityRequirement
-            {
-                [new OpenApiSecuritySchemeReference("Bearer", document)] = []
-            });
-        });
-
-        return services;
+        return new AuthBuilder(services, configuration);
     }
 }

@@ -20,7 +20,6 @@ public static class MessengerPersistenceServiceCollectionExtensions
 
         services.AddDbContext<MessengerDbContext>(options => options.UseNpgsql(connectionString));
 
-        services.AddScoped<IClientAccountRepository, PostgresClientAccountRepository>();
         services.AddScoped<IChatRepository, PostgresChatRepository>();
         services.AddScoped<IChatRequestRepository, PostgresChatRequestRepository>();
         services.AddScoped<ICryptoKeysRepository, PostgresCryptoKeysRepository>();

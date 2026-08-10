@@ -1,4 +1,4 @@
-namespace ShortP2P.MessengerServer.Api.Options;
+namespace ShortP2P.MessengerServer.Auth.Options;
 
 /// <summary>JWT bearer authentication settings.</summary>
 public sealed class AuthOptions
