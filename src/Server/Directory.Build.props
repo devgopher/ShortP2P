@@ -1,13 +1,12 @@
 <Project>
-  <!-- Server stack: modern .NET 8 only (no classic .NET Framework). -->
+  <!-- Server stack: .NET 10 only (no classic .NET Framework). Do not set TargetFramework here — it breaks SDK evaluation (empty TFM). -->
   <PropertyGroup>
-    <NetCoreTargetFramework>net8.0</NetCoreTargetFramework>
-    <TargetFramework>net8.0</TargetFramework>
-    <MicrosoftExtensionsVersion>8.0.0</MicrosoftExtensionsVersion>
-    <MicrosoftExtensionsDiAbstractionsVersion>8.0.2</MicrosoftExtensionsDiAbstractionsVersion>
-    <MicrosoftExtensionsHostingVersion>8.0.1</MicrosoftExtensionsHostingVersion>
-    <MicrosoftAspNetCoreVersion>8.0.11</MicrosoftAspNetCoreVersion>
-    <MicrosoftEntityFrameworkCoreVersion>8.0.11</MicrosoftEntityFrameworkCoreVersion>
-    <NpgsqlEntityFrameworkCoreVersion>8.0.11</NpgsqlEntityFrameworkCoreVersion>
+    <NetCoreTargetFramework>net10.0</NetCoreTargetFramework>
+    <MicrosoftExtensionsVersion>10.0.0</MicrosoftExtensionsVersion>
+    <MicrosoftExtensionsDiAbstractionsVersion>10.0.0</MicrosoftExtensionsDiAbstractionsVersion>
+    <MicrosoftExtensionsHostingVersion>10.0.0</MicrosoftExtensionsHostingVersion>
+    <MicrosoftAspNetCoreVersion>10.0.0</MicrosoftAspNetCoreVersion>
+    <MicrosoftEntityFrameworkCoreVersion>10.0.0</MicrosoftEntityFrameworkCoreVersion>
+    <NpgsqlEntityFrameworkCoreVersion>10.0.0</NpgsqlEntityFrameworkCoreVersion>
   </PropertyGroup>
 </Project>

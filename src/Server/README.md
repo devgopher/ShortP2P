@@ -34,6 +34,7 @@ src/Server/
 ├── ShortP2P.MessengerServer.Auth.EntityFramework/ # EF Core accounts + migrations
 ├── ShortP2P.MessengerServer.Auth.LiteDB/         # LiteDB accounts
 ├── ShortP2P.MessengerServer.Contracts/           # DTO, маршруты, OpenAPI
+├── ShortP2P.MessengerServer.Http/                # HTTPS-клиент для ShortP2P.Client
 ├── ShortP2P.MessengerServer.Domain/              # Доменные сущности
 ├── ShortP2P.MessengerServer.UseCases/            # Application-слой
 ├── ShortP2P.MessengerServer.Infrastructure/      # In-memory кеш, SystemClock
@@ -68,11 +69,11 @@ src/Server/
 
 | Проект | TFM | Зависит от |
 |--------|-----|------------|
-| **Api** | `net8.0` | Auth*, Contracts, Domain, UseCases, Infrastructure, Persistence.Psql |
-| **Auth** / **Auth.EntityFramework** / **Auth.LiteDB** | `net8.0` | … |
-| **Contracts** / **Domain** / **UseCases** / **Infrastructure** / **Persistence.Psql** | `net8.0` | … |
+| **Api** | `net10.0` | Auth*, Contracts, Domain, UseCases, Infrastructure, Persistence.Psql |
+| **Auth** / **Auth.EntityFramework** / **Auth.LiteDB** | `net10.0` | … |
+| **Contracts** / **Http** / **Domain** / **UseCases** / **Infrastructure** / **Persistence.Psql** | `net10.0` | … |
 
-Весь Server — **только .NET 8** (без classic .NET Framework и без dual-target net10).
+Весь Server — **только .NET 10** (без classic .NET Framework).
 
 Правила слоёв:
 
@@ -92,12 +93,16 @@ HTTPS JSON-контракт API v1.
 | Артефакт | Назначение |
 |----------|------------|
 | `ApiRoutes.cs` | Константы путей `/api/v1/...` |
-| `IMessengerServerApi.cs` | Скелет операций без реализации |
+| `IMessengerServerApi.cs` | Контракт операций (реализация — `MessengerServer.Http`) |
 | `Dtos/` | Request/response модели |
 | `openapi.yaml` | OpenAPI 3.0.3 (копируется в output) |
 
 Авторизация в OpenAPI: **Bearer JWT** (`bearerAuth`).  
 Даты — **UTC**. Сервер **не расшифровывает** `encryptedDataBase64`.
+
+### 1b. `ShortP2P.MessengerServer.Http`
+
+HTTPS SDK для внешнего клиента (`ShortP2P.Client` и др.): реализует `IMessengerServerApi`, JWT-сессия, `AddServerApiClient()` / `ServerApiClientSettings`.
 
 ### 2. `ShortP2P.MessengerServer.Domain`
 
@@ -288,7 +293,7 @@ dotnet build src/Server/ShortP2P.MessengerServer.Persistence.Psql
 
 ## Что ещё не сделано
 
-- Клиентский HTTP SDK (можно опираться на `IMessengerServerApi` + OpenAPI).
+- Интеграция `MessengerServer.Http` в UI-потоки ShortP2P.Client (регистрация/логин на сервере после локального Auth).
 - Интеграционные/юнит-тесты серверного слоя.
 
 ---

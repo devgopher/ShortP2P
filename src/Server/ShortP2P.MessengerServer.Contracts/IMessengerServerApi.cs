@@ -3,8 +3,8 @@ using ShortP2P.MessengerServer.Contracts.Dtos;
 namespace ShortP2P.MessengerServer.Contracts;
 
 /// <summary>
-/// Skeleton of messenger server HTTPS operations.
-/// Implementations live in the server host; clients may call the same surface via HTTP.
+/// Messenger server HTTPS operations.
+/// Client implementation: <c>ShortP2P.MessengerServer.Http.MessengerServerApiClient</c>.
 /// </summary>
 public interface IMessengerServerApi
 {
