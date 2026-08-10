@@ -18,7 +18,7 @@
 
 | Область | Реализация |
 |--------|------------|
-| Платформа | .NET 10, часть библиотек — `netstandard2.0` (`ShortP2P.Crypto`) |
+| Платформа | .NET 10 (клиент), Server — **.NET 8**; Crypto — `net8.0` + `net10.0` |
 | Транспорт | Абстракция `ITransport` → UDP (`ShortP2P.Transport`), Bluetooth **WinRT RFCOMM** (`ShortP2P.Transport.Bluetooth.Windows`), опционально **последовательный/IR** (`InfraredSerialTransport`) |
 | Криптография | RSA (рукопожатие), сессия на **ECDH**-подобных ключах; **AES-128-CBC** + **HMAC-SHA256** (усечённый tag), верхняя граница **зашифрованного пакета 128 байт**; крупные полезные нагрузки режутся в **`MessengerService`** |
 | Мессенджер | `ShortP2P.Messenger`: шифрование/фрагментация поверх `ITransport` + `P2PSession` |

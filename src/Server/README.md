@@ -68,11 +68,11 @@ src/Server/
 
 | Проект | TFM | Зависит от |
 |--------|-----|------------|
-| **Contracts** | `net10.0` | — |
-| **Domain** | `net8.0; net10.0` | — |
-| **UseCases** | `net8.0; net10.0` | Domain |
-| **Infrastructure** | `net10.0` | UseCases |
-| **Persistence.Psql** | `net8.0` | Domain, UseCases |
+| **Api** | `net8.0` | Auth*, Contracts, Domain, UseCases, Infrastructure, Persistence.Psql |
+| **Auth** / **Auth.EntityFramework** / **Auth.LiteDB** | `net8.0` | … |
+| **Contracts** / **Domain** / **UseCases** / **Infrastructure** / **Persistence.Psql** | `net8.0` | … |
+
+Весь Server — **только .NET 8** (без classic .NET Framework и без dual-target net10).
 
 Правила слоёв:
 
