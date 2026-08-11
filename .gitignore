@@ -34,3 +34,4 @@ Thumbs.db
 ehthumbs.db
 
 /.vs
+*.litedb

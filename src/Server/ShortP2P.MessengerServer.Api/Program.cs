@@ -1,5 +1,4 @@
 using ShortP2P.MessengerServer.Api.DependencyInjection;
-using ShortP2P.MessengerServer.Api.Endpoints;
 using ShortP2P.MessengerServer.Auth.DependencyInjection;
 using ShortP2P.MessengerServer.Auth.LiteDB.DependencyInjection;
 
@@ -24,6 +23,7 @@ builder.Services
 builder.Services.AddServerCertificateReader();
 builder.Services.AddMessengerUseCases();
 builder.Services.AddMessengerSwagger();
+builder.Services.AddControllers();
 
 var app = builder.Build();
 
@@ -40,6 +40,6 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapMessengerApi();
+app.MapControllers();
 
 app.Run();
