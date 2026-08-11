@@ -11,6 +11,7 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Client.Services.MessengerServers;
 using ShortP2P.Discovery;
 using ShortP2P.Discovery.Ble;
 using ShortP2P.Discovery.Pings;
@@ -67,6 +68,9 @@ public static class MauiProgram
         builder.Services.AddSingleton<IUdpTransportFactory, UdpTransportFactory>();
         builder.Services.AddSingleton<ChatSessionCache>();
         builder.Services.AddSingleton<P2pCryptoSessionCache>();
+        builder.Services.AddSingleton<IMessengerServerRepository, SqliteMessengerServerRepository>();
+        builder.Services.AddSingleton<MessengerServerManager>();
+        builder.Services.AddSingleton<MessengerServerSyncService>();
 #if ANDROID
         builder.Services.AddSingleton<IBluetoothRadioCatalog, AndroidBluetoothRadioCatalog>();
         builder.Services.AddSingleton<IBleShortP2PPeripheralScanner>(_ =>
@@ -97,7 +101,8 @@ public static class MauiProgram
             sp.GetService<IBleShortP2PPeripheralScanner>(),
             sp.GetService<IBleDiscoveredPeerStore>(),
             sp.GetRequiredService<IBluetoothPresencePingTargetsProvider>(),
-            sp.GetRequiredService<ILoggerFactory>()));
+            sp.GetRequiredService<ILoggerFactory>(),
+            sp.GetRequiredService<MessengerServerSyncService>()));
         builder.Services.AddTransient<LoginPage>();
         builder.Services.AddTransient<RegisterPage>();
         builder.Services.AddTransient<ChatsPage>();
@@ -105,6 +110,7 @@ public static class MauiProgram
         builder.Services.AddTransient<AddChatPage>();
         builder.Services.AddTransient<MyQrPage>();
         builder.Services.AddTransient<RoutingSettingsPage>();
+        builder.Services.AddTransient<MessengerServersPage>();
         builder.Services.AddTransient<LanScanPage>();
         builder.Services.AddTransient<LogsPage>();
 

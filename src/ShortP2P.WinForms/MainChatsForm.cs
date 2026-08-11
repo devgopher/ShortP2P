@@ -8,6 +8,7 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Client.Services.MessengerServers;
 using ShortP2P.Crypto;
 using ShortP2P.Transport;
 
@@ -26,6 +27,7 @@ public sealed class MainChatsForm : Form
     private readonly ILogger<LocalNetworkScanForm> _lanScanLog;
     private readonly ListBox _list = new() { IntegralHeight = false, DrawMode = DrawMode.OwnerDrawFixed };
     private readonly ILogger<MainChatsForm> _logger;
+    private readonly MessengerServerManager _messengerServers;
     private readonly HashSet<int> _newChatIds = [];
     private readonly UserP2pRuntime _p2P;
     private readonly Label _profile = new() { AutoSize = true };
@@ -42,7 +44,7 @@ public sealed class MainChatsForm : Form
         P2pRoutingSettingsStore routingStore, IBluetoothRadioCatalog bluetoothCatalog,
         IServiceProvider services, ILogger<MainChatsForm> logger,
         ILogger<ChatForm> chatLog, ILogger<LocalNetworkScanForm> lanScanLog, ILogger<UserAction> userActions,
-        ChatMediaOptions chatMedia, AppSettingsStore appSettings)
+        ChatMediaOptions chatMedia, AppSettingsStore appSettings, MessengerServerManager messengerServers)
     {
         _auth = auth;
         _chats = chats;
@@ -55,6 +57,7 @@ public sealed class MainChatsForm : Form
         _chatMedia = chatMedia;
         _appSettings = appSettings;
         _bluetoothCatalog = bluetoothCatalog;
+        _messengerServers = messengerServers;
         Text = "ShortP2P — Chats";
         StartPosition = FormStartPosition.CenterScreen;
         Width = 680;
@@ -88,6 +91,7 @@ public sealed class MainChatsForm : Form
         var btnCopy = new Button { Text = "Copy keys", AutoSize = true };
         var btnLogout = new Button { Text = "Logout", AutoSize = true };
         var btnRouting = new Button { Text = "P2P routing", AutoSize = true };
+        var btnServers = new Button { Text = "Servers", AutoSize = true };
         var btnSettings = new Button { Text = "Настройки", AutoSize = true };
         var btnLanScan = new Button { Text = "LAN scan", AutoSize = true };
         var btnDelete = new Button { Text = "Delete chat", AutoSize = true };
@@ -99,6 +103,7 @@ public sealed class MainChatsForm : Form
         toolbar.Controls.Add(btnCopy);
         toolbar.Controls.Add(btnLanScan);
         toolbar.Controls.Add(btnRouting);
+        toolbar.Controls.Add(btnServers);
         toolbar.Controls.Add(btnSettings);
         toolbar.Controls.Add(btnSeeLogs);
         toolbar.Controls.Add(btnLogout);
@@ -110,6 +115,7 @@ public sealed class MainChatsForm : Form
         btnCopy.Click += OnCopyKeys;
         btnLanScan.Click += OnLanScan;
         btnRouting.Click += OnRoutingSettings;
+        btnServers.Click += OnMessengerServers;
         btnSettings.Click += OnAppSettings;
         btnSeeLogs.Click += OnSeeLogs;
         btnLogout.Click += OnLogout;
@@ -164,12 +170,38 @@ public sealed class MainChatsForm : Form
         _chats.ChatListChanged += OnChatListChangedFromInvite;
         _chats.ChatMessageAppended += OnChatMessageAppended;
         _p2P.LocalScan.ClientsChanged += OnLanPresenceChanged;
+        _messengerServers.TrustThreatDetected += OnMessengerServerTrustThreat;
         FormClosed += (_, _) =>
         {
             _chats.ChatListChanged -= OnChatListChangedFromInvite;
             _chats.ChatMessageAppended -= OnChatMessageAppended;
             _p2P.LocalScan.ClientsChanged -= OnLanPresenceChanged;
+            _messengerServers.TrustThreatDetected -= OnMessengerServerTrustThreat;
         };
+    }
+
+    private void OnMessengerServerTrustThreat(object? sender, MessengerServerTrustThreatEventArgs e)
+    {
+        if (!IsHandleCreated || IsDisposed)
+            return;
+        try
+        {
+            BeginInvoke(() =>
+            {
+                MessageBox.Show(
+                    this,
+                    $"Сертификат сервера {e.Server.BaseUrl} не совпадает с сохранённым fingerprint.\n\n" +
+                    $"Ожидался: {e.ExpectedFingerprint}\nПолучен: {e.ActualFingerprint}\n\n" +
+                    "Сервер отключён и помечен как недоверенный.",
+                    "Угроза безопасности",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // ignore
+        }
     }
 
     private void OnLanPresenceChanged(object? sender, EventArgs e)
@@ -342,6 +374,13 @@ public sealed class MainChatsForm : Form
     {
         _userActions.LogInformation("Chats: open P2P routing settings");
         using var f = _services.GetRequiredService<RoutingSettingsForm>();
+        f.ShowDialog(this);
+    }
+
+    private void OnMessengerServers(object? sender, EventArgs e)
+    {
+        _userActions.LogInformation("Chats: open messenger servers");
+        using var f = _services.GetRequiredService<MessengerServersForm>();
         f.ShowDialog(this);
     }
 

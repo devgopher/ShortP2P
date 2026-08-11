@@ -23,6 +23,7 @@ public sealed class AppDatabase(string databasePath)
         await _connection.CreateTableAsync<ChatEntity>();
         await _connection.CreateTableAsync<ChatMessageEntity>();
         await _connection.CreateTableAsync<BleDiscoveredPeerEntity>();
+        await _connection.CreateTableAsync<MessengerServerEntity>();
         try
         {
             await _connection.ExecuteAsync("ALTER TABLE chats ADD COLUMN RelayRouteBlob TEXT NULL");

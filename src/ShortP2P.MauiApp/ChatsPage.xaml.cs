@@ -7,6 +7,7 @@ using ShortP2P.Client;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
+using ShortP2P.Client.Services.MessengerServers;
 using ShortP2P.Crypto;
 using ShortP2P.Transport;
 
@@ -19,17 +20,20 @@ public partial class ChatsPage : ContentPage
     private readonly ObservableCollection<ChatListRowVm> _chatRows = [];
     private readonly ChatRepository _chats;
     private readonly ILogger<ChatsPage> _logger;
+    private readonly MessengerServerManager _messengerServers;
     private readonly UserP2pRuntime _p2p;
     private IDispatcherTimer? _presenceRefreshTimer;
 
     public ChatsPage(AuthService auth, ChatRepository chats, UserP2pRuntime p2p,
-        IBluetoothRadioCatalog bluetoothCatalog, ILogger<ChatsPage> logger)
+        IBluetoothRadioCatalog bluetoothCatalog, MessengerServerManager messengerServers,
+        ILogger<ChatsPage> logger)
     {
         InitializeComponent();
         _auth = auth;
         _chats = chats;
         _p2p = p2p;
         _bluetoothCatalog = bluetoothCatalog;
+        _messengerServers = messengerServers;
         _logger = logger;
         ChatsCollection.ItemsSource = _chatRows;
     }
@@ -68,6 +72,12 @@ public partial class ChatsPage : ContentPage
         await Navigation.PushAsync(page).ConfigureAwait(true);
     }
 
+    private async void OnServersClicked(object? sender, EventArgs e)
+    {
+        var page = MauiProgram.Services.GetRequiredService<MessengerServersPage>();
+        await Navigation.PushAsync(page).ConfigureAwait(true);
+    }
+
     private async void OnLanScanClicked(object? sender, EventArgs e)
     {
         var page = MauiProgram.Services.GetRequiredService<LanScanPage>();
@@ -87,6 +97,8 @@ public partial class ChatsPage : ContentPage
         _chats.ChatListChanged += OnChatListChangedFromInvite;
         _p2p.LocalScan.ClientsChanged -= OnLanPresenceChanged;
         _p2p.LocalScan.ClientsChanged += OnLanPresenceChanged;
+        _messengerServers.TrustThreatDetected -= OnMessengerServerTrustThreat;
+        _messengerServers.TrustThreatDetected += OnMessengerServerTrustThreat;
         EnsurePresenceRefreshTimerStarted();
         var u = _auth.CurrentUser;
         if (u != null)
@@ -107,9 +119,23 @@ public partial class ChatsPage : ContentPage
     protected override void OnDisappearing()
     {
         _p2p.LocalScan.ClientsChanged -= OnLanPresenceChanged;
+        _messengerServers.TrustThreatDetected -= OnMessengerServerTrustThreat;
         if (_presenceRefreshTimer != null)
             _presenceRefreshTimer.Stop();
         base.OnDisappearing();
+    }
+
+    private void OnMessengerServerTrustThreat(object? sender, MessengerServerTrustThreatEventArgs e)
+    {
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            await DisplayAlert(
+                "Угроза безопасности",
+                $"Сертификат сервера {e.Server.BaseUrl} не совпадает с сохранённым fingerprint.\n\n" +
+                $"Ожидался: {e.ExpectedFingerprint}\nПолучен: {e.ActualFingerprint}\n\n" +
+                "Сервер отключён и помечен как недоверенный.",
+                "OK").ConfigureAwait(true);
+        });
     }
 
     private void OnLanPresenceChanged(object? sender, EventArgs e)

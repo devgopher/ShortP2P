@@ -448,6 +448,18 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
         try
         {
+            var servers = _runtime.MessengerServers;
+            if (servers != null)
+                await servers.PublishChatRequestAsync(_chat.PeerNetworkIdShort, cancellationToken)
+                    .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Chat {ChatId}: server ChatRequest publish failed during session start", _chat.Id);
+        }
+
+        try
+        {
             await SendChatInviteWithRetryAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -565,81 +577,95 @@ public sealed class ChatP2PSession : IAsyncDisposable
         messenger?.TryAcceptCipher(msg);
     }
 
+    /// <summary>Ingest a decrypted chat wire delivered via messenger server (servers-first path).</summary>
+    public async Task IngestIncomingWireFromServerAsync(byte[] payload, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        if (await ProcessIncomingPayloadAsync(payload, cancellationToken).ConfigureAwait(false))
+            RaiseMessagesChanged();
+    }
+
     private async void OnMessengerGotData(object? sender, IncomingBinaryMessage incoming)
     {
         try
         {
-            var shouldNotify = false;
             var payload = incoming.Payload.ToArray();
             var cancellationToken = _cts?.Token ?? CancellationToken.None;
-            if (ChatWireCodec.TryParse(payload, out var wire) && wire != null)
-            {
-                switch (wire)
-                {
-                    case ChatWireText t:
-                        if (!TryHandleSessionCryptoProbeText(t.Text, cancellationToken))
-                        {
-                            _ = await _repo.AddMessageAsync(_chat.Id, false, t.Text).ConfigureAwait(false);
-                            shouldNotify = true;
-                        }
-
-                        break;
-                    case ChatWireImage img:
-                        _ = await _repo.AddImageMessageAsync(_chat.Id, false, img.MimeType, img.ImageBytes)
-                            .ConfigureAwait(false);
-                        shouldNotify = true;
-                        break;
-                    case ChatWireFile f:
-                        try
-                        {
-                            _media.ValidateDocumentMime(f.MimeType);
-                            _media.ValidateDocumentSize(f.FileBytes.Length);
-                            _ = await _repo.AddFileMessageAsync(_chat.Id, false, f.FileName, f.MimeType, f.FileBytes)
-                                .ConfigureAwait(false);
-                        }
-                        catch
-                        {
-                            _ = await _repo.AddMessageAsync(_chat.Id, false,
-                                    "[Входящий файл отклонён: неподдерживаемый тип или размер.]")
-                                .ConfigureAwait(false);
-                        }
-
-                        shouldNotify = true;
-                        break;
-                    case ChatWireTransferOffer offer:
-                        await HandleTransferOfferAsync(offer).ConfigureAwait(false);
-                        shouldNotify = true;
-                        break;
-                    case ChatWireTransferControl control:
-                        await HandleTransferControlAsync(control, cancellationToken).ConfigureAwait(false);
-                        shouldNotify = true;
-                        break;
-                }
-            }
-            else if (ChatWireCodec.LooksLikeFramedWire(payload))
-            {
-                _ = await _repo.AddMessageAsync(_chat.Id, false,
-                        "[Входящее сообщение не распознано. Обновите клиент.]")
-                    .ConfigureAwait(false);
-                shouldNotify = true;
-            }
-            else
-            {
-                var text = Encoding.UTF8.GetString(payload);
-                if (!TryHandleSessionCryptoProbeText(text, cancellationToken))
-                {
-                    _ = await _repo.AddMessageAsync(_chat.Id, false, text).ConfigureAwait(false);
-                    shouldNotify = true;
-                }
-            }
-
-            if (shouldNotify)
+            if (await ProcessIncomingPayloadAsync(payload, cancellationToken).ConfigureAwait(false))
                 RaiseMessagesChanged();
         }
         catch
         {
             // ignore to avoid breaking messenger callbacks
         }
+    }
+
+    /// <returns>True if UI should refresh the message list.</returns>
+    private async Task<bool> ProcessIncomingPayloadAsync(byte[] payload, CancellationToken cancellationToken)
+    {
+        var shouldNotify = false;
+        if (ChatWireCodec.TryParse(payload, out var wire) && wire != null)
+        {
+            switch (wire)
+            {
+                case ChatWireText t:
+                    if (!TryHandleSessionCryptoProbeText(t.Text, cancellationToken))
+                    {
+                        _ = await _repo.AddMessageAsync(_chat.Id, false, t.Text).ConfigureAwait(false);
+                        shouldNotify = true;
+                    }
+
+                    break;
+                case ChatWireImage img:
+                    _ = await _repo.AddImageMessageAsync(_chat.Id, false, img.MimeType, img.ImageBytes)
+                        .ConfigureAwait(false);
+                    shouldNotify = true;
+                    break;
+                case ChatWireFile f:
+                    try
+                    {
+                        _media.ValidateDocumentMime(f.MimeType);
+                        _media.ValidateDocumentSize(f.FileBytes.Length);
+                        _ = await _repo.AddFileMessageAsync(_chat.Id, false, f.FileName, f.MimeType, f.FileBytes)
+                            .ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        _ = await _repo.AddMessageAsync(_chat.Id, false,
+                                "[Входящий файл отклонён: неподдерживаемый тип или размер.]")
+                            .ConfigureAwait(false);
+                    }
+
+                    shouldNotify = true;
+                    break;
+                case ChatWireTransferOffer offer:
+                    await HandleTransferOfferAsync(offer).ConfigureAwait(false);
+                    shouldNotify = true;
+                    break;
+                case ChatWireTransferControl control:
+                    await HandleTransferControlAsync(control, cancellationToken).ConfigureAwait(false);
+                    shouldNotify = true;
+                    break;
+            }
+        }
+        else if (ChatWireCodec.LooksLikeFramedWire(payload))
+        {
+            _ = await _repo.AddMessageAsync(_chat.Id, false,
+                    "[Входящее сообщение не распознано. Обновите клиент.]")
+                .ConfigureAwait(false);
+            shouldNotify = true;
+        }
+        else
+        {
+            var text = Encoding.UTF8.GetString(payload);
+            if (!TryHandleSessionCryptoProbeText(text, cancellationToken))
+            {
+                _ = await _repo.AddMessageAsync(_chat.Id, false, text).ConfigureAwait(false);
+                shouldNotify = true;
+            }
+        }
+
+        return shouldNotify;
     }
 
     private void OnInviteReceived(object? sender, InviteMessage msg)
@@ -1131,6 +1157,11 @@ public sealed class ChatP2PSession : IAsyncDisposable
         await _guaranteedDelivery.ExecuteAsync(
             async ct =>
             {
+                var servers = _runtime.MessengerServers;
+                if (servers != null &&
+                    await servers.TryDeliverWireAsync(_chat, _user, wire, ct).ConfigureAwait(false))
+                    return;
+
                 await EnsureSessionAsInitiatorAsync(ct).ConfigureAwait(false);
                 if (_handshakeWeInitiated && !_cryptoProbeRoundTripOk)
                     _ = TryConfirmCryptoSessionAsync(ct);
@@ -1163,6 +1194,11 @@ public sealed class ChatP2PSession : IAsyncDisposable
         await _guaranteedDelivery.ExecuteAsync(
             async ct =>
             {
+                var servers = _runtime.MessengerServers;
+                if (servers != null &&
+                    await servers.TryDeliverWireAsync(_chat, _user, wire, ct).ConfigureAwait(false))
+                    return;
+
                 await EnsureSessionAsInitiatorAsync(ct).ConfigureAwait(false);
                 if (_handshakeWeInitiated && !_cryptoProbeRoundTripOk)
                     _ = TryConfirmCryptoSessionAsync(ct);

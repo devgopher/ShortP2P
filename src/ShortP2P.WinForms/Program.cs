@@ -12,6 +12,7 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Client.Services.MessengerServers;
 using ShortP2P.Discovery;
 using ShortP2P.Discovery.Ble;
 using ShortP2P.Discovery.Pings;
@@ -59,6 +60,9 @@ internal static class Program
         services.AddSingleton<IUdpTransportFactory, UdpTransportFactory>();
         services.AddSingleton<ChatSessionCache>();
         services.AddSingleton<P2pCryptoSessionCache>();
+        services.AddSingleton<IMessengerServerRepository, SqliteMessengerServerRepository>();
+        services.AddSingleton<MessengerServerManager>();
+        services.AddSingleton<MessengerServerSyncService>();
         services.AddSingleton(sp => new UserP2pRuntime(
             sp.GetRequiredService<P2pRoutingSettingsStore>(),
             sp.GetRequiredService<AuthService>(),
@@ -74,7 +78,8 @@ internal static class Program
             sp.GetRequiredService<IBleShortP2PPeripheralScanner>(),
             sp.GetRequiredService<IBleDiscoveredPeerStore>(),
             sp.GetRequiredService<IBluetoothPresencePingTargetsProvider>(),
-            sp.GetRequiredService<ILoggerFactory>()));
+            sp.GetRequiredService<ILoggerFactory>(),
+            sp.GetRequiredService<MessengerServerSyncService>()));
 
         services.AddTransient<LoginForm>();
         services.AddTransient<RegisterForm>();
@@ -82,6 +87,7 @@ internal static class Program
         services.AddTransient<AddChatForm>();
         services.AddTransient<MyQrForm>();
         services.AddTransient<RoutingSettingsForm>();
+        services.AddTransient<MessengerServersForm>();
         services.AddTransient<AppSettingsForm>();
 
         using var host = builder.Build();

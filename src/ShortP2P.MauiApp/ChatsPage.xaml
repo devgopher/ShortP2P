@@ -10,6 +10,7 @@
         <ToolbarItem Text="My addresses" Order="Secondary" Clicked="OnMyAddressesClicked" />
         <ToolbarItem Text="Copy keys" Order="Secondary" Clicked="OnCopyKeysClicked" />
         <ToolbarItem Text="P2P routing" Order="Secondary" Clicked="OnRoutingClicked" />
+        <ToolbarItem Text="Servers" Order="Secondary" Clicked="OnServersClicked" />
         <ToolbarItem Text="LAN scan" Order="Secondary" Clicked="OnLanScanClicked" />
         <ToolbarItem Text="Logs" Order="Secondary" Clicked="OnLogsClicked" />
         <ToolbarItem Text="Logout" Order="Secondary" Clicked="OnLogoutClicked" />

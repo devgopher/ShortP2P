@@ -75,6 +75,11 @@ public sealed class LocalNetworkScanner(
     public bool IsUdpListening => _presenceUdp != null;
     public bool IsBluetoothListening { get; private set; }
 
+    /// <summary>
+    /// Optional prioritized discovery step (e.g. messenger servers) run before UDP/Bluetooth transports.
+    /// </summary>
+    public Func<CancellationToken, Task>? PrioritizedExternalDiscoveryRound { get; set; }
+
     /// <summary>Удалять пира из списка, если не было пинга дольше этого (несколько периодов рассылки).</summary>
     private TimeSpan DiscoveryStaleAfter =>
         TimeSpan.FromTicks(Math.Max(TimeSpan.FromSeconds(45).Ticks,
@@ -731,6 +736,23 @@ public sealed class LocalNetworkScanner(
         Interlocked.Increment(ref _presencePingTransmitDepth);
         try
         {
+            var external = PrioritizedExternalDiscoveryRound;
+            if (external != null)
+            {
+                try
+                {
+                    await external(cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // servers / external discovery must not block UDP/BT rounds
+                }
+            }
+
             EnsurePublicIpv4InPresenceTargets();
             var caps = routingSettings.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
             var payload = PresencePingCodec.Build(

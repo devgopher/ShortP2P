@@ -9,6 +9,7 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
+using ShortP2P.Client.Services.MessengerServers;
 using ShortP2P.Client.Transceivers;
 using ShortP2P.Discovery;
 using ShortP2P.Discovery.Ble;
@@ -62,7 +63,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         IBleShortP2PPeripheralScanner? blePeripheralScanner = null,
         IBleDiscoveredPeerStore? bleDiscoveredPeerStore = null,
         IBluetoothPresencePingTargetsProvider? bluetoothPresencePingTargetsProvider = null,
-        ILoggerFactory? loggerFactory = null)
+        ILoggerFactory? loggerFactory = null,
+        MessengerServerSyncService? messengerServers = null)
     {
         _store = store;
         _auth = auth;
@@ -74,10 +76,16 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         _cryptoSessionCache = cryptoSessionCache;
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         _bluetooth = bluetooth;
+        MessengerServers = messengerServers;
         LocalScan = new LocalNetworkScanner(Settings, udpTransportFactory, () => _bluetooth?.Current,
             additionalDiscoveryTransports, routeTableSnapshotSource, discoveryPingStore, blePeripheralScanner,
             bleDiscoveredPeerStore, bluetoothPresencePingTargetsProvider);
+        if (MessengerServers != null)
+            LocalScan.PrioritizedExternalDiscoveryRound = MessengerServers.RunDiscoveryRoundAsync;
     }
+
+    /// <summary>Optional HTTPS messenger-server sync (KeepAlive, ChatRequest, messages).</summary>
+    public MessengerServerSyncService? MessengerServers { get; }
 
     /// <summary>Глобальный invite-транспивер (порт 17502). Поднимается в <see cref="EnsureInviteListenerRunningAsync" />.</summary>
     public InviteTransceiver? Invite { get; private set; }
@@ -632,6 +640,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             LocalScan.DiscoveryPingReceived += OnDiscoveryPingReceived;
             _discoveryHooked = true;
         }
+
+        MessengerServers?.Start();
     }
 
     private void OnDiscoveryPingReceived(object? sender, DiscoveryPingReceivedEventArgs e)
@@ -735,6 +745,18 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
+        if (MessengerServers != null)
+        {
+            try
+            {
+                await MessengerServers.StopAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
         await StopInviteListenerAsync(cancellationToken).ConfigureAwait(false);
 
         await _dataPortGate.WaitAsync(cancellationToken).ConfigureAwait(false);
