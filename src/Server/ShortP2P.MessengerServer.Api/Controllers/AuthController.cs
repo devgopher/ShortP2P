@@ -8,7 +8,7 @@ using ShortP2P.MessengerServer.UseCases.Auth;
 namespace ShortP2P.MessengerServer.Api.Controllers;
 
 [ApiController]
-[Route(ApiRoutes.Prefix + "/auth")]
+[Route($"{ApiRoutes.Prefix}/auth")]
 public sealed class AuthController(
     RegisterClientUseCase registerUseCase,
     LoginClientUseCase loginUseCase) : ControllerBase

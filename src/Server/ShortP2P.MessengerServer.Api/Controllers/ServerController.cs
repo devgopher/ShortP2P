@@ -9,7 +9,7 @@ using ShortP2P.MessengerServer.UseCases.Server;
 namespace ShortP2P.MessengerServer.Api.Controllers;
 
 [ApiController]
-[Route(ApiRoutes.Prefix + "/server")]
+[Route($"{ApiRoutes.Prefix}/server")]
 public sealed class ServerController(
     GetServerCertificateUseCase certificateUseCase) : ControllerBase
 {
@@ -29,4 +29,3 @@ public sealed class ServerController(
         }
     }
 }
-

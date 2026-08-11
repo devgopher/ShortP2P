@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using ShortP2P.MessengerServer.Api.Controllers;
 using ShortP2P.MessengerServer.Api.Http;
 using ShortP2P.MessengerServer.Contracts;
 using ShortP2P.MessengerServer.Contracts.Dtos;
@@ -11,7 +10,7 @@ namespace ShortP2P.MessengerServer.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route(ApiRoutes.Prefix + "/chats")]
+[Route($"{ApiRoutes.Prefix}/chats")]
 public sealed class ChatsController(
     GetChatsUseCase getChatsUseCase,
     CreateChatRequestUseCase createChatRequestUseCase,

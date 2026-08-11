@@ -1,17 +1,16 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using ShortP2P.MessengerServer.Api.Controllers;
 using ShortP2P.MessengerServer.Api.Http;
 using ShortP2P.MessengerServer.Contracts;
 using ShortP2P.MessengerServer.Contracts.Dtos;
-using ShortP2P.MessengerServer.UseCases.Presence;
 using ShortP2P.MessengerServer.UseCases;
+using ShortP2P.MessengerServer.UseCases.Presence;
 
 namespace ShortP2P.MessengerServer.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route(ApiRoutes.Prefix)]
+[Route($"{ApiRoutes.Prefix}")]
 public sealed class PresenceController(
     KeepAliveUseCase keepAliveUseCase) : ControllerBase
 {
