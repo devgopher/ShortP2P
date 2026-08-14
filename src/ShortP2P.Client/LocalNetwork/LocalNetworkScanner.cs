@@ -37,6 +37,9 @@ public sealed class LocalNetworkScanner(
     /// <summary>Длительность приёма пингов при ручном сканировании по умолчанию.</summary>
     public static readonly TimeSpan DefaultScanListenDuration = TimeSpan.FromSeconds(45);
 
+    private static readonly TransportAddress MessengerServerPlaceholderAddress =
+        new(TransportKind.MessengerServer, []);
+
     private readonly IEnumerable<ITransport>? _additionalDiscoveryTransports = additionalDiscoveryTransports;
     private readonly ConcurrentDictionary<string, TransportAddress> _bluetoothTargets = new();
 
@@ -122,6 +125,52 @@ public sealed class LocalNetworkScanner(
     }
 
     public event EventHandler? ClientsChanged;
+
+    /// <summary>
+    /// Replaces messenger-server directory entries in the discovered list (self is skipped).
+    /// LAN/Bluetooth rows for the same network id are kept and only annotated with server presence.
+    /// </summary>
+    public void ApplyMessengerServerDirectory(IReadOnlyList<MessengerServerDirectoryEntry> clients)
+    {
+        ArgumentNullException.ThrowIfNull(clients);
+        var localPeer = _localPeer;
+        var keepIds = new HashSet<CompressedNetworkId>();
+
+        foreach (var entry in clients)
+        {
+            if (!CompressedNetworkId.TryParseShortString(entry.NetworkIdShort, out var id) || id.IsEmpty)
+                continue;
+            if (localPeer != null && id == localPeer.NetworkId)
+                continue;
+
+            keepIds.Add(id);
+            var lastSeen = entry.LastSeenUtc == default
+                ? DateTimeOffset.UtcNow
+                : entry.LastSeenUtc.ToUniversalTime();
+            var nick = string.IsNullOrWhiteSpace(entry.Nickname) ? "" : entry.Nickname.Trim();
+            var peer = new DiscoveredLocalPeer(
+                id,
+                nick,
+                MessengerServerPlaceholderAddress,
+                TransportKind.MessengerServer,
+                lastSeen,
+                PresencePingCodec.DefaultDataUdpPort,
+                MessengerServerOnline: entry.Online);
+            _entries.AddOrUpdate(id, peer, (_, existing) => MergeDiscoveredPeers(existing, peer));
+        }
+
+        foreach (var kv in _entries.ToArray())
+        {
+            if (kv.Value.TransportKind != TransportKind.MessengerServer)
+                continue;
+            if (keepIds.Contains(kv.Key))
+                continue;
+            _entries.TryRemove(kv.Key, out _);
+        }
+
+        RebuildSnapshot();
+        ClientsChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     /// <summary>
     ///     Принят чужой presence/discovery-пинг (не свой network id); обработчик не должен долго блокировать поток
@@ -481,17 +530,50 @@ public sealed class LocalNetworkScanner(
     private static DiscoveredLocalPeer MergeDiscoveredPeers(DiscoveredLocalPeer existing, DiscoveredLocalPeer incoming)
     {
         var lastSeen = incoming.LastSeenUtc > existing.LastSeenUtc ? incoming.LastSeenUtc : existing.LastSeenUtc;
+        var nick = !string.IsNullOrEmpty(existing.Nickname) ? existing.Nickname : incoming.Nickname;
+        var serverOnline = existing.MessengerServerOnline || incoming.MessengerServerOnline;
+
+        if (existing.TransportKind is TransportKind.Udp or TransportKind.Bluetooth &&
+            incoming.TransportKind == TransportKind.MessengerServer)
+        {
+            return existing with
+            {
+                LastSeenUtc = lastSeen,
+                Nickname = nick,
+                MessengerServerOnline = incoming.MessengerServerOnline
+            };
+        }
+
+        if (existing.TransportKind == TransportKind.MessengerServer &&
+            incoming.TransportKind is TransportKind.Udp or TransportKind.Bluetooth)
+        {
+            return incoming with
+            {
+                LastSeenUtc = lastSeen,
+                Nickname = string.IsNullOrEmpty(incoming.Nickname) ? existing.Nickname : incoming.Nickname,
+                MessengerServerOnline = existing.MessengerServerOnline
+            };
+        }
+
         return existing.TransportKind switch
         {
             TransportKind.Udp when incoming.TransportKind == TransportKind.Bluetooth => existing with
             {
-                LastSeenUtc = lastSeen
+                LastSeenUtc = lastSeen,
+                Nickname = nick,
+                MessengerServerOnline = serverOnline
             },
             TransportKind.Bluetooth when incoming.TransportKind == TransportKind.Udp => incoming with
             {
-                LastSeenUtc = lastSeen
+                LastSeenUtc = lastSeen,
+                Nickname = string.IsNullOrEmpty(incoming.Nickname) ? existing.Nickname : incoming.Nickname,
+                MessengerServerOnline = serverOnline
             },
-            _ => incoming.LastSeenUtc >= existing.LastSeenUtc ? incoming : existing
+            _ => (incoming.LastSeenUtc >= existing.LastSeenUtc ? incoming : existing) with
+            {
+                Nickname = nick,
+                MessengerServerOnline = serverOnline
+            }
         };
     }
 
@@ -728,29 +810,29 @@ public sealed class LocalNetworkScanner(
 
     private async Task SendDiscoveryBroadcastRoundAsync(CancellationToken cancellationToken)
     {
+        var external = PrioritizedExternalDiscoveryRound;
+        if (external != null)
+        {
+            try
+            {
+                await external(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // servers / external discovery must not block UDP/BT rounds
+            }
+        }
+
         var localPeer = _localPeer;
         var presenceUdp = _presenceUdp;
         if (localPeer == null) return;
         Interlocked.Increment(ref _presencePingTransmitDepth);
         try
         {
-            var external = PrioritizedExternalDiscoveryRound;
-            if (external != null)
-            {
-                try
-                {
-                    await external(cancellationToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch
-                {
-                    // servers / external discovery must not block UDP/BT rounds
-                }
-            }
-
             EnsurePublicIpv4InPresenceTargets();
             var caps = routingSettings.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
             var payload = PresencePingCodec.Build(
@@ -959,6 +1041,8 @@ public sealed class LocalNetworkScanner(
             var removed = false;
             foreach (var kv in _entries.ToArray())
             {
+                if (kv.Value.TransportKind == TransportKind.MessengerServer)
+                    continue;
                 if (kv.Value.LastSeenUtc >= cutoff) continue;
                 if (_entries.TryRemove(kv.Key, out _))
                     removed = true;

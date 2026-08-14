@@ -8,7 +8,8 @@ public enum TransportKind : byte
     Udp = 1,
     Bluetooth = 2,
 
-    Infrared = 3
-    // Tcp,
-    // 
+    Infrared = 3,
+
+    /// <summary>Клиент, найденный через HTTPS messenger-сервер (GetClients), без прямого UDP/BT адреса.</summary>
+    MessengerServer = 4
 }

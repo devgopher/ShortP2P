@@ -32,6 +32,10 @@ public static class LanChatStartFromDiscovery
         if (user == null)
             return LanChatStartResult.Failed("Выполните вход.");
 
+        if (peer.TransportKind == TransportKind.MessengerServer)
+            return await TryStartViaMessengerServerAsync(peer, auth, chats, inviteListenerCoordinator, cancellationToken)
+                .ConfigureAwait(false);
+
         if (peer.TransportKind != TransportKind.Udp)
         {
             if (peer.TransportKind != TransportKind.Bluetooth)
@@ -154,6 +158,38 @@ public static class LanChatStartFromDiscovery
             var chat = await chats.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);
             if (chat != null)
                 return LanChatStartResult.Created(chat);
+        }
+
+        return LanChatStartResult.WaitingForPeer();
+    }
+
+    private static async Task<LanChatStartResult> TryStartViaMessengerServerAsync(
+        DiscoveredLocalPeer peer,
+        AuthService auth,
+        ChatRepository chats,
+        UserP2pRuntime? runtime,
+        CancellationToken cancellationToken)
+    {
+        var user = auth.CurrentUser;
+        if (user == null)
+            return LanChatStartResult.Failed("Выполните вход.");
+
+        var idShort = peer.NetworkId.ToShortString();
+        var existing = await chats.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);
+        if (existing != null)
+            return LanChatStartResult.AlreadyExists(existing);
+
+        var servers = runtime?.MessengerServers;
+        if (servers == null)
+            return LanChatStartResult.Failed("Messenger-серверы не подключены.");
+
+        try
+        {
+            await servers.PublishChatRequestAsync(idShort, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return LanChatStartResult.Failed(ex.Message);
         }
 
         return LanChatStartResult.WaitingForPeer();

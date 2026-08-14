@@ -7,7 +7,7 @@
     <Grid RowDefinitions="Auto,*" Padding="12" RowSpacing="10">
         <VerticalStackLayout Grid.Row="0" Spacing="8">
             <Label
-                Text="LAN: presence UDP 17501; discovery wire 17890. Tap Scan, then double-tap a peer to start a chat (UDP)."
+                Text="LAN (UDP 17501 / discovery 17890) and messenger servers (GetClients). Tap Scan, then double-tap a peer to start a chat."
                 FontSize="12" TextColor="Gray" />
             <Button x:Name="ScanButton" Text="Scan" Clicked="OnScanClicked" />
             <Label x:Name="StatusLabel" FontSize="12" TextColor="Gray" Text="" />

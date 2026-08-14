@@ -97,9 +97,22 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         cts?.Dispose();
     }
 
-    /// <summary>Discovery priority hook: auth + KeepAlive on recorded servers before UDP/BT.</summary>
+    /// <summary>Discovery priority hook: auth + KeepAlive + GetClients before UDP/BT.</summary>
     public Task RunDiscoveryRoundAsync(CancellationToken cancellationToken) =>
-        KeepAliveOnceAsync(cancellationToken);
+        KeepAliveAndListRemoteClientsAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<ClientPresenceDto>> KeepAliveAndListRemoteClientsAsync(
+        CancellationToken cancellationToken)
+    {
+        var user = _auth.CurrentUser;
+        if (user == null)
+            return [];
+
+        var self = user.NetworkIdShort.Trim();
+        var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
+
+        return await ListRemoteClientsAsync(ready, self, cancellationToken).ConfigureAwait(false);
+    }
 
     /// <summary>Publish (or refresh) our public key to the peer via all ready servers.</summary>
     public async Task PublishChatRequestAsync(string targetNetworkId, CancellationToken cancellationToken = default)
@@ -204,6 +217,53 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
         return any;
     }
+
+    private async Task<IReadOnlyList<ClientPresenceDto>> ListRemoteClientsAsync(
+        IReadOnlyList<MessengerServerConnection> ready,
+        string selfNetworkId,
+        CancellationToken cancellationToken)
+    {
+        var byId = new Dictionary<string, ClientPresenceDto>(StringComparer.Ordinal);
+        foreach (var conn in ready)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            IReadOnlyList<ClientPresenceDto> list;
+            try
+            {
+                list = await conn.Api.GetClientsAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "GetClients failed on {BaseUrl}", conn.Entity.BaseUrl);
+                continue;
+            }
+
+            foreach (var client in list)
+            {
+                var id = client.NetworkId.Trim();
+                if (id.Length == 0 ||
+                    string.Equals(id, selfNetworkId, StringComparison.Ordinal))
+                    continue;
+
+                if (!byId.TryGetValue(id, out var existing) || PreferClient(client, existing))
+                    byId[id] = client;
+            }
+        }
+
+        return byId.Values.ToArray();
+    }
+
+    private static bool PreferClient(ClientPresenceDto candidate, ClientPresenceDto existing)
+    {
+        var candidateOnline = IsOnline(candidate);
+        var existingOnline = IsOnline(existing);
+        if (candidateOnline != existingOnline)
+            return candidateOnline;
+        return candidate.LastSeenAtUtc > existing.LastSeenAtUtc;
+    }
+
+    private static bool IsOnline(ClientPresenceDto client) =>
+        string.Equals(client.Status, "Online", StringComparison.OrdinalIgnoreCase);
 
     private async Task KeepAliveLoopAsync(CancellationToken cancellationToken)
     {

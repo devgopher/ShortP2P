@@ -46,14 +46,15 @@ public sealed class LocalNetworkScanForm : Form
         _refreshMainChatsAsync = refreshMainChatsAsync;
         Text = "Локальная сеть";
         StartPosition = FormStartPosition.CenterParent;
-        Width = 640;
+        Width = 720;
         Height = 420;
         MinimizeBox = false;
 
         _list.Columns.Add("Ник", 140);
-        _list.Columns.Add("Network id", 200);
-        _list.Columns.Add("Транспорт", 90);
-        _list.Columns.Add("Последний пинг", 140);
+        _list.Columns.Add("Network id", 180);
+        _list.Columns.Add("Транспорт", 80);
+        _list.Columns.Add("Статус", 80);
+        _list.Columns.Add("Последний контакт", 140);
 
         var bottom = new FlowLayoutPanel
         {
@@ -70,6 +71,7 @@ public sealed class LocalNetworkScanForm : Form
             AutoSize = true,
             ForeColor = SystemColors.GrayText,
             Text =
+                "Сканирование LAN (UDP/Bluetooth) и опрос messenger-серверов (GetClients). " +
                 "Двойной щелчок по строке (или Enter) — открыть чат или создать новый; список на главном экране обновится сам."
         };
 
@@ -130,6 +132,10 @@ public sealed class LocalNetworkScanForm : Form
                 };
                 row.SubItems.Add(idShort);
                 row.SubItems.Add(FormatTransport(p.TransportKind));
+                var online = p.TransportKind == TransportKind.MessengerServer
+                    ? p.MessengerServerOnline
+                    : _p2P.LocalScan.IsPeerSeenRecentlyOnLan(idShort) || p.MessengerServerOnline;
+                row.SubItems.Add(online ? "онлайн" : "офлайн");
                 row.SubItems.Add(p.LastSeenUtc.ToLocalTime().ToString("T"));
                 _list.Items.Add(row);
             }
@@ -147,6 +153,7 @@ public sealed class LocalNetworkScanForm : Form
             TransportKind.Udp => "UDP",
             TransportKind.Bluetooth => "Bluetooth",
             TransportKind.Infrared => "IrDA",
+            TransportKind.MessengerServer => "Сервер",
             _ => k.ToString()
         };
     }
@@ -203,7 +210,7 @@ public sealed class LocalNetworkScanForm : Form
         _userActions.LogInformation("LAN scan: scan started");
         _scan.Enabled = false;
         var sec = (int)Math.Round(LocalNetworkScanner.DefaultScanListenDuration.TotalSeconds);
-        _status.Text = $"Слушаем пинги {sec} с…";
+        _status.Text = $"Сканируем LAN и серверы {sec} с…";
         try
         {
             await _p2P.LocalScan.ScanAsync(LocalNetworkScanner.DefaultScanListenDuration).ConfigureAwait(true);

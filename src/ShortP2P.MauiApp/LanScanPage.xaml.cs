@@ -24,6 +24,7 @@ public sealed class LanScanRow
             TransportKind.Udp => "UDP",
             TransportKind.Bluetooth => "Bluetooth",
             TransportKind.Infrared => "IrDA",
+            TransportKind.MessengerServer => "Server",
             _ => p.TransportKind.ToString()
         };
         var seen = p.LastSeenUtc.ToLocalTime().ToString("g");
@@ -33,7 +34,7 @@ public sealed class LanScanRow
             IsPeerOnline = isPeerOnline,
             Nickname = string.IsNullOrEmpty(p.Nickname) ? "—" : p.Nickname,
             NetworkIdShort = idShort,
-            DetailLine = $"{transport} · last ping {seen}"
+            DetailLine = $"{transport} · {(isPeerOnline ? "online" : "offline")} · last {seen}"
         };
     }
 }
@@ -80,7 +81,9 @@ public partial class LanScanPage : ContentPage
         foreach (var p in _p2p.LocalScan.Clients)
         {
             var idShort = p.NetworkId.ToShortString();
-            var online = _p2p.LocalScan.IsPeerSeenRecentlyOnLan(idShort);
+            var online = p.TransportKind == TransportKind.MessengerServer
+                ? p.MessengerServerOnline
+                : _p2p.LocalScan.IsPeerSeenRecentlyOnLan(idShort) || p.MessengerServerOnline;
             _rows.Add(LanScanRow.From(p, online));
         }
     }

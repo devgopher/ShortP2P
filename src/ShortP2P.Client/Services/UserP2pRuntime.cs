@@ -16,6 +16,7 @@ using ShortP2P.Discovery.Ble;
 using ShortP2P.Discovery.Pings;
 using ShortP2P.Discovery.RouteTables;
 using ShortP2P.Discovery.Transceivers;
+using ShortP2P.MessengerServer.Contracts.Dtos;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
@@ -81,11 +82,28 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             additionalDiscoveryTransports, routeTableSnapshotSource, discoveryPingStore, blePeripheralScanner,
             bleDiscoveredPeerStore, bluetoothPresencePingTargetsProvider);
         if (MessengerServers != null)
-            LocalScan.PrioritizedExternalDiscoveryRound = MessengerServers.RunDiscoveryRoundAsync;
+        {
+            LocalScan.PrioritizedExternalDiscoveryRound = async ct =>
+            {
+                var remote = await MessengerServers.KeepAliveAndListRemoteClientsAsync(ct).ConfigureAwait(false);
+                var entries = remote.Select(ToDirectoryEntry).ToArray();
+                LocalScan.ApplyMessengerServerDirectory(entries);
+            };
+        }
     }
 
     /// <summary>Optional HTTPS messenger-server sync (KeepAlive, ChatRequest, messages).</summary>
     public MessengerServerSyncService? MessengerServers { get; }
+
+    private static MessengerServerDirectoryEntry ToDirectoryEntry(ClientPresenceDto client)
+    {
+        var lastSeen = DateTime.SpecifyKind(client.LastSeenAtUtc, DateTimeKind.Utc);
+        return new MessengerServerDirectoryEntry(
+            client.NetworkId.Trim(),
+            client.Nick.Trim(),
+            string.Equals(client.Status, "Online", StringComparison.OrdinalIgnoreCase),
+            new DateTimeOffset(lastSeen));
+    }
 
     /// <summary>Глобальный invite-транспивер (порт 17502). Поднимается в <see cref="EnsureInviteListenerRunningAsync" />.</summary>
     public InviteTransceiver? Invite { get; private set; }
