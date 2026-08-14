@@ -10,4 +10,10 @@ public sealed class InMemoryClientStatusRepository(InMemoryMessengerStore store)
         store.Statuses[status.NetworkId] = status;
         return Task.CompletedTask;
     }
+
+    public Task<IReadOnlyList<ClientStatuses>> ListAllAsync(CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<ClientStatuses> list = store.Statuses.Values.ToArray();
+        return Task.FromResult(list);
+    }
 }

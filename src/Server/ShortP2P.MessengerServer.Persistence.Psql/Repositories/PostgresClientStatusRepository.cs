@@ -25,4 +25,13 @@ public sealed class PostgresClientStatusRepository(MessengerDbContext db) : ICli
 
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
+
+    public async Task<IReadOnlyList<ClientStatuses>> ListAllAsync(CancellationToken cancellationToken = default)
+    {
+        var rows = await db.ClientStatuses
+            .AsNoTracking()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return rows.Select(x => x.ToDomain()).ToArray();
+    }
 }

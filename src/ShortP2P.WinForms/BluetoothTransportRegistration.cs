@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Bluetooth;
 using ShortP2P.Client.Routing;
+using ShortP2P.Discovery;
 using ShortP2P.Discovery.Ble;
 using ShortP2P.Transport.Abstractions;
 using ShortP2P.Transport.Bluetooth.Windows;

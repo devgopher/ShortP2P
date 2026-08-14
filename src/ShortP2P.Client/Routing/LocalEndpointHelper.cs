@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 
-namespace ShortP2P.Client.Routing;
+namespace ShortP2P.Discovery;
 
 internal static class LocalEndpointHelper
 {

@@ -17,4 +17,5 @@ public static class ApiRoutes
     public const string MessageReceipts = Prefix + "/messages/receipts";
 
     public const string KeepAlive = Prefix + "/keepalive";
+    public const string Clients = Prefix + "/clients";
 }

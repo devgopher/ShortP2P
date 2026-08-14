@@ -1,4 +1,4 @@
-namespace ShortP2P.Client.Routing;
+namespace ShortP2P.Discovery;
 
 /// <summary>
 ///     Маска ролей узла (устройство + приложение ShortP2P), заявляемая в discovery/presence ping

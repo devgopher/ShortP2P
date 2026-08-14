@@ -27,6 +27,7 @@
 | `POST` | `/api/v1/messages/receipts` | Отправка квитанции |
 | `GET` | `/api/v1/messages/receipts` | Все квитанции для текущего networkId |
 | `POST` | `/api/v1/keepalive` | KeepAlive |
+| `GET` | `/api/v1/clients` | Список клиентов и статус (Online/Offline) |
 
 Даты — UTC. `encryptedDataBase64` — opaque (сервер не расшифровывает).
 

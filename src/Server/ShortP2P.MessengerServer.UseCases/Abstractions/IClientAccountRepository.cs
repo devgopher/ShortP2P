@@ -9,4 +9,6 @@ public interface IClientAccountRepository
     Task<ClientAccount?> FindByNickAsync(string nick, CancellationToken cancellationToken = default);
 
     Task AddAsync(ClientAccount account, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ClientAccount>> ListAllAsync(CancellationToken cancellationToken = default);
 }

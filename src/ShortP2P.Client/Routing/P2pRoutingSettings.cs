@@ -1,4 +1,4 @@
-namespace ShortP2P.Client.Routing;
+namespace ShortP2P.Discovery;
 
 /// <summary>
 ///     Параметры поиска по графу и повторов при ошибке отправки (настраиваются через

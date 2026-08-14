@@ -147,6 +147,18 @@ public sealed class MessengerServerApiClient(
         await MessengerServerJson.EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<ClientPresenceDto>> GetClientsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await httpClient
+            .GetAsync(ApiRoutes.Clients, cancellationToken)
+            .ConfigureAwait(false);
+
+        return await MessengerServerJson
+            .ReadJsonAsync<ClientPresenceDto[]>(response, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>Clears the stored JWT (logout / switch account).</summary>
     public void Logout() => session.Clear();
 }

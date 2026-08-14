@@ -1,12 +1,11 @@
 using System.Buffers.Binary;
 using System.Text;
 using ShortP2P.Auth.Data;
-using ShortP2P.Discovery;
 using ShortP2P.Discovery.Transceivers;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
-namespace ShortP2P.Client.Routing;
+namespace ShortP2P.Discovery;
 
 /// <summary>
 ///     Единый модуль presence / discovery ping (кадр 0x31, порт <see cref="UdpPort" />): сериализация

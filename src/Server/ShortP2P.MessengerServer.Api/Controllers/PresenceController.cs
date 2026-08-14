@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using ShortP2P.MessengerServer.Api.Http;
+using ShortP2P.MessengerServer.Api.Extensions;
 using ShortP2P.MessengerServer.Contracts;
 using ShortP2P.MessengerServer.Contracts.Dtos;
 using ShortP2P.MessengerServer.UseCases;
@@ -12,7 +12,8 @@ namespace ShortP2P.MessengerServer.Api.Controllers;
 [Authorize]
 [Route($"{ApiRoutes.Prefix}")]
 public sealed class PresenceController(
-    KeepAliveUseCase keepAliveUseCase) : ControllerBase
+    KeepAliveUseCase keepAliveUseCase,
+    GetClientPresencesUseCase getClientPresencesUseCase) : ControllerBase
 {
     [HttpPost("keepalive")]
     public async Task<IActionResult> KeepAliveAsync(
@@ -30,6 +31,24 @@ public sealed class PresenceController(
                 .ConfigureAwait(false);
 
             return NoContent();
+        }
+        catch (UseCaseException ex)
+        {
+            return this.ToApiErrorResult(ex);
+        }
+    }
+
+    [HttpGet("clients")]
+    public async Task<IActionResult> GetClientsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _ = HttpContext.RequireNetworkId();
+            var list = await getClientPresencesUseCase
+                .ExecuteAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return Ok(list.Select(x => x.ToDto()).ToArray());
         }
         catch (UseCaseException ex)
         {

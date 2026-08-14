@@ -2,8 +2,9 @@ using ShortP2P.MessengerServer.Contracts.Dtos;
 using ShortP2P.MessengerServer.Domain;
 using ShortP2P.MessengerServer.UseCases;
 using ShortP2P.MessengerServer.UseCases.Abstractions;
+using ShortP2P.MessengerServer.UseCases.Presence;
 
-namespace ShortP2P.MessengerServer.Api.Http;
+namespace ShortP2P.MessengerServer.Api.Extensions;
 
 public static class ApiResults
 {
@@ -67,5 +68,13 @@ public static class DtoMapping
         FingerprintSha256 = info.FingerprintSha256,
         Subject = info.Subject,
         NotAfterUtc = info.NotAfterUtc
+    };
+
+    public static ClientPresenceDto ToDto(this ClientPresenceInfo info) => new()
+    {
+        NetworkId = info.NetworkId,
+        Nick = info.Nick,
+        Status = info.Status.ToString(),
+        LastSeenAtUtc = info.LastSeenAtUtc
     };
 }

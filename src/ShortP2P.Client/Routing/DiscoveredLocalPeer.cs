@@ -1,7 +1,7 @@
 using ShortP2P.Auth.Data;
 using ShortP2P.Transport.Abstractions;
 
-namespace ShortP2P.Client.Routing;
+namespace ShortP2P.Discovery;
 
 /// <summary>
 ///     Узел, обнаруженный по discovery-пингу (порт <see cref="PresencePingCodec.UdpPort" /> или Bluetooth).

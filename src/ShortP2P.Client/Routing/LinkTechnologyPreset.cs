@@ -1,4 +1,4 @@
-namespace ShortP2P.Client.Routing;
+namespace ShortP2P.Discovery;
 
 /// <summary>Пресет «радиоканала» для симуляции минимальной практической скорости (бит/с).</summary>
 public enum LinkTechnologyPreset

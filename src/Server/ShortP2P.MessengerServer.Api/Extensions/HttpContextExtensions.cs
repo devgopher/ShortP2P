@@ -2,7 +2,7 @@ using System.Security.Claims;
 using ShortP2P.MessengerServer.Auth;
 using ShortP2P.MessengerServer.UseCases;
 
-namespace ShortP2P.MessengerServer.Api.Http;
+namespace ShortP2P.MessengerServer.Api.Extensions;
 
 public static class HttpContextExtensions
 {

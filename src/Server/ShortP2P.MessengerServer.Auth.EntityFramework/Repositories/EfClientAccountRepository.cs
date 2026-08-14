@@ -30,4 +30,14 @@ public sealed class EfClientAccountRepository(AuthDbContext db) : IClientAccount
         db.Accounts.Add(AuthAccountEntity.FromDomain(account));
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
+
+    public async Task<IReadOnlyList<ClientAccount>> ListAllAsync(CancellationToken cancellationToken = default)
+    {
+        var rows = await db.Accounts.AsNoTracking()
+            .OrderBy(x => x.Nick)
+            .ThenBy(x => x.NetworkId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return rows.Select(x => x.ToDomain()).ToArray();
+    }
 }

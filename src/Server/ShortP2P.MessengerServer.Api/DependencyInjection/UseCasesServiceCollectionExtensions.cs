@@ -20,6 +20,7 @@ public static class UseCasesServiceCollectionExtensions
         services.AddScoped<SubmitDeliveryReceiptUseCase>();
         services.AddScoped<GetDeliveryReceiptsUseCase>();
         services.AddScoped<KeepAliveUseCase>();
+        services.AddScoped<GetClientPresencesUseCase>();
         services.AddScoped<GetServerCertificateUseCase>();
         return services;
     }

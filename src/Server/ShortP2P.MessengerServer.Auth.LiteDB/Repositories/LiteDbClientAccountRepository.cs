@@ -60,5 +60,17 @@ public sealed class LiteDbClientAccountRepository : IClientAccountRepository, ID
         return Task.CompletedTask;
     }
 
+    public Task<IReadOnlyList<ClientAccount>> ListAllAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            IReadOnlyList<ClientAccount> list = _accounts.FindAll()
+                .Select(x => x.ToDomain())
+                .ToArray();
+            return Task.FromResult(list);
+        }
+    }
+
     public void Dispose() => _db.Dispose();
 }

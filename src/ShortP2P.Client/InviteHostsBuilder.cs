@@ -1,5 +1,6 @@
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Routing;
+using ShortP2P.Discovery;
 
 namespace ShortP2P.Client;
 

@@ -1,4 +1,5 @@
 using ShortP2P.Auth;
+using ShortP2P.Discovery;
 
 namespace ShortP2P.Client.Routing;
 

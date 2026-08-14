@@ -1,6 +1,6 @@
+using ShortP2P.MessengerServer.Api.Extensions;
 using ShortP2P.MessengerServer.Contracts;
 using ShortP2P.MessengerServer.Contracts.Dtos;
-using ShortP2P.MessengerServer.Api.Http;
 using ShortP2P.MessengerServer.UseCases;
 using ShortP2P.MessengerServer.UseCases.Auth;
 using ShortP2P.MessengerServer.UseCases.Chats;
@@ -66,6 +66,11 @@ public static class MessengerEndpoints
 
         app.MapPost(ApiRoutes.KeepAlive, KeepAliveAsync)
             .WithName("KeepAlive")
+            .WithTags("Presence")
+            .RequireAuthorization();
+
+        app.MapGet(ApiRoutes.Clients, GetClientsAsync)
+            .WithName("GetClients")
             .WithTags("Presence")
             .RequireAuthorization();
 
@@ -281,6 +286,23 @@ public static class MessengerEndpoints
 
             await useCase.ExecuteAsync(new KeepAliveCommand(caller), cancellationToken).ConfigureAwait(false);
             return Results.NoContent();
+        }
+        catch (UseCaseException ex)
+        {
+            return ApiResults.FromException(ex);
+        }
+    }
+
+    private static async Task<IResult> GetClientsAsync(
+        HttpContext http,
+        GetClientPresencesUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            _ = http.RequireNetworkId();
+            var list = await useCase.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+            return Results.Ok(list.Select(x => x.ToDto()).ToArray());
         }
         catch (UseCaseException ex)
         {

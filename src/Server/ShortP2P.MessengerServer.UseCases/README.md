@@ -12,7 +12,7 @@
 | `Chats/` | GetChats, CreateChatRequest, GetChatRequests |
 | `Messages/` | Get/Send messages, delivery receipts |
 | `Hosting/` | `ExpiredCachePromotionHostedService` — TTL монитор кеша |
-| `Presence/` | KeepAlive |
+| `Presence/` | KeepAlive, GetClientPresences |
 | `Server/` | GetServerCertificate |
 
 ## Кеш Message / DeliveryTicket

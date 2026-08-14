@@ -1,9 +1,8 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
-using ShortP2P.Client.Routing;
 
-namespace ShortP2P.Client.Qr;
+namespace ShortP2P.Discovery;
 
 /// <summary>Picks a reasonable local IPv4 for QR display (best-effort; user may override).</summary>
 public static class LocalIPv4Resolver

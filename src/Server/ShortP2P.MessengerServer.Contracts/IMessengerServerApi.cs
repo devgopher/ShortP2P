@@ -42,4 +42,7 @@ public interface IMessengerServerApi
 
     /// <summary>POST <see cref="ApiRoutes.KeepAlive"/> — presence keep-alive.</summary>
     Task KeepAliveAsync(KeepAliveRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>GET <see cref="ApiRoutes.Clients"/> — registered clients with online/offline status.</summary>
+    Task<IReadOnlyList<ClientPresenceDto>> GetClientsAsync(CancellationToken cancellationToken = default);
 }

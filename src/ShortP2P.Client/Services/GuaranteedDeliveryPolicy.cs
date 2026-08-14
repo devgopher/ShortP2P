@@ -1,6 +1,7 @@
 using Polly;
 using Polly.Retry;
 using ShortP2P.Client.Routing;
+using ShortP2P.Discovery;
 
 namespace ShortP2P.Client.Services;
 

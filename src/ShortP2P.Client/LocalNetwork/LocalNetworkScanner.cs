@@ -2,8 +2,6 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using ShortP2P.Auth.Data;
-using ShortP2P.Client.Qr;
-using ShortP2P.Client.Routing;
 using ShortP2P.Discovery.Ble;
 using ShortP2P.Discovery.Gossip;
 using ShortP2P.Discovery.Pings;

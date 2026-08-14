@@ -1,4 +1,5 @@
 using ShortP2P.Client.Routing;
+using ShortP2P.Discovery;
 using ShortP2P.Transport;
 
 namespace ShortP2P.Client.Bluetooth;

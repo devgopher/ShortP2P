@@ -19,7 +19,7 @@ Executable-хост: **`ShortP2P.MessengerServer.Api`** (Kestrel + Swagger + HTT
 | Чаты | Список чатов; запрос чата создаёт `Chat` + `ChatRequest` + `CryptoKeys` |
 | Сообщения | Store-and-forward: запись в кеш и/или БД; выдача адресату с последующим удалением |
 | Квитанции доставки | Delivery ticket для отправителя; только получатель может подтвердить |
-| Presence | `POST /keepalive` выставляет статус `Online` |
+| Presence | `POST /keepalive` выставляет статус `Online`; `GET /clients` отдаёт список с Online/Offline (offline, если keep-alive старше 45 с) |
 
 Клиентский mesh (UDP/BT) и этот сервер — **разные каналы**: сервер — центральная точка обмена, когда P2P недоступен или нужна регистрация/офлайн-доставка.
 
@@ -127,7 +127,7 @@ HTTPS SDK для внешнего клиента (`ShortP2P.Client` и др.): �
 | `Auth/` | `RegisterClient`, `LoginClient` |
 | `Chats/` | `GetChats`, `CreateChatRequest`, `GetChatRequests` |
 | `Messages/` | `SendMessage`, `GetMessages`, `SubmitDeliveryReceipt`, `GetDeliveryReceipts` |
-| `Presence/` | `KeepAlive` |
+| `Presence/` | `KeepAlive`, `GetClientPresences` |
 | `Server/` | `GetServerCertificate` |
 | `Hosting/` | `ExpiredCachePromotionHostedService` |
 | `Abstractions/` | репозитории, кеши, `MessengerCacheOptions`, `IClock`, hasher, token, cert |
@@ -169,6 +169,7 @@ EF Core 8 + Npgsql: сущности-записи, репозитории, ми�
 | `POST` | `/messages/receipts` | JWT | Квитанция доставки | `202` |
 | `GET` | `/messages/receipts` | JWT | Квитанции для текущего networkId | `200` |
 | `POST` | `/keepalive` | JWT | Presence keep-alive | `204` |
+| `GET` | `/clients` | JWT | Список клиентов и статус Online/Offline | `200` |
 
 Ошибки API: `ApiError { code, message }`.
 
