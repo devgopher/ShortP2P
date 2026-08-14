@@ -124,6 +124,97 @@ public sealed class MessengerServerManager : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Probes the server certificate. If reachable and the fingerprint still matches the pin,
+    /// restores <see cref="MessengerServerEntity.Active"/> and <see cref="MessengerServerEntity.Trusted"/>.
+    /// Unreachable servers are left unchanged; a mismatch marks the server untrusted and inactive.
+    /// </summary>
+    public async Task<MessengerServerRecheckResult> RecheckServerAsync(
+        int serverId,
+        CancellationToken cancellationToken = default)
+    {
+        var user = RequireUser();
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var entity = await RequireOwnedServerAsync(user.Id, serverId, cancellationToken).ConfigureAwait(false);
+            var expected = MessengerServerConnection.NormalizeFingerprint(entity.FingerprintSha256);
+
+            await using var probe = MessengerServerConnection.CreateBootstrap(entity.BaseUrl, DefaultHttpTimeout);
+            ServerCertificateResponse cert;
+            try
+            {
+                cert = await probe.Api.GetServerCertificateAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Messenger server recheck failed for {BaseUrl}", entity.BaseUrl);
+                return new MessengerServerRecheckResult
+                {
+                    Server = entity,
+                    Status = MessengerServerRecheckStatus.Unreachable,
+                    ExpectedFingerprint = expected,
+                    ErrorMessage = ex.Message
+                };
+            }
+
+            var actual = MessengerServerConnection.NormalizeFingerprint(cert.FingerprintSha256);
+            if (!string.IsNullOrEmpty(actual) &&
+                MessengerServerConnection.FingerprintsEqual(expected, actual))
+            {
+                entity.Trusted = true;
+                entity.Active = true;
+                await _repository.UpdateAsync(entity, cancellationToken).ConfigureAwait(false);
+                if (_connections.TryGetValue(entity.Id, out var restored))
+                    restored.UpdateEntity(entity);
+
+                _logger.LogInformation(
+                    "Messenger server recheck restored {BaseUrl} (id={Id}) as active and trusted.",
+                    entity.BaseUrl,
+                    entity.Id);
+
+                return new MessengerServerRecheckResult
+                {
+                    Server = entity,
+                    Status = MessengerServerRecheckStatus.AvailableAndTrusted,
+                    ExpectedFingerprint = expected,
+                    ActualFingerprint = actual
+                };
+            }
+
+            entity.Trusted = false;
+            entity.Active = false;
+            await _repository.UpdateAsync(entity, cancellationToken).ConfigureAwait(false);
+            if (_connections.TryGetValue(entity.Id, out var conn))
+            {
+                conn.UpdateEntity(entity);
+                conn.ClearSession();
+            }
+
+            _logger.LogError(
+                "Messenger server recheck mismatch for {BaseUrl}. Expected {Expected}, got {Actual}. Marked untrusted.",
+                entity.BaseUrl,
+                expected,
+                actual);
+
+            return new MessengerServerRecheckResult
+            {
+                Server = entity,
+                Status = MessengerServerRecheckStatus.FingerprintMismatch,
+                ExpectedFingerprint = expected,
+                ActualFingerprint = string.IsNullOrEmpty(actual) ? "(empty)" : actual
+            };
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task SetActiveAsync(int serverId, bool active, CancellationToken cancellationToken = default)
     {
         var user = RequireUser();

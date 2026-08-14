@@ -13,6 +13,7 @@ public sealed class MessengerServersForm : Form
     };
 
     private readonly Button _addButton = new() { Text = "Добавить", AutoSize = true };
+    private readonly Button _recheckButton = new() { Text = "Проверить", AutoSize = true };
     private readonly Button _toggleActiveButton = new() { Text = "Вкл/выкл", AutoSize = true };
     private readonly Button _deleteButton = new() { Text = "Удалить", AutoSize = true };
     private readonly Button _refreshButton = new() { Text = "Обновить", AutoSize = true };
@@ -89,6 +90,7 @@ public sealed class MessengerServersForm : Form
             AutoSize = true,
             FlowDirection = FlowDirection.LeftToRight
         };
+        actions.Controls.Add(_recheckButton);
         actions.Controls.Add(_toggleActiveButton);
         actions.Controls.Add(_deleteButton);
         actions.Controls.Add(_refreshButton);
@@ -102,6 +104,7 @@ public sealed class MessengerServersForm : Form
         Controls.Add(root);
 
         _addButton.Click += async (_, _) => await AddServerAsync().ConfigureAwait(true);
+        _recheckButton.Click += async (_, _) => await RecheckSelectedAsync().ConfigureAwait(true);
         _toggleActiveButton.Click += async (_, _) => await ToggleActiveAsync().ConfigureAwait(true);
         _deleteButton.Click += async (_, _) => await DeleteSelectedAsync().ConfigureAwait(true);
         _refreshButton.Click += async (_, _) => await ReloadAsync().ConfigureAwait(true);
@@ -182,6 +185,68 @@ public sealed class MessengerServersForm : Form
         finally
         {
             _addButton.Enabled = true;
+        }
+    }
+
+    private async Task RecheckSelectedAsync()
+    {
+        if (_list.SelectedItems.Count == 0 || _list.SelectedItems[0].Tag is not MessengerServerEntity entity)
+        {
+            MessageBox.Show(this, "Выберите сервер в списке.", "Messenger servers", MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        _recheckButton.Enabled = false;
+        _status.Text = $"Проверка {entity.BaseUrl}…";
+        try
+        {
+            var result = await _manager.RecheckServerAsync(entity.Id).ConfigureAwait(true);
+            await ReloadAsync().ConfigureAwait(true);
+            switch (result.Status)
+            {
+                case MessengerServerRecheckStatus.AvailableAndTrusted:
+                    _status.Text = $"Сервер доступен, сертификат совпадает: {result.Server.BaseUrl}";
+                    MessageBox.Show(
+                        this,
+                        "Сервер доступен, отпечаток сертификата совпадает.\nСтатус: active, доверенный.",
+                        "Проверка сервера",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    break;
+                case MessengerServerRecheckStatus.Unreachable:
+                    _status.Text = $"Сервер недоступен: {result.Server.BaseUrl}";
+                    MessageBox.Show(
+                        this,
+                        string.IsNullOrWhiteSpace(result.ErrorMessage)
+                            ? "Сервер недоступен. Статус не изменён."
+                            : $"Сервер недоступен. Статус не изменён.\n\n{result.ErrorMessage}",
+                        "Проверка сервера",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    break;
+                case MessengerServerRecheckStatus.FingerprintMismatch:
+                    _status.Text = $"Fingerprint не совпал: {result.Server.BaseUrl}";
+                    MessageBox.Show(
+                        this,
+                        "Сертификат сервера не совпадает с сохранённым fingerprint.\n" +
+                        $"Ожидался: {result.ExpectedFingerprint}\nПолучен: {result.ActualFingerprint}\n\n" +
+                        "Сервер отключён и помечен как недоверенный.",
+                        "Проверка сервера",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Recheck messenger server {Id}", entity.Id);
+            _status.Text = ex.Message;
+            MessageBox.Show(this, ex.Message, "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _recheckButton.Enabled = true;
         }
     }
 

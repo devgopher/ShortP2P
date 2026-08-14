@@ -43,6 +43,13 @@ public sealed class MessengerServersPage : ContentPage
                 BindingMode.OneWay));
             active.Toggled += OnActiveToggled;
 
+            var recheck = new Button
+            {
+                Text = "Проверить",
+                Padding = new Thickness(10, 4)
+            };
+            recheck.Clicked += OnRecheckClicked;
+
             var delete = new Button
             {
                 Text = "Удалить",
@@ -65,14 +72,16 @@ public sealed class MessengerServersPage : ContentPage
                 {
                     new ColumnDefinition(GridLength.Star),
                     new ColumnDefinition(GridLength.Auto),
+                    new ColumnDefinition(GridLength.Auto),
                     new ColumnDefinition(GridLength.Auto)
                 },
                 ColumnSpacing = 8,
                 Children =
                 {
                     texts,
-                    active.AtColumn(1),
-                    delete.AtColumn(2)
+                    recheck.AtColumn(1),
+                    active.AtColumn(2),
+                    delete.AtColumn(3)
                 }
             };
         });
@@ -228,6 +237,60 @@ public sealed class MessengerServersPage : ContentPage
                 switchControl.IsToggled = !e.Value;
             _suppressActiveToggle = false;
             await DisplayAlert("Ошибка", ex.Message, "OK").ConfigureAwait(true);
+        }
+    }
+
+    private async void OnRecheckClicked(object? sender, EventArgs e)
+    {
+        if (sender is not BindableObject { BindingContext: MessengerServerRowVm row } bindable)
+            return;
+
+        if (bindable is Button button)
+            button.IsEnabled = false;
+        _status.Text = $"Проверка {row.BaseUrl}…";
+        try
+        {
+            var result = await _manager.RecheckServerAsync(row.Id).ConfigureAwait(true);
+            await ReloadAsync().ConfigureAwait(true);
+            switch (result.Status)
+            {
+                case MessengerServerRecheckStatus.AvailableAndTrusted:
+                    _status.Text = $"Сервер доступен, сертификат совпадает: {result.Server.BaseUrl}";
+                    await DisplayAlert(
+                        "Проверка сервера",
+                        "Сервер доступен, отпечаток сертификата совпадает.\nСтатус: active, доверенный.",
+                        "OK").ConfigureAwait(true);
+                    break;
+                case MessengerServerRecheckStatus.Unreachable:
+                    _status.Text = $"Сервер недоступен: {result.Server.BaseUrl}";
+                    await DisplayAlert(
+                        "Проверка сервера",
+                        string.IsNullOrWhiteSpace(result.ErrorMessage)
+                            ? "Сервер недоступен. Статус не изменён."
+                            : $"Сервер недоступен. Статус не изменён.\n\n{result.ErrorMessage}",
+                        "OK").ConfigureAwait(true);
+                    break;
+                case MessengerServerRecheckStatus.FingerprintMismatch:
+                    _status.Text = $"Fingerprint не совпал: {result.Server.BaseUrl}";
+                    await DisplayAlert(
+                        "Проверка сервера",
+                        "Сертификат сервера не совпадает с сохранённым fingerprint.\n" +
+                        $"Ожидался: {result.ExpectedFingerprint}\nПолучен: {result.ActualFingerprint}\n\n" +
+                        "Сервер отключён и помечен как недоверенный.",
+                        "OK").ConfigureAwait(true);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Recheck messenger server {Id}", row.Id);
+            _status.Text = ex.Message;
+            await DisplayAlert("Ошибка", ex.Message, "OK").ConfigureAwait(true);
+        }
+        finally
+        {
+            if (bindable is Button restore)
+                restore.IsEnabled = true;
         }
     }
 
