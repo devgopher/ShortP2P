@@ -179,6 +179,37 @@ public partial class ChatsPage : ContentPage
             $"You: {u.Nickname} · id {u.NetworkIdShort} · local UDP {u.DataUdpPort}";
 
         var list = await _chats.ListChatsAsync(u.Id).ConfigureAwait(true);
+        ApplyChatList(list);
+    }
+
+    private void ApplyChatList(IReadOnlyList<ChatEntity> list)
+    {
+        // Same membership and order: update rows in place (no Clear → no flicker).
+        if (_chatRows.Count == list.Count)
+        {
+            var sameIds = true;
+            for (var i = 0; i < list.Count; i++)
+            {
+                if (_chatRows[i].Chat.Id != list[i].Id)
+                {
+                    sameIds = false;
+                    break;
+                }
+            }
+
+            if (sameIds)
+            {
+                for (var i = 0; i < list.Count; i++)
+                {
+                    _chatRows[i].ApplyChat(list[i]);
+                    _chatRows[i].IsPeerOnline =
+                        _p2p.LocalScan.IsPeerSeenRecentlyOnLan(list[i].PeerNetworkIdShort);
+                }
+
+                return;
+            }
+        }
+
         _chatRows.Clear();
         foreach (var c in list)
             _chatRows.Add(new ChatListRowVm(c, _p2p.LocalScan.IsPeerSeenRecentlyOnLan(c.PeerNetworkIdShort)));
@@ -291,12 +322,13 @@ public partial class ChatsPage : ContentPage
 public sealed class ChatListRowVm(ChatEntity chat, bool isPeerOnline) : INotifyPropertyChanged
 {
     private bool _isPeerOnline = isPeerOnline;
+    private ChatEntity _chat = chat;
 
-    public ChatEntity Chat { get; } = chat;
+    public ChatEntity Chat => _chat;
 
-    public string PeerNickname => Chat.PeerNickname;
+    public string PeerNickname => _chat.PeerNickname;
 
-    public string PeerNetworkIdShort => Chat.PeerNetworkIdShort;
+    public string PeerNetworkIdShort => _chat.PeerNetworkIdShort;
 
     public bool IsPeerOnline
     {
@@ -308,6 +340,21 @@ public sealed class ChatListRowVm(ChatEntity chat, bool isPeerOnline) : INotifyP
             _isPeerOnline = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsPeerOnline)));
         }
+    }
+
+    public void ApplyChat(ChatEntity chat)
+    {
+        ArgumentNullException.ThrowIfNull(chat);
+        if (chat.Id != _chat.Id)
+            throw new ArgumentException("Chat id mismatch.", nameof(chat));
+
+        var nickChanged = !string.Equals(_chat.PeerNickname, chat.PeerNickname, StringComparison.Ordinal);
+        var idChanged = !string.Equals(_chat.PeerNetworkIdShort, chat.PeerNetworkIdShort, StringComparison.Ordinal);
+        _chat = chat;
+        if (nickChanged)
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PeerNickname)));
+        if (idChanged)
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PeerNetworkIdShort)));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

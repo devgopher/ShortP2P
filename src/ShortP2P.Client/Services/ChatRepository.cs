@@ -58,13 +58,26 @@ public sealed class ChatRepository(AppDatabase db)
             {
                 var mergedHost = PeerHostList.MergeAppend(existing.PeerHost, peerHost);
                 var mergedEndpoints = MergePeerEndpoints(existing, peerHost, peerPort);
+                var newPub = peerRsaPublicJson?.Trim();
+                var pubChanged = newPub != null &&
+                                 !string.Equals(existing.PeerRsaPublicJson, newPub, StringComparison.Ordinal);
+                var changed =
+                    !string.Equals(mergedHost, existing.PeerHost, StringComparison.Ordinal) ||
+                    existing.PeerPort != peerPort ||
+                    !string.Equals(mergedEndpoints, existing.PeerEndpointsJson ?? "", StringComparison.Ordinal) ||
+                    pubChanged ||
+                    !string.IsNullOrEmpty(existing.RelayRouteBlob);
+
+                if (!changed)
+                    return existing;
+
                 await UpdateChatP2pRouteAsync(existing.Id, mergedHost, peerPort, null, peerRsaPublicJson)
                     .ConfigureAwait(false);
                 existing.PeerHost = mergedHost;
                 existing.PeerPort = peerPort;
                 existing.PeerEndpointsJson = mergedEndpoints;
-                if (peerRsaPublicJson != null)
-                    existing.PeerRsaPublicJson = peerRsaPublicJson.Trim();
+                if (newPub != null)
+                    existing.PeerRsaPublicJson = newPub;
                 existing.RelayRouteBlob = null;
                 existing.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
                 NotifyChatListChanged();
@@ -103,15 +116,16 @@ public sealed class ChatRepository(AppDatabase db)
         return list.OrderByDescending(c => c.UpdatedUtcTicks).FirstOrDefault();
     }
 
-    public async Task ReplaceChatBluetoothMacAsync(int chatId, string mac)
+    /// <returns>True if the stored MAC / endpoints actually changed.</returns>
+    public async Task<bool> ReplaceChatBluetoothMacAsync(int chatId, string mac)
     {
         if (!BluetoothTransportAddress.TryParseMac(mac, out var macBytes))
-            return;
+            return false;
 
         var conn = await _db.GetConnectionAsync();
         var chat = await conn.FindAsync<ChatEntity>(chatId);
         if (chat == null)
-            return;
+            return false;
 
         var newHost = PeerHostList.ReplaceBluetoothMac(chat.PeerHost, mac);
         var btEndpoint = BluetoothTransportAddress.FromMac(macBytes);
@@ -119,12 +133,13 @@ public sealed class ChatRepository(AppDatabase db)
 
         if (string.Equals(newHost, chat.PeerHost, StringComparison.Ordinal)
             && string.Equals(newEndpointsJson, chat.PeerEndpointsJson, StringComparison.Ordinal))
-            return;
+            return false;
 
         chat.PeerHost = newHost;
         chat.PeerEndpointsJson = newEndpointsJson;
         chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
         await conn.UpdateAsync(chat);
+        return true;
     }
 
     public async Task UpdateChatP2pRouteAsync(int chatId, string peerHost, int peerPort, string? relayRouteBlob,

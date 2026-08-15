@@ -440,9 +440,12 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 return;
 
             var seenDirect = BluetoothTransportAddress.ToMacString(msg.RemoteAddress.Data);
-            await _chats.ReplaceChatBluetoothMacAsync(chat.Id, seenDirect).ConfigureAwait(false);
-            _chats.NotifyChatListChanged();
-            await RefreshSessionChatRowAsync(chat.Id, cancellationToken).ConfigureAwait(false);
+            if (await _chats.ReplaceChatBluetoothMacAsync(chat.Id, seenDirect).ConfigureAwait(false))
+            {
+                _chats.NotifyChatListChanged();
+                await RefreshSessionChatRowAsync(chat.Id, cancellationToken).ConfigureAwait(false);
+            }
+
             await TryEnsureChatSessionStartedAsync(chat.Id, null, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)

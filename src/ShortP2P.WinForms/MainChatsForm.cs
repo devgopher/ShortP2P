@@ -318,6 +318,46 @@ public sealed class MainChatsForm : Form
                 _newChatIds.RemoveWhere(id => !idsNow.Contains(id));
             }
 
+            var sameMembership = _list.Items.Count == list.Count;
+            if (sameMembership)
+            {
+                for (var i = 0; i < list.Count; i++)
+                {
+                    if (_list.Items[i] is not ChatEntity existing || existing.Id != list[i].Id)
+                    {
+                        sameMembership = false;
+                        break;
+                    }
+                }
+            }
+
+            if (sameMembership)
+            {
+                // Update display fields in place; ListBox uses DrawMode owner-draw from ChatEntity.
+                for (var i = 0; i < list.Count; i++)
+                {
+                    if (_list.Items[i] is not ChatEntity row)
+                        continue;
+                    var src = list[i];
+                    var visualChanged =
+                        !string.Equals(row.PeerNickname, src.PeerNickname, StringComparison.Ordinal) ||
+                        !string.Equals(row.PeerNetworkIdShort, src.PeerNetworkIdShort, StringComparison.Ordinal);
+                    row.PeerNickname = src.PeerNickname;
+                    row.PeerNetworkIdShort = src.PeerNetworkIdShort;
+                    row.PeerRsaPublicJson = src.PeerRsaPublicJson;
+                    row.PeerHost = src.PeerHost;
+                    row.PeerPort = src.PeerPort;
+                    row.PeerEndpointsJson = src.PeerEndpointsJson;
+                    row.RelayRouteBlob = src.RelayRouteBlob;
+                    row.UpdatedUtcTicks = src.UpdatedUtcTicks;
+                    if (visualChanged)
+                        _list.Invalidate(GetItemRectSafe(i));
+                }
+
+                UpdateTransportIndicators();
+                return;
+            }
+
             _list.BeginUpdate();
             _list.Items.Clear();
             foreach (var c in list)
@@ -343,6 +383,18 @@ public sealed class MainChatsForm : Form
         finally
         {
             _refreshGate.Release();
+        }
+    }
+
+    private Rectangle GetItemRectSafe(int index)
+    {
+        try
+        {
+            return _list.GetItemRectangle(index);
+        }
+        catch
+        {
+            return Rectangle.Empty;
         }
     }
 

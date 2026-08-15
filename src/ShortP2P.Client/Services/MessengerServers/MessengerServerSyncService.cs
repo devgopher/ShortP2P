@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -19,12 +21,16 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     public static readonly TimeSpan KeepAlivePeriod = TimeSpan.FromSeconds(15);
     public static readonly TimeSpan PollPeriod = TimeSpan.FromSeconds(20);
 
+    /// <summary>Max concurrent workers for inbound message receive (one server per worker).</summary>
+    public const int MaxMessageReceiveWorkers = 3;
+
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
     private readonly ChatSessionCache _sessions;
     private readonly MessengerServerManager _manager;
     private readonly ILogger<MessengerServerSyncService> _logger;
     private readonly object _startGate = new();
+    private readonly SemaphoreSlim _ingestGate = new(1, 1);
 
     private CancellationTokenSource? _cts;
     private Task? _keepAliveLoop;
@@ -132,13 +138,13 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         {
             try
             {
-                await conn.Api.CreateChatRequestAsync(
+                await TrackAsync(conn, () => conn.Api.CreateChatRequestAsync(
                     new ChatRequestCreateRequest
                     {
                         PublicKey = publicKey,
                         TargetNetworkId = target
                     },
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken)).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -205,7 +211,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         {
             try
             {
-                await conn.Api.SendMessageAsync(dto, cancellationToken).ConfigureAwait(false);
+                await TrackAsync(conn, () => conn.Api.SendMessageAsync(dto, cancellationToken))
+                    .ConfigureAwait(false);
                 any = true;
                 break;
             }
@@ -230,7 +237,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             IReadOnlyList<ClientPresenceDto> list;
             try
             {
-                list = await conn.Api.GetClientsAsync(cancellationToken).ConfigureAwait(false);
+                list = await TrackAsync(conn, () => conn.Api.GetClientsAsync(cancellationToken))
+                    .ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -341,14 +349,18 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         var networkId = user.NetworkIdShort.Trim();
         foreach (var conn in ready)
         {
+            var sw = Stopwatch.StartNew();
             try
             {
                 await conn.Api.KeepAliveAsync(
                     new KeepAliveRequest { NetworkId = networkId },
                     cancellationToken).ConfigureAwait(false);
+                sw.Stop();
+                _manager.RecordKeepAliveSuccess(conn.Entity.Id, sw.Elapsed);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                _manager.RecordRequestFailure(conn.Entity.Id);
                 _logger.LogDebug(ex, "KeepAlive failed on {BaseUrl}", conn.Entity.BaseUrl);
             }
         }
@@ -373,15 +385,88 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             {
                 _logger.LogDebug(ex, "ChatRequest poll failed on {BaseUrl}", conn.Entity.BaseUrl);
             }
+        }
 
-            try
+        await ReceiveMessagesFromAvailableServersAsync(ready, user, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Pulls chat messages from available servers only.
+    /// Uses 1–3 concurrent workers (one server per worker); sequential when only one worker is needed.
+    /// </summary>
+    private async Task ReceiveMessagesFromAvailableServersAsync(
+        IReadOnlyList<MessengerServerConnection> ready,
+        UserEntity user,
+        CancellationToken cancellationToken)
+    {
+        var available = _manager.FilterAvailable(ready);
+        if (available.Count == 0)
+        {
+            _logger.LogDebug("No available messenger servers for message receive");
+            return;
+        }
+
+        var degree = Math.Clamp(available.Count, 1, MaxMessageReceiveWorkers);
+        _logger.LogDebug(
+            "Receiving messages from {ServerCount} available server(s) with {Workers} worker(s)",
+            available.Count,
+            degree);
+
+        if (degree == 1)
+        {
+            foreach (var conn in available)
             {
-                await ProcessIncomingMessagesAsync(conn, user, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                await ReceiveFromServerSafeAsync(conn, user, cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+
+            return;
+        }
+
+        var queue = new ConcurrentQueue<MessengerServerConnection>(available);
+        var workers = new Task[degree];
+        for (var i = 0; i < degree; i++)
+        {
+            workers[i] = Task.Run(async () =>
             {
-                _logger.LogDebug(ex, "Messages poll failed on {BaseUrl}", conn.Entity.BaseUrl);
-            }
+                while (queue.TryDequeue(out var conn))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await ReceiveFromServerSafeAsync(conn, user, cancellationToken).ConfigureAwait(false);
+                }
+            }, cancellationToken);
+        }
+
+        try
+        {
+            await Task.WhenAll(workers).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Parallel message receive completed with errors");
+        }
+    }
+
+    private async Task ReceiveFromServerSafeAsync(
+        MessengerServerConnection conn,
+        UserEntity user,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ProcessIncomingMessagesAsync(conn, user, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Messages poll failed on {BaseUrl}", conn.Entity.BaseUrl);
         }
     }
 
@@ -390,7 +475,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         UserEntity user,
         CancellationToken cancellationToken)
     {
-        var requests = await connection.Api.GetChatRequestsAsync(cancellationToken).ConfigureAwait(false);
+        var requests = await TrackAsync(connection, () => connection.Api.GetChatRequestsAsync(cancellationToken))
+            .ConfigureAwait(false);
         if (requests.Count == 0)
             return;
 
@@ -403,33 +489,46 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                 string.Equals(peerId, user.NetworkIdShort.Trim(), StringComparison.Ordinal))
                 continue;
 
-            var chat = await _chats.AddChatAsync(
-                user.Id,
-                peerId,
-                peerId,
-                request.PublicKey,
-                peerId,
-                user.DataUdpPort).ConfigureAwait(false);
+            var existing = await _chats.FindChatByPeerNetworkIdAsync(user.Id, peerId).ConfigureAwait(false);
+            ChatEntity chat;
+            if (existing == null ||
+                !string.Equals(existing.PeerRsaPublicJson, request.PublicKey.Trim(), StringComparison.Ordinal))
+            {
+                chat = await _chats.AddChatAsync(
+                    user.Id,
+                    peerId,
+                    peerId,
+                    request.PublicKey,
+                    peerId,
+                    user.DataUdpPort).ConfigureAwait(false);
+            }
+            else
+            {
+                chat = existing;
+            }
 
             try
             {
-                await connection.Api.CreateChatRequestAsync(
+                await TrackAsync(connection, () => connection.Api.CreateChatRequestAsync(
                     new ChatRequestCreateRequest
                     {
                         PublicKey = ourPublic,
                         TargetNetworkId = peerId
                     },
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken)).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogDebug(ex, "Reply ChatRequest failed for peer {PeerId}", peerId);
             }
 
-            _logger.LogInformation(
-                "Accepted server chat request from {PeerId} into local chat {ChatId}",
-                peerId,
-                chat.Id);
+            if (existing == null)
+            {
+                _logger.LogInformation(
+                    "Accepted server chat request from {PeerId} into local chat {ChatId}",
+                    peerId,
+                    chat.Id);
+            }
         }
     }
 
@@ -438,7 +537,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         UserEntity user,
         CancellationToken cancellationToken)
     {
-        var messages = await connection.Api.GetMessagesAsync(cancellationToken).ConfigureAwait(false);
+        var messages = await TrackAsync(connection, () => connection.Api.GetMessagesAsync(cancellationToken))
+            .ConfigureAwait(false);
         if (messages.Count == 0)
             return;
 
@@ -461,39 +561,77 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             }
 
             var peerId = message.SrcNetworkId.Trim();
-            var chat = await _chats.FindChatByPeerNetworkIdAsync(user.Id, peerId).ConfigureAwait(false);
-            if (chat == null)
-            {
-                _logger.LogDebug(
-                    "Skipping server message {MessageId}: no local chat for peer {PeerId}",
-                    message.MessageId,
-                    peerId);
-                continue;
-            }
 
-            if (_sessions.TryGetSession(chat.Id, out var session) && session != null)
+            await _ingestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                await session.IngestIncomingWireFromServerAsync(wire, cancellationToken).ConfigureAwait(false);
+                var chat = await _chats.FindChatByPeerNetworkIdAsync(user.Id, peerId).ConfigureAwait(false);
+                if (chat == null)
+                {
+                    _logger.LogDebug(
+                        "Skipping server message {MessageId}: no local chat for peer {PeerId}",
+                        message.MessageId,
+                        peerId);
+                    continue;
+                }
+
+                if (_sessions.TryGetSession(chat.Id, out var session) && session != null)
+                {
+                    await session.IngestIncomingWireFromServerAsync(wire, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await IngestWireIntoRepositoryAsync(chat.Id, wire).ConfigureAwait(false);
+                }
             }
-            else
+            finally
             {
-                await IngestWireIntoRepositoryAsync(chat.Id, wire).ConfigureAwait(false);
+                _ingestGate.Release();
             }
 
             try
             {
-                await connection.Api.SubmitDeliveryReceiptAsync(
+                await TrackAsync(connection, () => connection.Api.SubmitDeliveryReceiptAsync(
                     new DeliveryReceiptRequest
                     {
                         MessageId = message.MessageId,
                         ReceivedAtUtc = DateTime.UtcNow
                     },
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken)).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogDebug(ex, "Delivery receipt failed for {MessageId}", message.MessageId);
             }
+        }
+    }
+
+    private async Task TrackAsync(MessengerServerConnection connection, Func<Task> action)
+    {
+        try
+        {
+            await action().ConfigureAwait(false);
+            _manager.RecordRequestSuccess(connection.Entity.Id);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _manager.RecordRequestFailure(connection.Entity.Id);
+            throw;
+        }
+    }
+
+    private async Task<T> TrackAsync<T>(MessengerServerConnection connection, Func<Task<T>> action)
+    {
+        try
+        {
+            var result = await action().ConfigureAwait(false);
+            _manager.RecordRequestSuccess(connection.Entity.Id);
+            return result;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _manager.RecordRequestFailure(connection.Entity.Id);
+            throw;
         }
     }
 
@@ -539,5 +677,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         }
     }
 
-    public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync().ConfigureAwait(false);
+        _ingestGate.Dispose();
+    }
 }

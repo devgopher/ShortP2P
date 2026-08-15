@@ -18,6 +18,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
 
     private readonly AuthService _auth;
     private readonly ConcurrentDictionary<int, MessengerServerConnection> _connections = new();
+    private readonly ConcurrentDictionary<int, MessengerServerRankStats> _rankStats = new();
     private readonly ILogger<MessengerServerManager> _logger;
     private readonly IMessengerServerRepository _repository;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -38,7 +39,13 @@ public sealed class MessengerServerManager : IAsyncDisposable
     public async Task<IReadOnlyList<MessengerServerEntity>> ListAsync(CancellationToken cancellationToken = default)
     {
         var user = RequireUser();
-        return await _repository.ListByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
+        var all = await _repository.ListByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
+        return all
+            .OrderByDescending(e => e.Active && e.Trusted)
+            .ThenBy(e => GetRankStatsRef(e.Id),
+                Comparer<MessengerServerRankStats>.Create(MessengerServerRankComparer.Compare))
+            .ThenBy(e => e.Id)
+            .ToList();
     }
 
     public async Task<IReadOnlyList<MessengerServerEntity>> ListActiveTrustedAsync(
@@ -46,6 +53,70 @@ public sealed class MessengerServerManager : IAsyncDisposable
     {
         var all = await ListAsync(cancellationToken).ConfigureAwait(false);
         return all.Where(s => s.Active && s.Trusted).ToList();
+    }
+
+    /// <summary>Snapshot of live rank metrics for UI / diagnostics.</summary>
+    public MessengerServerRankStats GetRankStats(int serverId) =>
+        CloneStats(_rankStats.GetOrAdd(serverId, _ => new MessengerServerRankStats()));
+
+    public bool IsServerAvailable(int serverId) => GetRankStats(serverId).IsAvailable;
+
+    public void RecordRequestSuccess(int serverId)
+    {
+        var stats = _rankStats.GetOrAdd(serverId, _ => new MessengerServerRankStats());
+        lock (stats)
+        {
+            stats.ConsecutiveFailures = 0;
+            stats.LastSuccessUtc = DateTime.UtcNow;
+        }
+    }
+
+    public void RecordRequestFailure(int serverId)
+    {
+        var stats = _rankStats.GetOrAdd(serverId, _ => new MessengerServerRankStats());
+        lock (stats)
+        {
+            if (stats.ConsecutiveFailures < int.MaxValue)
+                stats.ConsecutiveFailures++;
+            stats.LastFailureUtc = DateTime.UtcNow;
+        }
+    }
+
+    public void RecordKeepAliveSuccess(int serverId, TimeSpan roundTrip)
+    {
+        var stats = _rankStats.GetOrAdd(serverId, _ => new MessengerServerRankStats());
+        var ms = Math.Max(0, (long)Math.Round(roundTrip.TotalMilliseconds));
+        lock (stats)
+        {
+            stats.ConsecutiveFailures = 0;
+            stats.LastSuccessUtc = DateTime.UtcNow;
+            stats.LastKeepAliveRttMs = ms;
+        }
+    }
+
+    public IReadOnlyList<MessengerServerConnection> SortConnectionsByRank(
+        IEnumerable<MessengerServerConnection> connections) =>
+        connections
+            .OrderBy(c => GetRankStatsRef(c.Entity.Id),
+                Comparer<MessengerServerRankStats>.Create(MessengerServerRankComparer.Compare))
+            .ThenBy(c => c.Entity.Id)
+            .ToList();
+
+    private MessengerServerRankStats GetRankStatsRef(int serverId) =>
+        _rankStats.GetOrAdd(serverId, _ => new MessengerServerRankStats());
+
+    private static MessengerServerRankStats CloneStats(MessengerServerRankStats stats)
+    {
+        lock (stats)
+        {
+            return new MessengerServerRankStats
+            {
+                ConsecutiveFailures = stats.ConsecutiveFailures,
+                LastKeepAliveRttMs = stats.LastKeepAliveRttMs,
+                LastSuccessUtc = stats.LastSuccessUtc,
+                LastFailureUtc = stats.LastFailureUtc
+            };
+        }
     }
 
     /// <summary>
@@ -246,6 +317,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
             _ = await RequireOwnedServerAsync(user.Id, serverId, cancellationToken).ConfigureAwait(false);
             if (_connections.TryRemove(serverId, out var conn))
                 await conn.DisposeAsync().ConfigureAwait(false);
+            _rankStats.TryRemove(serverId, out _);
             await _repository.DeleteAsync(serverId, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Messenger server deleted: id={Id}", serverId);
         }
@@ -294,15 +366,23 @@ public sealed class MessengerServerManager : IAsyncDisposable
                 var conn = await EnsureReadyAsync(server, cancellationToken).ConfigureAwait(false);
                 if (conn != null)
                     ready.Add(conn);
+                else
+                    RecordRequestFailure(server.Id);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                RecordRequestFailure(server.Id);
                 _logger.LogWarning(ex, "Failed to ready messenger server {BaseUrl}", server.BaseUrl);
             }
         }
 
-        return ready;
+        return SortConnectionsByRank(ready);
     }
+
+    /// <summary>Ready connections that currently look available (no consecutive request failures).</summary>
+    public IReadOnlyList<MessengerServerConnection> FilterAvailable(
+        IEnumerable<MessengerServerConnection> connections) =>
+        SortConnectionsByRank(connections.Where(c => IsServerAvailable(c.Entity.Id)));
 
     private async Task RegisterOrLoginAsync(
         MessengerServerConnection connection,
