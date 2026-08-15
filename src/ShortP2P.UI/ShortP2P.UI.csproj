@@ -1,8 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <ItemGroup>
-        <ProjectReference Include="..\ShortP2P.Messenger\ShortP2P.Messenger.csproj"/>
-        <ProjectReference Include="..\ShortP2P.Discovery\ShortP2P.Discovery.csproj"/>
+      <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.13" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\ShortP2P.Messenger\ShortP2P.Messenger.csproj" />
+        <ProjectReference Include="..\ShortP2P.Discovery\ShortP2P.Discovery.csproj" />
     </ItemGroup>
 
     <PropertyGroup>

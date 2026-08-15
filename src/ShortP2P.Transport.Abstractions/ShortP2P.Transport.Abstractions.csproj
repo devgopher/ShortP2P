@@ -1,7 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <ItemGroup>
-        <ProjectReference Include="..\ShortP2P.Auth\ShortP2P.Auth.csproj"/>
+      <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.13" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\ShortP2P.Auth\ShortP2P.Auth.csproj" />
     </ItemGroup>
 
     <PropertyGroup>

@@ -10,12 +10,13 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="$(MicrosoftExtensionsVersion)"/>
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="$(MicrosoftExtensionsVersion)" />
+        <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3.android" Version="2.1.13" />
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\ShortP2P.Transport.Abstractions\ShortP2P.Transport.Abstractions.csproj"/>
-        <ProjectReference Include="..\ShortP2P.Transport\ShortP2P.Transport.csproj"/>
+        <ProjectReference Include="..\ShortP2P.Transport.Abstractions\ShortP2P.Transport.Abstractions.csproj" />
+        <ProjectReference Include="..\ShortP2P.Transport\ShortP2P.Transport.csproj" />
     </ItemGroup>
 
 </Project>
