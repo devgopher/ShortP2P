@@ -187,6 +187,7 @@ EF Core 8 + Npgsql: сущности-записи, репозитории, ми�
 ### Чаты
 
 - **CreateChatRequest**: нельзя создать чат с собой; если пары ещё нет — создаётся `Chat` (`ChatId = Guid N`); всегда добавляются `ChatRequest` и upsert `CryptoKeys` (caller → target). Существующий чат пары не дублируется.
+- **GetChatRequests**: выдаёт pending-запросы для caller и **сразу удаляет** их (Postgres / in-memory store) — запрос считается принятым клиентом.
 
 ### Сообщения и квитанции (кеш ↔ БД)
 

@@ -24,4 +24,23 @@ public sealed class PostgresChatRequestRepository(MessengerDbContext db) : IChat
             .ConfigureAwait(false);
         return rows.Select(x => x.ToDomain()).ToArray();
     }
+
+    public async Task<IReadOnlyList<ChatRequest>> TakeByTargetNetworkIdAsync(
+        string targetNetworkId,
+        CancellationToken cancellationToken = default)
+    {
+        var rows = await db.ChatRequests
+            .Where(x => x.TargetNetworkId == targetNetworkId)
+            .OrderBy(x => x.CreatedAtUtc)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (rows.Count == 0)
+            return [];
+
+        var result = rows.Select(x => x.ToDomain()).ToArray();
+        db.ChatRequests.RemoveRange(rows);
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return result;
+    }
 }

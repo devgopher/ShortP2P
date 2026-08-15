@@ -23,7 +23,7 @@ public interface IMessengerServerApi
     /// <summary>POST <see cref="ApiRoutes.ChatRequests"/> — request a new chat with target subscriber.</summary>
     Task CreateChatRequestAsync(ChatRequestCreateRequest request, CancellationToken cancellationToken = default);
 
-    /// <summary>GET <see cref="ApiRoutes.ChatRequests"/> — pending chat requests for the current client.</summary>
+    /// <summary>GET <see cref="ApiRoutes.ChatRequests"/> — pending chat requests for the current client (consumed on read).</summary>
     Task<IReadOnlyList<ChatRequestDto>> GetChatRequestsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>GET <see cref="ApiRoutes.Messages"/> — messages addressed to the current client's networkId.</summary>

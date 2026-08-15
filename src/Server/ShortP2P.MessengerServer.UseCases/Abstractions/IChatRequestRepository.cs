@@ -9,4 +9,12 @@ public interface IChatRequestRepository
     Task<IReadOnlyList<ChatRequest>> ListByTargetNetworkIdAsync(
         string targetNetworkId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns pending requests for <paramref name="targetNetworkId"/> and removes them
+    /// (accepted / delivered to the client) from durable store / in-memory cache.
+    /// </summary>
+    Task<IReadOnlyList<ChatRequest>> TakeByTargetNetworkIdAsync(
+        string targetNetworkId,
+        CancellationToken cancellationToken = default);
 }

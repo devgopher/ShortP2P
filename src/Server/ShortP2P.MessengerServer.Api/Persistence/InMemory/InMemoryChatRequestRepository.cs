@@ -15,4 +15,9 @@ public sealed class InMemoryChatRequestRepository(InMemoryMessengerStore store) 
         string targetNetworkId,
         CancellationToken cancellationToken = default) =>
         Task.FromResult(store.ListChatRequestsByTarget(targetNetworkId));
+
+    public Task<IReadOnlyList<ChatRequest>> TakeByTargetNetworkIdAsync(
+        string targetNetworkId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(store.TakeChatRequestsByTarget(targetNetworkId));
 }

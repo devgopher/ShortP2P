@@ -36,4 +36,22 @@ public sealed class InMemoryMessengerStore
                 .ToArray();
         }
     }
+
+    /// <summary>Atomically list and remove pending chat requests for the target (accepted).</summary>
+    public IReadOnlyList<ChatRequest> TakeChatRequestsByTarget(string targetNetworkId)
+    {
+        lock (_chatRequestsGate)
+        {
+            var taken = _chatRequests
+                .Where(x => string.Equals(x.Request.TargetNetworkId, targetNetworkId, StringComparison.Ordinal))
+                .ToArray();
+            if (taken.Length == 0)
+                return [];
+
+            foreach (var row in taken)
+                _chatRequests.Remove(row);
+
+            return taken.Select(x => x.Request).ToArray();
+        }
+    }
 }

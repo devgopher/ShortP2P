@@ -9,7 +9,7 @@
 |-------|------------|
 | `Abstractions/` | Порты репозиториев и кеша, `MessengerCacheOptions`, `IClock`, hasher, token, cert |
 | `Auth/` | Register, Login |
-| `Chats/` | GetChats, CreateChatRequest, GetChatRequests |
+| `Chats/` | GetChats, CreateChatRequest, GetChatRequests (consume-on-read) |
 | `Messages/` | Get/Send messages, delivery receipts |
 | `Hosting/` | `ExpiredCachePromotionHostedService` — TTL монитор кеша |
 | `Presence/` | KeepAlive, GetClientPresences |

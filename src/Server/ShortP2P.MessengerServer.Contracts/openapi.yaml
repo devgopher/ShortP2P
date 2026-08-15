@@ -121,13 +121,13 @@ paths:
           $ref: '#/components/responses/Unauthorized'
     get:
       operationId: getChatRequests
-      summary: Pending chat requests for the current client
+      summary: Pending chat requests for the current client (consumed on read; removed from store)
       tags: [Chats]
       security:
         - bearerAuth: []
       responses:
         '200':
-          description: Requesters' networkId and public keys
+          description: Requesters' networkId and public keys; requests are deleted after delivery
           content:
             application/json:
               schema:
