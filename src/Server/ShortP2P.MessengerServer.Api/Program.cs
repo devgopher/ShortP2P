@@ -2,6 +2,7 @@ using ShortP2P.MessengerServer.Api.DependencyInjection;
 using ShortP2P.MessengerServer.Api.Filters;
 using ShortP2P.MessengerServer.Auth.DependencyInjection;
 using ShortP2P.MessengerServer.Auth.LiteDB.DependencyInjection;
+using ShortP2P.MessengerServer.Infrastructure.HostPowers;
 using ShortP2P.MessengerServer.UseCases.Abstractions;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -23,6 +24,7 @@ builder.Services.Configure<MessengerInboxOptions>(
     builder.Configuration.GetSection(MessengerInboxOptions.Section));
 
 builder.Services.AddPersistence(builder.Configuration);
+builder.Services.AddHostPowersLiteDb(builder.Configuration);
 
 builder.Services
     .AddAuth(builder.Configuration)

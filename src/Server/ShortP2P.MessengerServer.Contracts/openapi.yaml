@@ -224,6 +224,41 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /api/v1/server-tech/power:
+    get:
+      operationId: getPower
+      summary: Host TotalPower score (anonymous)
+      tags: [ServerTech]
+      responses:
+        '200':
+          description: Cached TotalPower from LiteDB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerPowerResponse'
+
+  /api/v1/server-tech/free-powers:
+    get:
+      operationId: getFreePowers
+      summary: Host FreePowers percent (anonymous)
+      tags: [ServerTech]
+      responses:
+        '200':
+          description: Cached FreePowers from LiteDB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerFreePowersResponse'
+
+  /api/v1/server-tech/ping:
+    get:
+      operationId: ping
+      summary: Liveness ping (anonymous)
+      tags: [ServerTech]
+      responses:
+        '200':
+          description: Empty OK
+
 components:
   securitySchemes:
     bearerAuth:
@@ -287,6 +322,32 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ChatRequestDto'
+
+    ServerPowerResponse:
+      type: object
+      required: [totalPower, measuredAtUtc]
+      properties:
+        totalPower:
+          type: number
+          format: double
+          minimum: 1
+          maximum: 100
+        measuredAtUtc:
+          type: string
+          format: date-time
+
+    ServerFreePowersResponse:
+      type: object
+      required: [freePowers, measuredAtUtc]
+      properties:
+        freePowers:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+        measuredAtUtc:
+          type: string
+          format: date-time
 
     LoginResponse:
       type: object

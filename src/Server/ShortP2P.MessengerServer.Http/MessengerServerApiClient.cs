@@ -139,6 +139,37 @@ public sealed class MessengerServerApiClient(
             .ConfigureAwait(false);
     }
 
+    public async Task<ServerPowerResponse> GetPowerAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await httpClient
+            .GetAsync(ApiRoutes.ServerTechPower, cancellationToken)
+            .ConfigureAwait(false);
+
+        return await MessengerServerJson
+            .ReadJsonAsync<ServerPowerResponse>(response, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<ServerFreePowersResponse> GetFreePowersAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await httpClient
+            .GetAsync(ApiRoutes.ServerTechFreePowers, cancellationToken)
+            .ConfigureAwait(false);
+
+        return await MessengerServerJson
+            .ReadJsonAsync<ServerFreePowersResponse>(response, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task PingAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await httpClient
+            .GetAsync(ApiRoutes.ServerTechPing, cancellationToken)
+            .ConfigureAwait(false);
+
+        response.EnsureSuccessStatusCode();
+    }
+
     /// <summary>Clears the stored JWT (logout / switch account).</summary>
     public void Logout() => session.Clear();
 }

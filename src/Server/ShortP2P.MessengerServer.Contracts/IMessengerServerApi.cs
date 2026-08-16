@@ -43,4 +43,13 @@ public interface IMessengerServerApi
 
     /// <summary>GET <see cref="ApiRoutes.Clients"/> — registered clients with online/offline status.</summary>
     Task<IReadOnlyList<ClientPresenceDto>> GetClientsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>GET <see cref="ApiRoutes.ServerTechPower"/> — host TotalPower (anonymous).</summary>
+    Task<ServerPowerResponse> GetPowerAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>GET <see cref="ApiRoutes.ServerTechFreePowers"/> — host FreePowers % (anonymous).</summary>
+    Task<ServerFreePowersResponse> GetFreePowersAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>GET <see cref="ApiRoutes.ServerTechPing"/> — liveness (anonymous, 200 OK).</summary>
+    Task PingAsync(CancellationToken cancellationToken = default);
 }

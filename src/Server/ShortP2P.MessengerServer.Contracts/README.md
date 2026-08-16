@@ -26,6 +26,9 @@
 | `GET` | `/api/v1/messages/receipts` | Квитанции для текущего networkId |
 | `GET` | `/api/v1/events/poll` | Long-poll inbox (messages + chatRequests) |
 | `GET` | `/api/v1/clients` | Presence (Online если любое устройство в OnlineTimeout) |
+| `GET` | `/api/v1/server-tech/power` | TotalPower (anonymous) |
+| `GET` | `/api/v1/server-tech/free-powers` | FreePowers % (anonymous) |
+| `GET` | `/api/v1/server-tech/ping` | Liveness 200 OK (anonymous) |
 
 `deviceId` — 64 lowercase hex (SHA-256 от install GUID). Даты — UTC. `encryptedDataBase64` — opaque.
 

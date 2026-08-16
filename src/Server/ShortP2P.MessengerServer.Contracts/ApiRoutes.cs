@@ -20,4 +20,13 @@ public static class ApiRoutes
     public const string EventsPoll = Prefix + "/events/poll";
 
     public const string Clients = Prefix + "/clients";
+
+    /// <summary>GET anonymous TotalPower (host hardware score).</summary>
+    public const string ServerTechPower = Prefix + "/server-tech/power";
+
+    /// <summary>GET anonymous FreePowers (host free capacity %).</summary>
+    public const string ServerTechFreePowers = Prefix + "/server-tech/free-powers";
+
+    /// <summary>GET anonymous liveness ping (200 OK).</summary>
+    public const string ServerTechPing = Prefix + "/server-tech/ping";
 }
