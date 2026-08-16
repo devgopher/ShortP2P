@@ -7,7 +7,7 @@ public sealed class InMemoryClientStatusRepository(InMemoryMessengerStore store)
 {
     public Task UpsertAsync(ClientStatuses status, CancellationToken cancellationToken = default)
     {
-        store.Statuses[status.NetworkId] = status;
+        store.Statuses[(status.NetworkId, status.DeviceId)] = status;
         return Task.CompletedTask;
     }
 
@@ -15,5 +15,17 @@ public sealed class InMemoryClientStatusRepository(InMemoryMessengerStore store)
     {
         IReadOnlyList<ClientStatuses> list = store.Statuses.Values.ToArray();
         return Task.FromResult(list);
+    }
+
+    public Task<IReadOnlyList<string>> ListDeviceIdsAsync(
+        string networkId,
+        CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<string> ids = store.Statuses.Keys
+            .Where(k => string.Equals(k.NetworkId, networkId, StringComparison.Ordinal))
+            .Select(k => k.DeviceId)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return Task.FromResult(ids);
     }
 }

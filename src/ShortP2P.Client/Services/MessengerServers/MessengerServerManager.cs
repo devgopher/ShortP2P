@@ -14,9 +14,10 @@ namespace ShortP2P.Client.Services.MessengerServers;
 /// </summary>
 public sealed class MessengerServerManager : IAsyncDisposable
 {
-    public static readonly TimeSpan DefaultHttpTimeout = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan DefaultHttpTimeout = TimeSpan.FromSeconds(90);
 
     private readonly AuthService _auth;
+    private readonly DeviceIdProvider _deviceId;
     private readonly ConcurrentDictionary<int, MessengerServerConnection> _connections = new();
     private readonly ConcurrentDictionary<int, MessengerServerRankStats> _rankStats = new();
     private readonly ILogger<MessengerServerManager> _logger;
@@ -26,10 +27,12 @@ public sealed class MessengerServerManager : IAsyncDisposable
     public MessengerServerManager(
         IMessengerServerRepository repository,
         AuthService auth,
+        DeviceIdProvider deviceId,
         ILogger<MessengerServerManager>? logger = null)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
+        _deviceId = deviceId ?? throw new ArgumentNullException(nameof(deviceId));
         _logger = logger ?? NullLogger<MessengerServerManager>.Instance;
     }
 
@@ -81,6 +84,9 @@ public sealed class MessengerServerManager : IAsyncDisposable
             stats.LastFailureUtc = DateTime.UtcNow;
         }
     }
+
+    public void RecordProbeSuccess(int serverId, TimeSpan roundTrip) =>
+        RecordKeepAliveSuccess(serverId, roundTrip);
 
     public void RecordKeepAliveSuccess(int serverId, TimeSpan roundTrip)
     {
@@ -399,6 +405,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
 
         entity.NetworkId = user.NetworkIdShort.Trim();
         entity.Nick = user.Nickname.Trim();
+        var deviceId = await _deviceId.GetDeviceIdAsync(cancellationToken).ConfigureAwait(false);
 
         if (!entity.IsRegistered)
         {
@@ -409,7 +416,8 @@ public sealed class MessengerServerManager : IAsyncDisposable
                     {
                         Nick = entity.Nick,
                         NetworkId = entity.NetworkId,
-                        Password = entity.AccountPassword
+                        Password = entity.AccountPassword,
+                        DeviceId = deviceId
                     },
                     cancellationToken).ConfigureAwait(false);
                 entity.IsRegistered = true;
@@ -430,7 +438,8 @@ public sealed class MessengerServerManager : IAsyncDisposable
             new LoginRequest
             {
                 NetworkId = entity.NetworkId,
-                Password = entity.AccountPassword
+                Password = entity.AccountPassword,
+                DeviceId = deviceId
             },
             cancellationToken).ConfigureAwait(false);
     }

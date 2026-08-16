@@ -13,8 +13,7 @@ namespace ShortP2P.MessengerServer.Api.Controllers;
 [Route($"{ApiRoutes.Prefix}/chats")]
 public sealed class ChatsController(
     GetChatsUseCase getChatsUseCase,
-    CreateChatRequestUseCase createChatRequestUseCase,
-    GetChatRequestsUseCase getChatRequestsUseCase) : ControllerBase
+    CreateChatRequestUseCase createChatRequestUseCase) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetChatsAsync(
@@ -59,24 +58,4 @@ public sealed class ChatsController(
             return this.ToApiErrorResult(ex);
         }
     }
-
-    [HttpGet("requests")]
-    public async Task<IActionResult> GetChatRequestsAsync(
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var caller = HttpContext.RequireNetworkId();
-            var list = await getChatRequestsUseCase
-                .ExecuteAsync(new GetChatRequestsQuery(caller), cancellationToken)
-                .ConfigureAwait(false);
-
-            return Ok(list.Select(x => x.ToDto()).ToArray());
-        }
-        catch (UseCaseException ex)
-        {
-            return this.ToApiErrorResult(ex);
-        }
-    }
 }
-

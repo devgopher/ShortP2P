@@ -31,7 +31,21 @@ public sealed class InMemoryMessageRepository(InMemoryMessengerStore store) : IM
     public Task RemoveByIdsAsync(IReadOnlyCollection<string> messageIds, CancellationToken cancellationToken = default)
     {
         foreach (var id in messageIds)
+        {
             store.Messages.TryRemove(id, out _);
+            foreach (var key in store.MessageInboxes.Keys.Where(k => k.MessageId == id).ToArray())
+                store.MessageInboxes.TryRemove(key, out _);
+        }
+
         return Task.CompletedTask;
+    }
+
+    public Task RemoveOlderThanAsync(DateTime cutoffUtc, CancellationToken cancellationToken = default)
+    {
+        var ids = store.Messages.Values
+            .Where(m => m.CreatedUtc < cutoffUtc)
+            .Select(m => m.MessageId)
+            .ToArray();
+        return RemoveByIdsAsync(ids, cancellationToken);
     }
 }

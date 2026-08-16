@@ -61,6 +61,7 @@ internal static class Program
         services.AddSingleton<ChatSessionCache>();
         services.AddSingleton<P2pCryptoSessionCache>();
         services.AddSingleton<IMessengerServerRepository, SqliteMessengerServerRepository>();
+        services.AddSingleton<DeviceIdProvider>();
         services.AddSingleton<MessengerServerManager>();
         services.AddSingleton<MessengerServerSyncService>();
         services.AddSingleton(sp => new UserP2pRuntime(

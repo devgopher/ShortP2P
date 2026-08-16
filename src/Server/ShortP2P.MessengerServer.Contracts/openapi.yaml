@@ -6,6 +6,10 @@ info:
     HTTPS JSON contract for the central messenger server (store-and-forward).
     EncryptedData is opaque; the server does not decrypt payloads.
     networkId is the short client id (base64url).
+    deviceId is lowercase hex SHA-256 (64) of a local install GUID.
+    Inbox is long-polled via GET /api/v1/events/poll; messages deleted on Submit per device (fan-out).
+    Presence is updated on every authenticated request; OnlineTimeout = 1.5 × MaxPollTimeoutSeconds.
+    Undelivered messages are retained at most 30 days.
 servers:
   - url: https://{host}
     variables:
@@ -119,45 +123,11 @@ paths:
           description: Accepted
         '401':
           $ref: '#/components/responses/Unauthorized'
-    get:
-      operationId: getChatRequests
-      summary: Pending chat requests for the current client (consumed on read; removed from store)
-      tags: [Chats]
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Requesters' networkId and public keys; requests are deleted after delivery
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ChatRequestDto'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
 
   /api/v1/messages:
-    get:
-      operationId: getMessages
-      summary: Messages addressed to the current client's networkId
-      tags: [Messages]
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Message array
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/MessageDto'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
     post:
       operationId: sendMessage
-      summary: Send encrypted message
+      summary: Send encrypted message (fan-out to known target devices)
       tags: [Messages]
       security:
         - bearerAuth: []
@@ -176,7 +146,7 @@ paths:
   /api/v1/messages/receipts:
     post:
       operationId: submitDeliveryReceipt
-      summary: Submit a delivery receipt
+      summary: Submit a delivery receipt (deletes this device's inbox copy)
       tags: [Messages]
       security:
         - bearerAuth: []
@@ -209,22 +179,29 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
-  /api/v1/keepalive:
-    post:
-      operationId: keepAlive
-      summary: Presence keep-alive
-      tags: [Presence]
+  /api/v1/events/poll:
+    get:
+      operationId: pollEvents
+      summary: Long-poll inbox (messages + chat requests) for this device
+      tags: [Events]
       security:
         - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/KeepAliveRequest'
+      parameters:
+        - name: timeoutSeconds
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 30
+            default: 30
       responses:
-        '204':
-          description: No content
+        '200':
+          description: Inbox snapshot; messages listed until Submit; chat requests consumed per device
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventsPollResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -237,7 +214,7 @@ paths:
         - bearerAuth: []
       responses:
         '200':
-          description: Client presence array
+          description: Client presence array (online if any device touched within OnlineTimeout)
           content:
             application/json:
               schema:
@@ -271,7 +248,7 @@ components:
   schemas:
     RegisterRequest:
       type: object
-      required: [nick, networkId, password]
+      required: [nick, networkId, password, deviceId]
       properties:
         nick:
           type: string
@@ -281,16 +258,35 @@ components:
         password:
           type: string
           format: password
+        deviceId:
+          type: string
+          description: Lowercase hex SHA-256 (64 chars) of install GUID
 
     LoginRequest:
       type: object
-      required: [networkId, password]
+      required: [networkId, password, deviceId]
       properties:
         networkId:
           type: string
         password:
           type: string
           format: password
+        deviceId:
+          type: string
+          description: Lowercase hex SHA-256 (64 chars) of install GUID
+
+    EventsPollResponse:
+      type: object
+      required: [messages, chatRequests]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageDto'
+        chatRequests:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatRequestDto'
 
     LoginResponse:
       type: object
@@ -394,13 +390,6 @@ components:
         receivedAtUtc:
           type: string
           format: date-time
-
-    KeepAliveRequest:
-      type: object
-      required: [networkId]
-      properties:
-        networkId:
-          type: string
 
     ClientPresenceDto:
       type: object

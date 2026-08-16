@@ -47,6 +47,7 @@ public static class PersistenceServiceCollectionExtensions
             services.AddSingleton<IChatRequestRepository, InMemoryChatRequestRepository>();
             services.AddSingleton<ICryptoKeysRepository, InMemoryCryptoKeysRepository>();
             services.AddSingleton<IMessageRepository, InMemoryMessageRepository>();
+            services.AddSingleton<IMessageInboxRepository, InMemoryMessageInboxRepository>();
             services.AddSingleton<IDeliveryTicketRepository, InMemoryDeliveryTicketRepository>();
         }
 

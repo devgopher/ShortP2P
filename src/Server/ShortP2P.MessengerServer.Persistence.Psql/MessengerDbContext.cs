@@ -7,9 +7,11 @@ public sealed class MessengerDbContext(DbContextOptions<MessengerDbContext> opti
 {
     public DbSet<ChatRecord> Chats => Set<ChatRecord>();
     public DbSet<ChatRequestRecord> ChatRequests => Set<ChatRequestRecord>();
+    public DbSet<ChatRequestInboxRecord> ChatRequestInboxes => Set<ChatRequestInboxRecord>();
     public DbSet<CryptoKeysRecord> CryptoKeys => Set<CryptoKeysRecord>();
     public DbSet<ClientStatusRecord> ClientStatuses => Set<ClientStatusRecord>();
     public DbSet<MessageRecord> Messages => Set<MessageRecord>();
+    public DbSet<MessageInboxRecord> MessageInboxes => Set<MessageInboxRecord>();
     public DbSet<DeliveryTicketRecord> DeliveryTickets => Set<DeliveryTicketRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -25,12 +27,22 @@ public sealed class MessengerDbContext(DbContextOptions<MessengerDbContext> opti
         modelBuilder.Entity<ChatRequestRecord>(e =>
         {
             e.ToTable("chat_requests");
-            e.HasKey(x => x.Id);
-            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasKey(x => x.RequestId);
+            e.Property(x => x.RequestId).HasMaxLength(64);
             e.Property(x => x.RequesterNetworkId).HasMaxLength(64);
             e.Property(x => x.TargetNetworkId).HasMaxLength(64);
             e.HasIndex(x => x.TargetNetworkId);
             e.HasIndex(x => new { x.RequesterNetworkId, x.TargetNetworkId });
+        });
+
+        modelBuilder.Entity<ChatRequestInboxRecord>(e =>
+        {
+            e.ToTable("chat_request_inbox");
+            e.HasKey(x => new { x.RequestId, x.DeviceId });
+            e.Property(x => x.RequestId).HasMaxLength(64);
+            e.Property(x => x.TargetNetworkId).HasMaxLength(64);
+            e.Property(x => x.DeviceId).HasMaxLength(64);
+            e.HasIndex(x => new { x.TargetNetworkId, x.DeviceId });
         });
 
         modelBuilder.Entity<CryptoKeysRecord>(e =>
@@ -44,8 +56,9 @@ public sealed class MessengerDbContext(DbContextOptions<MessengerDbContext> opti
         modelBuilder.Entity<ClientStatusRecord>(e =>
         {
             e.ToTable("client_statuses");
-            e.HasKey(x => x.NetworkId);
+            e.HasKey(x => new { x.NetworkId, x.DeviceId });
             e.Property(x => x.NetworkId).HasMaxLength(64);
+            e.Property(x => x.DeviceId).HasMaxLength(64);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
         });
 
@@ -58,6 +71,17 @@ public sealed class MessengerDbContext(DbContextOptions<MessengerDbContext> opti
             e.Property(x => x.TgtNetworkId).HasMaxLength(64);
             e.HasIndex(x => x.TgtNetworkId);
             e.HasIndex(x => x.SrcNetworkId);
+            e.HasIndex(x => x.CreatedUtc);
+        });
+
+        modelBuilder.Entity<MessageInboxRecord>(e =>
+        {
+            e.ToTable("message_inbox");
+            e.HasKey(x => new { x.MessageId, x.DeviceId });
+            e.Property(x => x.MessageId).HasMaxLength(128);
+            e.Property(x => x.TgtNetworkId).HasMaxLength(64);
+            e.Property(x => x.DeviceId).HasMaxLength(64);
+            e.HasIndex(x => new { x.TgtNetworkId, x.DeviceId });
         });
 
         modelBuilder.Entity<DeliveryTicketRecord>(e =>

@@ -25,6 +25,7 @@ public static class MessengerPersistenceServiceCollectionExtensions
         services.AddScoped<ICryptoKeysRepository, PostgresCryptoKeysRepository>();
         services.AddScoped<IClientStatusRepository, PostgresClientStatusRepository>();
         services.AddScoped<IMessageRepository, PostgresMessageRepository>();
+        services.AddScoped<IMessageInboxRepository, PostgresMessageInboxRepository>();
         services.AddScoped<IDeliveryTicketRepository, PostgresDeliveryTicketRepository>();
 
         if (applyMigrationsOnStartup)

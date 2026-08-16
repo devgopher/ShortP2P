@@ -19,6 +19,7 @@ public static class InMemoryMessengerCacheServiceCollectionExtensions
         services.AddSingleton(options);
         services.AddSingleton<InMemoryCacheMemoryTracker>();
         services.AddSingleton<IMessageCache, InMemoryMessageCache>();
+        services.AddSingleton<IMessageInboxCache, InMemoryMessageInboxCache>();
         services.AddSingleton<IDeliveryTicketCache, InMemoryDeliveryTicketCache>();
         return services;
     }

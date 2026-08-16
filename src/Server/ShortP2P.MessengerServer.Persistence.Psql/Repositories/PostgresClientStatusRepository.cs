@@ -10,7 +10,9 @@ public sealed class PostgresClientStatusRepository(MessengerDbContext db) : ICli
     public async Task UpsertAsync(ClientStatuses status, CancellationToken cancellationToken = default)
     {
         var existing = await db.ClientStatuses
-            .FirstOrDefaultAsync(x => x.NetworkId == status.NetworkId, cancellationToken)
+            .FirstOrDefaultAsync(
+                x => x.NetworkId == status.NetworkId && x.DeviceId == status.DeviceId,
+                cancellationToken)
             .ConfigureAwait(false);
 
         if (existing is null)
@@ -33,5 +35,18 @@ public sealed class PostgresClientStatusRepository(MessengerDbContext db) : ICli
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
         return rows.Select(x => x.ToDomain()).ToArray();
+    }
+
+    public async Task<IReadOnlyList<string>> ListDeviceIdsAsync(
+        string networkId,
+        CancellationToken cancellationToken = default)
+    {
+        var ids = await db.ClientStatuses.AsNoTracking()
+            .Where(x => x.NetworkId == networkId)
+            .Select(x => x.DeviceId)
+            .Distinct()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return ids;
     }
 }

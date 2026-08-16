@@ -37,9 +37,28 @@ public sealed class PostgresMessageRepository(MessengerDbContext db) : IMessageR
         IReadOnlyCollection<string> messageIds,
         CancellationToken cancellationToken = default)
     {
+        await db.MessageInboxes
+            .Where(x => messageIds.Contains(x.MessageId))
+            .ExecuteDeleteAsync(cancellationToken)
+            .ConfigureAwait(false);
+
         await db.Messages
             .Where(x => messageIds.Contains(x.MessageId))
             .ExecuteDeleteAsync(cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    public async Task RemoveOlderThanAsync(DateTime cutoffUtc, CancellationToken cancellationToken = default)
+    {
+        var ids = await db.Messages.AsNoTracking()
+            .Where(x => x.CreatedUtc < cutoffUtc)
+            .Select(x => x.MessageId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (ids.Count == 0)
+            return;
+
+        await RemoveByIdsAsync(ids, cancellationToken).ConfigureAwait(false);
     }
 }

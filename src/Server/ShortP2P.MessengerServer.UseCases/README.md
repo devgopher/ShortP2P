@@ -7,30 +7,32 @@
 
 | Папка | Содержимое |
 |-------|------------|
-| `Abstractions/` | Порты репозиториев и кеша, `MessengerCacheOptions`, `IClock`, hasher, token, cert |
-| `Auth/` | Register, Login |
-| `Chats/` | GetChats, CreateChatRequest, GetChatRequests (consume-on-read) |
-| `Messages/` | Get/Send messages, delivery receipts |
-| `Hosting/` | `ExpiredCachePromotionHostedService` — TTL монитор кеша |
-| `Presence/` | KeepAlive, GetClientPresences |
+| `Abstractions/` | Порты репозиториев/кеша, `MessengerCacheOptions`, `MessengerInboxOptions`, wait |
+| `Auth/` | Register, Login (DeviceId + lazy fan-out) |
+| `Chats/` | GetChats, CreateChatRequest (fan-out) |
+| `Messages/` | Send, Submit receipt (delete device inbox), Get receipts |
+| `Inbox/` | `DeviceFanoutService`, `PollInboxEventsUseCase` |
+| `Hosting/` | Cache promotion TTL; message retention 30d; `InboxWaitService` |
+| `Presence/` | GetClientPresences (OnlineTimeout = 1.5 × MaxPoll) |
 | `Server/` | GetServerCertificate |
+
+## Inbox / presence
+
+| Правило | Поведение |
+|---------|-----------|
+| Long-poll | `PollInboxEvents` — list messages (no delete), take chatRequests per DeviceId |
+| Submit | Ticket + delete `MessageInbox(MessageId, DeviceId)`; GC Message when no copies |
+| Fan-out | Send / ChatRequest → copies for known DeviceIds; lazy on login |
+| Retention | Purge Message/ChatRequest older than 30 days |
+| Presence | Touch на каждый authed-запрос; Online если любое устройство в окне |
 
 ## Кеш Message / DeliveryTicket
 
 | Операция | Поведение |
 |----------|-----------|
-| Send / Submit receipt | Перед записью в кеш проверяется `IsWriteAvailable`. Пишем в включённые/доступные хранилища. Оба недоступны → `Unavailable` |
-| Get messages / receipts | Сначала кеш (если включён); если пусто/недоступен — репозиторий. После выдачи — best-effort удаление из доступных хранилищ |
-| Настройки | `CacheEnabled` / `RepositoryEnabled` (оба default **true**). Оба false → ошибка Validation |
-| TTL (`TimeToLive`, default **60 с**) | `ListExpired` → запись в репозиторий → при успехе удаление из кеша; при сбое БД элемент остаётся в кеше |
-
-Зарегистрировать в host: `services.AddHostedService<ExpiredCachePromotionHostedService>()`.
-
-## Правила
-
-- `SendMessage`: повторный `MessageId` — **no-op OK** (кеш или репозиторий).
-- `CreateChatRequest`: создаёт `Chat` (пара caller+target), `ChatRequest` и `CryptoKeys`; существующий чат пары не дублируется.
-- Ошибки — `UseCaseException` с кодами `Validation`, `Conflict`, `NotFound`, `Unauthorized`.
+| Send / Submit receipt | Пишем в доступные хранилища; оба недоступны → `Unavailable` |
+| Настройки | `CacheEnabled` / `RepositoryEnabled` |
+| TTL кеша | Promotion в durable repo (`ExpiredCachePromotionHostedService`) |
 
 ## Сборка
 

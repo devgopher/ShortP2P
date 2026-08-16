@@ -77,29 +77,6 @@ public sealed class MessengerServerApiClient(
         await MessengerServerJson.EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<ChatRequestDto>> GetChatRequestsAsync(
-        CancellationToken cancellationToken = default)
-    {
-        using var response = await httpClient
-            .GetAsync(ApiRoutes.ChatRequests, cancellationToken)
-            .ConfigureAwait(false);
-
-        return await MessengerServerJson
-            .ReadJsonAsync<ChatRequestDto[]>(response, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    public async Task<IReadOnlyList<MessageDto>> GetMessagesAsync(CancellationToken cancellationToken = default)
-    {
-        using var response = await httpClient
-            .GetAsync(ApiRoutes.Messages, cancellationToken)
-            .ConfigureAwait(false);
-
-        return await MessengerServerJson
-            .ReadJsonAsync<MessageDto[]>(response, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
     public async Task SendMessageAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(message);
@@ -136,15 +113,18 @@ public sealed class MessengerServerApiClient(
             .ConfigureAwait(false);
     }
 
-    public async Task KeepAliveAsync(KeepAliveRequest request, CancellationToken cancellationToken = default)
+    public async Task<EventsPollResponse> PollEventsAsync(
+        int? timeoutSeconds = null,
+        CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
+        var url = ApiRoutes.EventsPoll;
+        if (timeoutSeconds is > 0)
+            url += $"?timeoutSeconds={timeoutSeconds.Value}";
 
-        using var response = await httpClient
-            .PostAsync(ApiRoutes.KeepAlive, MessengerServerJson.ToJsonContent(request), cancellationToken)
+        using var response = await httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        return await MessengerServerJson
+            .ReadJsonAsync<EventsPollResponse>(response, cancellationToken)
             .ConfigureAwait(false);
-
-        await MessengerServerJson.EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<ClientPresenceDto>> GetClientsAsync(

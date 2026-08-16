@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.Logging;
@@ -13,16 +13,15 @@ using ShortP2P.MessengerServer.Contracts.Dtos;
 namespace ShortP2P.Client.Services.MessengerServers;
 
 /// <summary>
-/// Background KeepAlive / ChatRequest / message poll for messenger servers,
-/// plus outbound server-first message delivery.
+/// Background long-poll inbox for messenger servers, plus outbound server-first message delivery.
 /// </summary>
 public sealed class MessengerServerSyncService : IAsyncDisposable
 {
-    public static readonly TimeSpan KeepAlivePeriod = TimeSpan.FromSeconds(15);
-    public static readonly TimeSpan PollPeriod = TimeSpan.FromSeconds(20);
+    /// <summary>Default long-poll wait requested from the server (seconds).</summary>
+    public const int LongPollTimeoutSeconds = 25;
 
-    /// <summary>Max concurrent workers for inbound message receive (one server per worker).</summary>
-    public const int MaxMessageReceiveWorkers = 3;
+    /// <summary>Max concurrent long-poll workers (one server per worker).</summary>
+    public const int MaxLongPollWorkers = 3;
 
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
@@ -33,8 +32,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     private readonly SemaphoreSlim _ingestGate = new(1, 1);
 
     private CancellationTokenSource? _cts;
-    private Task? _keepAliveLoop;
-    private Task? _pollLoop;
+    private Task? _longPollLoop;
     private bool _started;
 
     public MessengerServerSyncService(
@@ -61,8 +59,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                 return;
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
-            _keepAliveLoop = Task.Run(() => KeepAliveLoopAsync(token), token);
-            _pollLoop = Task.Run(() => PollLoopAsync(token), token);
+            _longPollLoop = Task.Run(() => LongPollSupervisorAsync(token), token);
             _started = true;
         }
     }
@@ -70,19 +67,16 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     public async Task StopAsync()
     {
         CancellationTokenSource? cts;
-        Task? keepAlive;
-        Task? poll;
+        Task? longPoll;
         lock (_startGate)
         {
             if (!_started)
                 return;
             _started = false;
             cts = _cts;
-            keepAlive = _keepAliveLoop;
-            poll = _pollLoop;
+            longPoll = _longPollLoop;
             _cts = null;
-            _keepAliveLoop = null;
-            _pollLoop = null;
+            _longPollLoop = null;
         }
 
         if (cts != null)
@@ -97,17 +91,15 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             }
         }
 
-        await Task.WhenAll(
-            WaitIgnoreCancelAsync(keepAlive),
-            WaitIgnoreCancelAsync(poll)).ConfigureAwait(false);
+        await WaitIgnoreCancelAsync(longPoll).ConfigureAwait(false);
         cts?.Dispose();
     }
 
-    /// <summary>Discovery priority hook: auth + KeepAlive + GetClients before UDP/BT.</summary>
+    /// <summary>Discovery priority hook: auth + GetClients before UDP/BT.</summary>
     public Task RunDiscoveryRoundAsync(CancellationToken cancellationToken) =>
-        KeepAliveAndListRemoteClientsAsync(cancellationToken);
+        ProbeAndListRemoteClientsAsync(cancellationToken);
 
-    public async Task<IReadOnlyList<ClientPresenceDto>> KeepAliveAndListRemoteClientsAsync(
+    public async Task<IReadOnlyList<ClientPresenceDto>> ProbeAndListRemoteClientsAsync(
         CancellationToken cancellationToken)
     {
         var user = _auth.CurrentUser;
@@ -119,6 +111,11 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
         return await ListRemoteClientsAsync(ready, self, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>Obsolete name kept for call sites; prefers GetClients probe.</summary>
+    public Task<IReadOnlyList<ClientPresenceDto>> KeepAliveAndListRemoteClientsAsync(
+        CancellationToken cancellationToken) =>
+        ProbeAndListRemoteClientsAsync(cancellationToken);
 
     /// <summary>Publish (or refresh) our public key to the peer via all ready servers.</summary>
     public async Task PublishChatRequestAsync(string targetNetworkId, CancellationToken cancellationToken = default)
@@ -235,10 +232,13 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             IReadOnlyList<ClientPresenceDto> list;
+            var sw = Stopwatch.StartNew();
             try
             {
                 list = await TrackAsync(conn, () => conn.Api.GetClientsAsync(cancellationToken))
                     .ConfigureAwait(false);
+                sw.Stop();
+                _manager.RecordProbeSuccess(conn.Entity.Id, sw.Elapsed);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -273,210 +273,111 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     private static bool IsOnline(ClientPresenceDto client) =>
         string.Equals(client.Status, "Online", StringComparison.OrdinalIgnoreCase);
 
-    private async Task KeepAliveLoopAsync(CancellationToken cancellationToken)
+
+    private async Task LongPollSupervisorAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await KeepAliveOnceAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Messenger server KeepAlive round failed");
-            }
-
-            try
-            {
-                await Task.Delay(KeepAlivePeriod, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-        }
-    }
-
-    private async Task PollLoopAsync(CancellationToken cancellationToken)
-    {
-        // Stagger first poll slightly after KeepAlive so auth/cert run first.
-        try
-        {
-            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            try
-            {
-                await PollOnceAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Messenger server poll round failed");
-            }
-
-            try
-            {
-                await Task.Delay(PollPeriod, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-        }
-    }
-
-    private async Task KeepAliveOnceAsync(CancellationToken cancellationToken)
-    {
-        var user = _auth.CurrentUser;
-        if (user == null)
-            return;
-
-        var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
-        var networkId = user.NetworkIdShort.Trim();
-        foreach (var conn in ready)
-        {
-            var sw = Stopwatch.StartNew();
-            try
-            {
-                await conn.Api.KeepAliveAsync(
-                    new KeepAliveRequest { NetworkId = networkId },
-                    cancellationToken).ConfigureAwait(false);
-                sw.Stop();
-                _manager.RecordKeepAliveSuccess(conn.Entity.Id, sw.Elapsed);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _manager.RecordRequestFailure(conn.Entity.Id);
-                _logger.LogDebug(ex, "KeepAlive failed on {BaseUrl}", conn.Entity.BaseUrl);
-            }
-        }
-    }
-
-    private async Task PollOnceAsync(CancellationToken cancellationToken)
-    {
-        var user = _auth.CurrentUser;
-        if (user == null)
-            return;
-
-        // Cert + auth before ChatRequest / message pull.
-        var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var conn in ready)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                await ProcessChatRequestsAsync(conn, user, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogDebug(ex, "ChatRequest poll failed on {BaseUrl}", conn.Entity.BaseUrl);
-            }
-        }
-
-        await ReceiveMessagesFromAvailableServersAsync(ready, user, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Pulls chat messages from available servers only.
-    /// Uses 1–3 concurrent workers (one server per worker); sequential when only one worker is needed.
-    /// </summary>
-    private async Task ReceiveMessagesFromAvailableServersAsync(
-        IReadOnlyList<MessengerServerConnection> ready,
-        UserEntity user,
-        CancellationToken cancellationToken)
-    {
-        var available = _manager.FilterAvailable(ready);
-        if (available.Count == 0)
-        {
-            _logger.LogDebug("No available messenger servers for message receive");
-            return;
-        }
-
-        var degree = Math.Clamp(available.Count, 1, MaxMessageReceiveWorkers);
-        _logger.LogDebug(
-            "Receiving messages from {ServerCount} available server(s) with {Workers} worker(s)",
-            available.Count,
-            degree);
-
-        if (degree == 1)
-        {
-            foreach (var conn in available)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                await ReceiveFromServerSafeAsync(conn, user, cancellationToken).ConfigureAwait(false);
-            }
-
-            return;
-        }
-
-        var queue = new ConcurrentQueue<MessengerServerConnection>(available);
-        var workers = new Task[degree];
-        for (var i = 0; i < degree; i++)
-        {
-            workers[i] = Task.Run(async () =>
-            {
-                while (queue.TryDequeue(out var conn))
+                var user = _auth.CurrentUser;
+                if (user == null)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await ReceiveFromServerSafeAsync(conn, user, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+                    continue;
                 }
-            }, cancellationToken);
-        }
 
-        try
-        {
-            await Task.WhenAll(workers).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Parallel message receive completed with errors");
+                var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
+                var available = _manager.FilterAvailable(ready);
+                if (available.Count == 0)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                var degree = Math.Clamp(available.Count, 1, MaxLongPollWorkers);
+                var selected = available.Take(degree).ToArray();
+                var workers = selected
+                    .Select(conn => LongPollServerLoopAsync(conn, user, cancellationToken))
+                    .ToArray();
+
+                await Task.WhenAll(workers).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Messenger server long-poll supervisor failed");
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
         }
     }
 
-    private async Task ReceiveFromServerSafeAsync(
-        MessengerServerConnection conn,
+    private async Task LongPollServerLoopAsync(
+        MessengerServerConnection connection,
         UserEntity user,
         CancellationToken cancellationToken)
     {
-        try
+        while (!cancellationToken.IsCancellationRequested)
         {
-            await ProcessIncomingMessagesAsync(conn, user, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Messages poll failed on {BaseUrl}", conn.Entity.BaseUrl);
+            try
+            {
+                var sw = Stopwatch.StartNew();
+                var inbox = await TrackAsync(
+                        connection,
+                        () => connection.Api.PollEventsAsync(LongPollTimeoutSeconds, cancellationToken))
+                    .ConfigureAwait(false);
+                sw.Stop();
+
+                if (inbox.Messages.Count > 0 ||
+                    inbox.ChatRequests.Count > 0 ||
+                    sw.Elapsed < TimeSpan.FromSeconds(LongPollTimeoutSeconds - 2))
+                {
+                    _manager.RecordProbeSuccess(connection.Entity.Id, sw.Elapsed);
+                }
+
+                if (inbox.ChatRequests.Count > 0)
+                    await ProcessChatRequestsAsync(connection, user, inbox.ChatRequests, cancellationToken)
+                        .ConfigureAwait(false);
+
+                if (inbox.Messages.Count > 0)
+                    await ProcessIncomingMessagesAsync(connection, user, inbox.Messages, cancellationToken)
+                        .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Long-poll failed on {BaseUrl}", connection.Entity.BaseUrl);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
         }
     }
 
     private async Task ProcessChatRequestsAsync(
         MessengerServerConnection connection,
         UserEntity user,
+        IReadOnlyList<ChatRequestDto> requests,
         CancellationToken cancellationToken)
     {
-        var requests = await TrackAsync(connection, () => connection.Api.GetChatRequestsAsync(cancellationToken))
-            .ConfigureAwait(false);
         if (requests.Count == 0)
             return;
 
@@ -535,10 +436,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     private async Task ProcessIncomingMessagesAsync(
         MessengerServerConnection connection,
         UserEntity user,
+        IReadOnlyList<MessageDto> messages,
         CancellationToken cancellationToken)
     {
-        var messages = await TrackAsync(connection, () => connection.Api.GetMessagesAsync(cancellationToken))
-            .ConfigureAwait(false);
         if (messages.Count == 0)
             return;
 

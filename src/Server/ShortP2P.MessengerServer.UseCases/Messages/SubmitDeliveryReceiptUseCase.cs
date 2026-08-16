@@ -3,9 +3,17 @@ using ShortP2P.MessengerServer.UseCases.Abstractions;
 
 namespace ShortP2P.MessengerServer.UseCases.Messages;
 
+public sealed record SubmitDeliveryReceiptCommand(
+    string CallerNetworkId,
+    string DeviceId,
+    string MessageId,
+    DateTime ReceivedAtUtc);
+
 public sealed class SubmitDeliveryReceiptUseCase(
     IMessageRepository messages,
     IMessageCache messageCache,
+    IMessageInboxRepository messageInbox,
+    IMessageInboxCache messageInboxCache,
     IDeliveryTicketRepository tickets,
     IDeliveryTicketCache ticketCache,
     MessengerCacheOptions options)
@@ -14,12 +22,15 @@ public sealed class SubmitDeliveryReceiptUseCase(
         SubmitDeliveryReceiptCommand command,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(command.CallerNetworkId) || string.IsNullOrWhiteSpace(command.MessageId))
-            throw UseCaseException.Validation("CallerNetworkId and messageId are required.");
+        if (string.IsNullOrWhiteSpace(command.CallerNetworkId) ||
+            string.IsNullOrWhiteSpace(command.MessageId) ||
+            string.IsNullOrWhiteSpace(command.DeviceId))
+            throw UseCaseException.Validation("CallerNetworkId, deviceId and messageId are required.");
 
         StorageAccess.EnsureAnyStoreEnabled(options);
 
         var caller = command.CallerNetworkId.Trim();
+        var deviceId = command.DeviceId.Trim();
         var messageId = command.MessageId.Trim();
 
         Domain.Message? message = null;
@@ -66,5 +77,62 @@ public sealed class SubmitDeliveryReceiptUseCase(
         var results = await Task.WhenAll(writes).ConfigureAwait(false);
         if (!results.Any(ok => ok))
             throw UseCaseException.Unavailable("Failed to store delivery receipt: cache and repository are unavailable.");
+
+        // Delete this device's inbox copy; GC message when no copies remain.
+        if (options.CacheEnabled)
+        {
+            await StorageAccess
+                .TryExecuteAsync(() => messageInboxCache.RemoveAsync(messageId, deviceId, cancellationToken), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (options.RepositoryEnabled)
+        {
+            await StorageAccess
+                .TryExecuteAsync(() => messageInbox.RemoveAsync(messageId, deviceId, cancellationToken), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var remaining = 0;
+        if (options.CacheEnabled)
+        {
+            try
+            {
+                remaining = Math.Max(remaining, await messageInboxCache.CountForMessageAsync(messageId, cancellationToken).ConfigureAwait(false));
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        if (options.RepositoryEnabled)
+        {
+            try
+            {
+                remaining = Math.Max(remaining, await messageInbox.CountForMessageAsync(messageId, cancellationToken).ConfigureAwait(false));
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        if (remaining == 0)
+        {
+            if (options.CacheEnabled)
+            {
+                await StorageAccess
+                    .TryExecuteAsync(() => messageCache.RemoveByIdsAsync([messageId], cancellationToken), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (options.RepositoryEnabled)
+            {
+                await StorageAccess
+                    .TryExecuteAsync(() => messages.RemoveByIdsAsync([messageId], cancellationToken), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
     }
 }

@@ -12,29 +12,10 @@ namespace ShortP2P.MessengerServer.Api.Controllers;
 [Authorize]
 [Route($"{ApiRoutes.Prefix}/messages")]
 public sealed class MessagesController(
-    GetMessagesUseCase getMessagesUseCase,
     SendMessageUseCase sendMessageUseCase,
     SubmitDeliveryReceiptUseCase submitReceiptUseCase,
     GetDeliveryReceiptsUseCase getReceiptsUseCase) : ControllerBase
 {
-    [HttpGet]
-    public async Task<IActionResult> GetMessagesAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var caller = HttpContext.RequireNetworkId();
-            var list = await getMessagesUseCase
-                .ExecuteAsync(new GetMessagesQuery(caller), cancellationToken)
-                .ConfigureAwait(false);
-
-            return Ok(list.Select(x => x.ToDto()).ToArray());
-        }
-        catch (UseCaseException ex)
-        {
-            return this.ToApiErrorResult(ex);
-        }
-    }
-
     [HttpPost]
     public async Task<IActionResult> SendMessageAsync(
         [FromBody] MessageDto message,
@@ -66,8 +47,11 @@ public sealed class MessagesController(
         try
         {
             var caller = HttpContext.RequireNetworkId();
+            var deviceId = HttpContext.RequireDeviceId();
             await submitReceiptUseCase
-                .ExecuteAsync(new SubmitDeliveryReceiptCommand(caller, request.MessageId, request.ReceivedAtUtc), cancellationToken)
+                .ExecuteAsync(
+                    new SubmitDeliveryReceiptCommand(caller, deviceId, request.MessageId, request.ReceivedAtUtc),
+                    cancellationToken)
                 .ConfigureAwait(false);
 
             return Accepted();
@@ -96,4 +80,3 @@ public sealed class MessagesController(
         }
     }
 }
-

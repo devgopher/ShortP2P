@@ -25,7 +25,7 @@ public sealed class ChatRecord
 
 public sealed class ChatRequestRecord
 {
-    public long Id { get; set; }
+    public string RequestId { get; set; } = "";
     public string RequesterNetworkId { get; set; } = "";
     public string TargetNetworkId { get; set; } = "";
     public string PublicKey { get; set; } = "";
@@ -33,6 +33,7 @@ public sealed class ChatRequestRecord
 
     public ChatRequest ToDomain() => new()
     {
+        RequestId = RequestId,
         RequesterNetworkId = RequesterNetworkId,
         TargetNetworkId = TargetNetworkId,
         PublicKey = PublicKey,
@@ -41,11 +42,19 @@ public sealed class ChatRequestRecord
 
     public static ChatRequestRecord FromDomain(ChatRequest request) => new()
     {
+        RequestId = request.RequestId,
         RequesterNetworkId = request.RequesterNetworkId,
         TargetNetworkId = request.TargetNetworkId,
         PublicKey = request.PublicKey,
         CreatedAtUtc = request.CreatedAtUtc
     };
+}
+
+public sealed class ChatRequestInboxRecord
+{
+    public string RequestId { get; set; } = "";
+    public string TargetNetworkId { get; set; } = "";
+    public string DeviceId { get; set; } = "";
 }
 
 public sealed class CryptoKeysRecord
@@ -72,12 +81,14 @@ public sealed class CryptoKeysRecord
 public sealed class ClientStatusRecord
 {
     public string NetworkId { get; set; } = "";
+    public string DeviceId { get; set; } = "";
     public ClientOnlineStatus Status { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 
     public ClientStatuses ToDomain() => new()
     {
         NetworkId = NetworkId,
+        DeviceId = DeviceId,
         Status = Status,
         CreatedAtUtc = CreatedAtUtc
     };
@@ -85,6 +96,7 @@ public sealed class ClientStatusRecord
     public static ClientStatusRecord FromDomain(ClientStatuses status) => new()
     {
         NetworkId = status.NetworkId,
+        DeviceId = status.DeviceId,
         Status = status.Status,
         CreatedAtUtc = status.CreatedAtUtc
     };
@@ -118,6 +130,13 @@ public sealed class MessageRecord
         UpdatedUtc = message.UpdatedUtc,
         EncryptedDataBase64 = message.EncryptedDataBase64
     };
+}
+
+public sealed class MessageInboxRecord
+{
+    public string MessageId { get; set; } = "";
+    public string TgtNetworkId { get; set; } = "";
+    public string DeviceId { get; set; } = "";
 }
 
 public sealed class DeliveryTicketRecord

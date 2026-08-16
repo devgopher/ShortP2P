@@ -18,4 +18,13 @@ public static class HttpContextExtensions
 
         return networkId;
     }
+
+    public static string RequireDeviceId(this HttpContext http)
+    {
+        var deviceId = http.User.FindFirstValue(JwtAuthTokenService.DeviceIdClaimType);
+        if (string.IsNullOrWhiteSpace(deviceId))
+            throw UseCaseException.Unauthorized("Missing device id claim.");
+
+        return deviceId;
+    }
 }

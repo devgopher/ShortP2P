@@ -1,11 +1,14 @@
 using ShortP2P.MessengerServer.UseCases.Abstractions;
+using ShortP2P.MessengerServer.UseCases.Inbox;
 
 namespace ShortP2P.MessengerServer.UseCases.Messages;
 
 public sealed class SendMessageUseCase(
     IMessageRepository messages,
     IMessageCache messageCache,
-    MessengerCacheOptions options)
+    MessengerCacheOptions options,
+    DeviceFanoutService fanout,
+    IInboxWaitService inboxWait)
 {
     public async Task ExecuteAsync(SendMessageCommand command, CancellationToken cancellationToken = default)
     {
@@ -56,5 +59,8 @@ public sealed class SendMessageUseCase(
         var results = await Task.WhenAll(writes).ConfigureAwait(false);
         if (!results.Any(ok => ok))
             throw UseCaseException.Unavailable("Failed to store message: cache and repository are unavailable.");
+
+        await fanout.FanOutMessageAsync(message, cancellationToken).ConfigureAwait(false);
+        inboxWait.Notify(message.TgtNetworkId);
     }
 }

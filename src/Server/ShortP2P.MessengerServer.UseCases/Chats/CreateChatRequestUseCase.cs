@@ -1,5 +1,6 @@
 using ShortP2P.MessengerServer.Domain;
 using ShortP2P.MessengerServer.UseCases.Abstractions;
+using ShortP2P.MessengerServer.UseCases.Inbox;
 
 namespace ShortP2P.MessengerServer.UseCases.Chats;
 
@@ -7,6 +8,8 @@ public sealed class CreateChatRequestUseCase(
     IChatRepository chats,
     IChatRequestRepository chatRequests,
     ICryptoKeysRepository cryptoKeys,
+    DeviceFanoutService fanout,
+    IInboxWaitService inboxWait,
     IClock clock)
 {
     public async Task ExecuteAsync(CreateChatRequestCommand command, CancellationToken cancellationToken = default)
@@ -38,15 +41,17 @@ public sealed class CreateChatRequestUseCase(
                 cancellationToken).ConfigureAwait(false);
         }
 
-        await chatRequests.AddAsync(
-            new ChatRequest
-            {
-                RequesterNetworkId = caller,
-                TargetNetworkId = target,
-                PublicKey = command.PublicKey,
-                CreatedAtUtc = now
-            },
-            cancellationToken).ConfigureAwait(false);
+        var request = new ChatRequest
+        {
+            RequestId = Guid.NewGuid().ToString("N"),
+            RequesterNetworkId = caller,
+            TargetNetworkId = target,
+            PublicKey = command.PublicKey,
+            CreatedAtUtc = now
+        };
+
+        await chatRequests.AddAsync(request, cancellationToken).ConfigureAwait(false);
+        await fanout.FanOutChatRequestAsync(request, cancellationToken).ConfigureAwait(false);
 
         await cryptoKeys.UpsertAsync(
             new CryptoKeys
@@ -56,5 +61,7 @@ public sealed class CreateChatRequestUseCase(
                 PublicKey = command.PublicKey
             },
             cancellationToken).ConfigureAwait(false);
+
+        inboxWait.Notify(target);
     }
 }

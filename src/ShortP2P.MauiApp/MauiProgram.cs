@@ -69,6 +69,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<ChatSessionCache>();
         builder.Services.AddSingleton<P2pCryptoSessionCache>();
         builder.Services.AddSingleton<IMessengerServerRepository, SqliteMessengerServerRepository>();
+        builder.Services.AddSingleton<DeviceIdProvider>();
         builder.Services.AddSingleton<MessengerServerManager>();
         builder.Services.AddSingleton<MessengerServerSyncService>();
 #if ANDROID

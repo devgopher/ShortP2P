@@ -92,7 +92,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         }
     }
 
-    /// <summary>Optional HTTPS messenger-server sync (KeepAlive, ChatRequest, messages).</summary>
+    /// <summary>Optional HTTPS messenger-server sync (long-poll inbox, ChatRequest, messages).</summary>
     public MessengerServerSyncService? MessengerServers { get; }
 
     private static MessengerServerDirectoryEntry ToDirectoryEntry(ClientPresenceDto client)

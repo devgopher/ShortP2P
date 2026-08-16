@@ -13,4 +13,6 @@ public interface IMessageRepository
         CancellationToken cancellationToken = default);
 
     Task RemoveByIdsAsync(IReadOnlyCollection<string> messageIds, CancellationToken cancellationToken = default);
+
+    Task RemoveOlderThanAsync(DateTime cutoffUtc, CancellationToken cancellationToken = default);
 }

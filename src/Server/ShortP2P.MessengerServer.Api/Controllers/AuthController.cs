@@ -22,7 +22,7 @@ public sealed class AuthController(
         try
         {
             await registerUseCase.ExecuteAsync(
-                new RegisterClientCommand(request.Nick, request.NetworkId, request.Password),
+                new RegisterClientCommand(request.Nick, request.NetworkId, request.Password, request.DeviceId),
                 cancellationToken).ConfigureAwait(false);
 
             return StatusCode(StatusCodes.Status201Created);
@@ -42,7 +42,7 @@ public sealed class AuthController(
         try
         {
             var result = await loginUseCase.ExecuteAsync(
-                new LoginClientCommand(request.NetworkId, request.Password),
+                new LoginClientCommand(request.NetworkId, request.Password, request.DeviceId),
                 cancellationToken).ConfigureAwait(false);
 
             return Ok(new LoginResponse
@@ -57,4 +57,3 @@ public sealed class AuthController(
         }
     }
 }
-

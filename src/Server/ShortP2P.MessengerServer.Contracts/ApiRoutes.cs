@@ -16,6 +16,8 @@ public static class ApiRoutes
     public const string Messages = Prefix + "/messages";
     public const string MessageReceipts = Prefix + "/messages/receipts";
 
-    public const string KeepAlive = Prefix + "/keepalive";
+    /// <summary>GET long-poll inbox: messages + chat requests for the caller's device.</summary>
+    public const string EventsPoll = Prefix + "/events/poll";
+
     public const string Clients = Prefix + "/clients";
 }

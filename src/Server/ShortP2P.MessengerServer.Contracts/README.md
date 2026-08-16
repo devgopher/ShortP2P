@@ -16,20 +16,18 @@
 
 | Метод | Путь | Описание |
 |-------|------|----------|
-| `POST` | `/api/v1/auth/register` | Регистрация (nick, networkId, password) |
-| `POST` | `/api/v1/auth/login` | Авторизация (networkId, password) → token |
+| `POST` | `/api/v1/auth/register` | Регистрация (nick, networkId, password, deviceId) |
+| `POST` | `/api/v1/auth/login` | Авторизация → JWT (`network_id` + `device_id`) |
 | `GET` | `/api/v1/server/certificate` | Fingerprint сертификата сервера |
 | `GET` | `/api/v1/chats?networkId=` | Список чатов клиента |
-| `POST` | `/api/v1/chats/requests` | Запрос чата (publicKey, targetNetworkId) |
-| `GET` | `/api/v1/chats/requests` | Входящие запросы чата |
-| `GET` | `/api/v1/messages` | Сообщения для текущего networkId |
-| `POST` | `/api/v1/messages` | Отправка `MessageDto` |
-| `POST` | `/api/v1/messages/receipts` | Отправка квитанции |
-| `GET` | `/api/v1/messages/receipts` | Все квитанции для текущего networkId |
-| `POST` | `/api/v1/keepalive` | KeepAlive |
-| `GET` | `/api/v1/clients` | Список клиентов и статус (Online/Offline) |
+| `POST` | `/api/v1/chats/requests` | Запрос чата (fan-out на устройства tgt) |
+| `POST` | `/api/v1/messages` | Отправка `MessageDto` (fan-out) |
+| `POST` | `/api/v1/messages/receipts` | Квитанция; удаляет inbox-копию устройства |
+| `GET` | `/api/v1/messages/receipts` | Квитанции для текущего networkId |
+| `GET` | `/api/v1/events/poll` | Long-poll inbox (messages + chatRequests) |
+| `GET` | `/api/v1/clients` | Presence (Online если любое устройство в OnlineTimeout) |
 
-Даты — UTC. `encryptedDataBase64` — opaque (сервер не расшифровывает).
+`deviceId` — 64 lowercase hex (SHA-256 от install GUID). Даты — UTC. `encryptedDataBase64` — opaque.
 
 ## Сборка
 

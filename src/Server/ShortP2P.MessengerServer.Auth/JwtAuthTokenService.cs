@@ -11,8 +11,9 @@ namespace ShortP2P.MessengerServer.Auth;
 public sealed class JwtAuthTokenService(IOptions<AuthOptions> options, IClock clock) : IAuthTokenService
 {
     public const string NetworkIdClaimType = "network_id";
+    public const string DeviceIdClaimType = "device_id";
 
-    public AuthToken IssueToken(string networkId)
+    public AuthToken IssueToken(string networkId, string deviceId)
     {
         var opts = options.Value;
         var expires = clock.UtcNow.Add(opts.TokenLifetime);
@@ -23,6 +24,7 @@ public sealed class JwtAuthTokenService(IOptions<AuthOptions> options, IClock cl
         {
             new Claim(JwtRegisteredClaimNames.Sub, networkId),
             new Claim(NetworkIdClaimType, networkId),
+            new Claim(DeviceIdClaimType, deviceId),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N"))
         };
 

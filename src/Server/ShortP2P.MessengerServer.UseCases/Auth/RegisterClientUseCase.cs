@@ -3,6 +3,8 @@ using ShortP2P.MessengerServer.UseCases.Abstractions;
 
 namespace ShortP2P.MessengerServer.UseCases.Auth;
 
+public sealed record RegisterClientCommand(string Nick, string NetworkId, string Password, string DeviceId);
+
 public sealed class RegisterClientUseCase(
     IClientAccountRepository accounts,
     IClientStatusRepository statuses,
@@ -18,8 +20,12 @@ public sealed class RegisterClientUseCase(
             throw UseCaseException.Validation("Nick, networkId and password are required.");
         }
 
+        if (!DeviceIdRules.IsValid(command.DeviceId?.Trim()))
+            throw UseCaseException.Validation("DeviceId must be 64 lowercase hex characters (SHA-256).");
+
         var nick = command.Nick.Trim();
         var networkId = command.NetworkId.Trim();
+        var deviceId = command.DeviceId.Trim();
 
         if (await accounts.FindByNetworkIdAsync(networkId, cancellationToken).ConfigureAwait(false) != null)
             throw UseCaseException.Conflict("NetworkId is already registered.");
@@ -45,6 +51,7 @@ public sealed class RegisterClientUseCase(
             new ClientStatuses
             {
                 NetworkId = networkId,
+                DeviceId = deviceId,
                 Status = ClientOnlineStatus.Offline,
                 CreatedAtUtc = now
             },
