@@ -67,7 +67,7 @@ public sealed class InfrastructureBuilder
     /// </summary>
     public InfrastructureBuilder WithCachePromotion()
     {
-        _services.AddHostedService<ExpiredCachePromotionHostedService>();
+       // _services.AddHostedService<ExpiredCachePromotionHostedService>();
         return this;
     }
 }
