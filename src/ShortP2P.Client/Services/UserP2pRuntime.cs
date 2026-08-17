@@ -101,7 +101,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         return new MessengerServerDirectoryEntry(
             client.NetworkId.Trim(),
             client.Nick.Trim(),
-            string.Equals(client.Status, "Online", StringComparison.OrdinalIgnoreCase),
+            client.IsOnline,
             new DateTimeOffset(lastSeen));
     }
 

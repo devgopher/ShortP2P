@@ -190,9 +190,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Delivers an already-built chat wire to all ready messenger servers (E2EE envelope),
-    /// in parallel with up to <see cref="MaxSendWorkers"/> concurrent requests.
-    /// Returns true if at least one server accepted the message.
+    /// Delivers an already-built chat wire through trusted messenger servers where the peer is registered.
+    /// Returns true if at least one such server accepted the message.
     /// </summary>
     public async Task<bool> TryDeliverWireAsync(
         ChatEntity chat,
@@ -228,8 +227,22 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             return false;
         }
 
+        var peerId = chat.PeerNetworkIdShort.Trim();
+        if (peerId.Length == 0)
+            return false;
+
         var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
-        if (ready.Count == 0)
+        var targets = new List<MessengerServerConnection>(ready.Count);
+        foreach (var conn in ready)
+        {
+            if (!_manager.AllowsTraffic(conn))
+                continue;
+            if (!await PeerRegisteredOnTrustedServerAsync(conn, peerId, cancellationToken).ConfigureAwait(false))
+                continue;
+            targets.Add(conn);
+        }
+
+        if (targets.Count == 0)
             return false;
 
         var now = DateTime.UtcNow;
@@ -237,17 +250,17 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         {
             MessageId = Guid.NewGuid().ToString("N"),
             SrcNetworkId = user.NetworkIdShort.Trim(),
-            TgtNetworkId = chat.PeerNetworkIdShort.Trim(),
+            TgtNetworkId = peerId,
             CreatedUtc = now,
             UpdatedUtc = now,
             EncryptedDataBase64 = encrypted
         };
 
-        var degree = Math.Clamp(ready.Count, 1, MaxSendWorkers);
+        var degree = Math.Clamp(targets.Count, 1, MaxSendWorkers);
         var successCount = 0;
 
         await Parallel.ForEachAsync(
-            ready,
+            targets,
             new ParallelOptions
             {
                 MaxDegreeOfParallelism = degree,
@@ -255,7 +268,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             },
             async (conn, ct) =>
             {
-                if (!_manager.AllowsTraffic(conn))
+                if (!_manager.AllowsTraffic(conn) ||
+                    !_manager.IsClientRegisteredOnServer(conn.Entity.Id, peerId))
                     return;
                 try
                 {
@@ -290,6 +304,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                     .ConfigureAwait(false);
                 sw.Stop();
                 _manager.RecordProbeSuccess(conn.Entity.Id, sw.Elapsed);
+                _manager.ReplaceRegisteredClients(conn.Entity.Id, list.Select(c => c.NetworkId));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -312,17 +327,39 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         return byId.Values.ToArray();
     }
 
+    private async Task<bool> PeerRegisteredOnTrustedServerAsync(
+        MessengerServerConnection connection,
+        string peerNetworkId,
+        CancellationToken cancellationToken)
+    {
+        if (!_manager.AllowsTraffic(connection))
+            return false;
+
+        if (_manager.IsClientRegisteredOnServer(connection.Entity.Id, peerNetworkId))
+            return true;
+
+        try
+        {
+            var list = await TrackAsync(connection, () => connection.Api.GetClientsAsync(cancellationToken))
+                .ConfigureAwait(false);
+            _manager.ReplaceRegisteredClients(connection.Entity.Id, list.Select(c => c.NetworkId));
+            return _manager.IsClientRegisteredOnServer(connection.Entity.Id, peerNetworkId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "GetClients failed while checking registration on {BaseUrl}", connection.Entity.BaseUrl);
+            return false;
+        }
+    }
+
     private static bool PreferClient(ClientPresenceDto candidate, ClientPresenceDto existing)
     {
-        var candidateOnline = IsOnline(candidate);
-        var existingOnline = IsOnline(existing);
+        var candidateOnline = candidate.IsOnline;
+        var existingOnline = existing.IsOnline;
         if (candidateOnline != existingOnline)
             return candidateOnline;
         return candidate.LastSeenAtUtc > existing.LastSeenAtUtc;
     }
-
-    private static bool IsOnline(ClientPresenceDto client) =>
-        string.Equals(client.Status, "Online", StringComparison.OrdinalIgnoreCase);
 
 
     private async Task LongPollSupervisorAsync(CancellationToken cancellationToken)

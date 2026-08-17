@@ -23,6 +23,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
     private readonly DeviceIdProvider _deviceId;
     private readonly ConcurrentDictionary<int, MessengerServerConnection> _connections = new();
     private readonly ConcurrentDictionary<int, MessengerServerRankStats> _rankStats = new();
+    private readonly ConcurrentDictionary<int, HashSet<string>> _registeredClients = new();
     private readonly ILogger<MessengerServerManager> _logger;
     private readonly IMessengerServerRepository _repository;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -67,6 +68,32 @@ public sealed class MessengerServerManager : IAsyncDisposable
 
     public bool IsServerAvailable(int serverId) => GetRankStats(serverId).IsAvailable;
 
+    /// <summary>Replaces the known registered-client snapshot for a trusted server (from GetClients).</summary>
+    public void ReplaceRegisteredClients(int serverId, IEnumerable<string> networkIds)
+    {
+        ArgumentNullException.ThrowIfNull(networkIds);
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var id in networkIds)
+        {
+            var trimmed = id.Trim();
+            if (trimmed.Length > 0)
+                set.Add(trimmed);
+        }
+
+        _registeredClients[serverId] = set;
+    }
+
+    public bool IsClientRegisteredOnServer(int serverId, string networkId)
+    {
+        if (string.IsNullOrWhiteSpace(networkId))
+            return false;
+        return _registeredClients.TryGetValue(serverId, out var set) &&
+               set.Contains(networkId.Trim());
+    }
+
+    public void ClearRegisteredClients(int serverId) =>
+        _registeredClients.TryRemove(serverId, out _);
+
     public void RecordRequestSuccess(int serverId)
     {
         var stats = _rankStats.GetOrAdd(serverId, _ => new MessengerServerRankStats());
@@ -91,7 +118,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
     public void RecordProbeSuccess(int serverId, TimeSpan roundTrip) =>
         RecordKeepAliveSuccess(serverId, roundTrip);
 
-    public void RecordKeepAliveSuccess(int serverId, TimeSpan roundTrip)
+    private void RecordKeepAliveSuccess(int serverId, TimeSpan roundTrip)
     {
         var stats = _rankStats.GetOrAdd(serverId, _ => new MessengerServerRankStats());
         var ms = Math.Max(0, (long)Math.Round(roundTrip.TotalMilliseconds));
@@ -103,7 +130,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
         }
     }
 
-    public IReadOnlyList<MessengerServerConnection> SortConnectionsByRank(
+    private IReadOnlyList<MessengerServerConnection> SortConnectionsByRank(
         IEnumerable<MessengerServerConnection> connections) =>
         connections
             .OrderBy(c => GetRankStatsRef(c.Entity.Id),
@@ -365,6 +392,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
             if (_connections.TryRemove(serverId, out var conn))
                 await conn.DisposeAsync().ConfigureAwait(false);
             _rankStats.TryRemove(serverId, out _);
+            _registeredClients.TryRemove(serverId, out _);
             await _repository.DeleteAsync(serverId, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Messenger server deleted: id={Id}", serverId);
         }
@@ -660,6 +688,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
         entity.Active = false;
         await _repository.UpdateAsync(entity, cancellationToken).ConfigureAwait(false);
         await DropConnectionAsync(entity).ConfigureAwait(false);
+        _registeredClients.TryRemove(entity.Id, out _);
         _logger.LogWarning("Dropped connection to untrusted messenger server {BaseUrl} (id={Id})", entity.BaseUrl, entity.Id);
     }
 
@@ -745,6 +774,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
                 await conn.DisposeAsync().ConfigureAwait(false);
         }
 
+        _registeredClients.Clear();
         _gate.Dispose();
     }
 }

@@ -74,7 +74,9 @@ public static class DtoMapping
     {
         NetworkId = info.NetworkId,
         Nick = info.Nick,
-        Status = info.Status.ToString(),
+        Status = info.Status == ClientOnlineStatus.Online
+            ? ClientPresenceDto.StatusOnline
+            : ClientPresenceDto.StatusOffline,
         LastSeenAtUtc = info.LastSeenAtUtc
     };
 }
