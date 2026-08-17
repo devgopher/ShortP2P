@@ -104,7 +104,7 @@ public sealed class MessengerServersPage : ContentPage
         root.Add(new Label
         {
             Text =
-                "До 32 HTTPS-серверов. При добавлении сохраняется fingerprint сертификата; при несовпадении сервер помечается как недоверенный.",
+                "До 32 HTTPS-серверов. При добавлении сохраняется fingerprint сертификата. Если сервер не отвечает, он помечается как неактивный; при несовпадении fingerprint — как недоверенный.",
             FontSize = 12,
             TextColor = Colors.Gray
         }, 0, 0);
@@ -266,8 +266,8 @@ public sealed class MessengerServersPage : ContentPage
                     await DisplayAlert(
                         "Проверка сервера",
                         string.IsNullOrWhiteSpace(result.ErrorMessage)
-                            ? "Сервер недоступен. Статус не изменён."
-                            : $"Сервер недоступен. Статус не изменён.\n\n{result.ErrorMessage}",
+                            ? "Сервер недоступен. Помечен как неактивный (доверенный статус сохранён)."
+                            : $"Сервер недоступен. Помечен как неактивный (доверенный статус сохранён).\n\n{result.ErrorMessage}",
                         "OK").ConfigureAwait(true);
                     break;
                 case MessengerServerRecheckStatus.FingerprintMismatch:

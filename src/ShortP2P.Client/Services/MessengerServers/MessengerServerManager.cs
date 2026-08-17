@@ -204,7 +204,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
     /// <summary>
     /// Probes the server certificate. If reachable and the fingerprint still matches the pin,
     /// restores <see cref="MessengerServerEntity.Active"/> and <see cref="MessengerServerEntity.Trusted"/>.
-    /// Unreachable servers are left unchanged; a mismatch marks the server untrusted and inactive.
+    /// Unreachable servers are marked inactive (trust is kept). A fingerprint mismatch marks the server untrusted and inactive.
     /// </summary>
     public async Task<MessengerServerRecheckResult> RecheckServerAsync(
         int serverId,
@@ -230,6 +230,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Messenger server recheck failed for {BaseUrl}", entity.BaseUrl);
+                await PersistInactiveAsync(entity, cancellationToken).ConfigureAwait(false);
                 return new MessengerServerRecheckResult
                 {
                     Server = entity,
@@ -263,14 +264,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
                 };
             }
 
-            entity.Trusted = false;
-            entity.Active = false;
-            await _repository.UpdateAsync(entity, cancellationToken).ConfigureAwait(false);
-            if (_connections.TryGetValue(entity.Id, out var conn))
-            {
-                conn.UpdateEntity(entity);
-                conn.ClearSession();
-            }
+            await PersistUntrustedAsync(entity, cancellationToken).ConfigureAwait(false);
 
             _logger.LogError(
                 "Messenger server recheck mismatch for {BaseUrl}. Expected {Expected}, got {Actual}. Marked untrusted.",
@@ -449,29 +443,39 @@ public sealed class MessengerServerManager : IAsyncDisposable
         MessengerServerEntity entity,
         CancellationToken cancellationToken)
     {
-        ServerCertificateResponse cert;
+        ServerCertificateResponse? cert = null;
         try
         {
             cert = await connection.Api.GetServerCertificateAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            _logger.LogWarning(ex, "Certificate fetch failed for {BaseUrl}", entity.BaseUrl);
-
-            // Likely TLS pin rejection / MITM — treat as trust threat when we already have a pin.
-            if (!string.IsNullOrWhiteSpace(entity.FingerprintSha256))
+            throw;
+        }
+        catch (Exception pinnedEx)
+        {
+            _logger.LogWarning(pinnedEx, "Certificate fetch failed for {BaseUrl}", entity.BaseUrl);
+            try
             {
-                entity.Trusted = false;
-                entity.Active = false;
-                await _repository.UpdateAsync(entity, cancellationToken).ConfigureAwait(false);
-                connection.UpdateEntity(entity);
-                connection.ClearSession();
-                TrustThreatDetected?.Invoke(this,
-                    new MessengerServerTrustThreatEventArgs(entity, entity.FingerprintSha256, "(unreachable/mismatch)"));
+                await using var probe = MessengerServerConnection.CreateBootstrap(entity.BaseUrl, DefaultHttpTimeout);
+                cert = await probe.Api.GetServerCertificateAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception unreachableEx)
+            {
+                _logger.LogWarning(unreachableEx, "Messenger server unreachable for {BaseUrl}", entity.BaseUrl);
+                await PersistInactiveAsync(entity, cancellationToken).ConfigureAwait(false);
                 return false;
             }
+        }
 
-            throw;
+        if (cert is null)
+        {
+            await PersistInactiveAsync(entity, cancellationToken).ConfigureAwait(false);
+            return false;
         }
 
         var actual = MessengerServerConnection.NormalizeFingerprint(cert.FingerprintSha256);
@@ -479,11 +483,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
         if (MessengerServerConnection.FingerprintsEqual(expected, actual))
             return true;
 
-        entity.Trusted = false;
-        entity.Active = false;
-        await _repository.UpdateAsync(entity, cancellationToken).ConfigureAwait(false);
-        connection.UpdateEntity(entity);
-        connection.ClearSession();
+        await PersistUntrustedAsync(entity, cancellationToken).ConfigureAwait(false);
 
         _logger.LogError(
             "Messenger server certificate mismatch for {BaseUrl}. Expected {Expected}, got {Actual}. Marked untrusted.",
@@ -494,6 +494,31 @@ public sealed class MessengerServerManager : IAsyncDisposable
         TrustThreatDetected?.Invoke(this,
             new MessengerServerTrustThreatEventArgs(entity, expected, actual));
         return false;
+    }
+
+    /// <summary>Server is down / does not ping: deactivate, keep trusted.</summary>
+    private async Task PersistInactiveAsync(MessengerServerEntity entity, CancellationToken cancellationToken)
+    {
+        entity.Active = false;
+        await _repository.UpdateAsync(entity, cancellationToken).ConfigureAwait(false);
+        if (_connections.TryGetValue(entity.Id, out var conn))
+        {
+            conn.UpdateEntity(entity);
+            conn.ClearSession();
+        }
+    }
+
+    /// <summary>Fingerprint mismatch: untrusted and inactive.</summary>
+    private async Task PersistUntrustedAsync(MessengerServerEntity entity, CancellationToken cancellationToken)
+    {
+        entity.Trusted = false;
+        entity.Active = false;
+        await _repository.UpdateAsync(entity, cancellationToken).ConfigureAwait(false);
+        if (_connections.TryGetValue(entity.Id, out var conn))
+        {
+            conn.UpdateEntity(entity);
+            conn.ClearSession();
+        }
     }
 
     private async Task<MessengerServerConnection> GetOrCreateConnectionAsync(

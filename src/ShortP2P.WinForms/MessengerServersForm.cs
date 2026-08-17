@@ -71,8 +71,7 @@ public sealed class MessengerServersForm : Form
             ForeColor = SystemColors.GrayText,
             MaximumSize = new Size(740, 0),
             Text =
-                "До 32 HTTPS-серверов. При добавлении сохраняется fingerprint сертификата. " +
-                "При несовпадении сервер отключается и помечается как недоверенный."
+                "До 32 HTTPS-серверов. При добавлении сохраняется fingerprint сертификата."
         };
 
         var addRow = new FlowLayoutPanel
@@ -219,8 +218,8 @@ public sealed class MessengerServersForm : Form
                     MessageBox.Show(
                         this,
                         string.IsNullOrWhiteSpace(result.ErrorMessage)
-                            ? "Сервер недоступен. Статус не изменён."
-                            : $"Сервер недоступен. Статус не изменён.\n\n{result.ErrorMessage}",
+                            ? "Сервер недоступен. Помечен как неактивный (доверенный статус сохранён)."
+                            : $"Сервер недоступен. Помечен как неактивный (доверенный статус сохранён).\n\n{result.ErrorMessage}",
                         "Проверка сервера",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning);
