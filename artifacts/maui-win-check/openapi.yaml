@@ -1,0 +1,477 @@
+openapi: 3.0.3
+info:
+  title: ShortP2P Messenger Server API
+  version: 1.0.0
+  description: |
+    HTTPS JSON contract for the central messenger server (store-and-forward).
+    EncryptedData is opaque; the server does not decrypt payloads.
+    networkId is the short client id (base64url).
+    deviceId is lowercase hex SHA-256 (64) of a local install GUID.
+    Inbox is long-polled via GET /api/v1/events/poll; messages deleted on Submit per device (fan-out).
+    Presence is updated on every authenticated request; OnlineTimeout = 1.5 × MaxPollTimeoutSeconds.
+    Undelivered messages are retained at most 30 days.
+servers:
+  - url: https://{host}
+    variables:
+      host:
+        default: localhost:5001
+paths:
+  /api/v1/auth/register:
+    post:
+      operationId: register
+      summary: Register client
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Registered
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: NetworkId or nick already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      summary: Authorize client
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/server/certificate:
+    get:
+      operationId: getServerCertificate
+      summary: Server certificate fingerprint
+      tags: [Server]
+      responses:
+        '200':
+          description: Certificate fingerprint for pinning
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerCertificateResponse'
+
+  /api/v1/chats:
+    get:
+      operationId: getChats
+      summary: List chats for a client
+      tags: [Chats]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: networkId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Short network id of the client
+      responses:
+        '200':
+          description: Chats that include the given networkId
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatDto'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/chats/requests:
+    post:
+      operationId: createChatRequest
+      summary: Request a new chat with a subscriber
+      tags: [Chats]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequestCreateRequest'
+      responses:
+        '202':
+          description: Accepted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/messages:
+    post:
+      operationId: sendMessage
+      summary: Send encrypted message (fan-out to known target devices)
+      tags: [Messages]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageDto'
+      responses:
+        '202':
+          description: Accepted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/messages/receipts:
+    post:
+      operationId: submitDeliveryReceipt
+      summary: Submit a delivery receipt (deletes this device's inbox copy)
+      tags: [Messages]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryReceiptRequest'
+      responses:
+        '202':
+          description: Accepted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    get:
+      operationId: getDeliveryReceipts
+      summary: All delivery receipts for the current client's networkId
+      tags: [Messages]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Receipt array for this client
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeliveryReceiptDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/events/poll:
+    get:
+      operationId: pollEvents
+      summary: Long-poll inbox (messages + chat requests) for this device
+      tags: [Events]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: timeoutSeconds
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 30
+            default: 30
+      responses:
+        '200':
+          description: Inbox snapshot; messages listed until Submit; chat requests consumed per device
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventsPollResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/clients:
+    get:
+      operationId: getClients
+      summary: List registered clients and online/offline status
+      tags: [Presence]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Client presence array (online if any device touched within OnlineTimeout)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ClientPresenceDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/server-tech/power:
+    get:
+      operationId: getPower
+      summary: Host TotalPower score (anonymous)
+      tags: [ServerTech]
+      responses:
+        '200':
+          description: Cached TotalPower from LiteDB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerPowerResponse'
+
+  /api/v1/server-tech/free-powers:
+    get:
+      operationId: getFreePowers
+      summary: Host FreePowers percent (anonymous)
+      tags: [ServerTech]
+      responses:
+        '200':
+          description: Cached FreePowers from LiteDB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerFreePowersResponse'
+
+  /api/v1/server-tech/ping:
+    get:
+      operationId: ping
+      summary: Liveness ping (anonymous)
+      tags: [ServerTech]
+      responses:
+        '200':
+          description: Empty OK
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: Missing or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [nick, networkId, password, deviceId]
+      properties:
+        nick:
+          type: string
+        networkId:
+          type: string
+          description: Short network id (base64url)
+        password:
+          type: string
+          format: password
+        deviceId:
+          type: string
+          description: Lowercase hex SHA-256 (64 chars) of install GUID
+
+    LoginRequest:
+      type: object
+      required: [networkId, password, deviceId]
+      properties:
+        networkId:
+          type: string
+        password:
+          type: string
+          format: password
+        deviceId:
+          type: string
+          description: Lowercase hex SHA-256 (64 chars) of install GUID
+
+    EventsPollResponse:
+      type: object
+      required: [messages, chatRequests]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageDto'
+        chatRequests:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatRequestDto'
+
+    ServerPowerResponse:
+      type: object
+      required: [totalPower, measuredAtUtc]
+      properties:
+        totalPower:
+          type: number
+          format: double
+          minimum: 1
+          maximum: 100
+        measuredAtUtc:
+          type: string
+          format: date-time
+
+    ServerFreePowersResponse:
+      type: object
+      required: [freePowers, measuredAtUtc]
+      properties:
+        freePowers:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+        measuredAtUtc:
+          type: string
+          format: date-time
+
+    LoginResponse:
+      type: object
+      required: [token, expiresAtUtc]
+      properties:
+        token:
+          type: string
+        expiresAtUtc:
+          type: string
+          format: date-time
+
+    ServerCertificateResponse:
+      type: object
+      required: [fingerprintSha256]
+      properties:
+        fingerprintSha256:
+          type: string
+        subject:
+          type: string
+          nullable: true
+        notAfterUtc:
+          type: string
+          format: date-time
+          nullable: true
+
+    GetChatsRequest:
+      type: object
+      required: [networkId]
+      properties:
+        networkId:
+          type: string
+
+    ChatDto:
+      type: object
+      required: [chatId, networkIds, createdAtUtc]
+      properties:
+        chatId:
+          type: string
+        networkIds:
+          type: array
+          items:
+            type: string
+        createdAtUtc:
+          type: string
+          format: date-time
+
+    ChatRequestCreateRequest:
+      type: object
+      required: [publicKey, targetNetworkId]
+      properties:
+        publicKey:
+          type: string
+        targetNetworkId:
+          type: string
+
+    ChatRequestDto:
+      type: object
+      required: [networkId, publicKey]
+      properties:
+        networkId:
+          type: string
+        publicKey:
+          type: string
+
+    MessageDto:
+      type: object
+      required: [messageId, srcNetworkId, tgtNetworkId, createdUtc, updatedUtc, encryptedDataBase64]
+      properties:
+        messageId:
+          type: string
+        srcNetworkId:
+          type: string
+        tgtNetworkId:
+          type: string
+        createdUtc:
+          type: string
+          format: date-time
+        updatedUtc:
+          type: string
+          format: date-time
+        encryptedDataBase64:
+          type: string
+          description: Opaque ciphertext, base64
+
+    DeliveryReceiptRequest:
+      type: object
+      required: [messageId, receivedAtUtc]
+      properties:
+        messageId:
+          type: string
+        receivedAtUtc:
+          type: string
+          format: date-time
+
+    DeliveryReceiptDto:
+      type: object
+      required: [messageId, receivedAtUtc]
+      properties:
+        messageId:
+          type: string
+        receivedAtUtc:
+          type: string
+          format: date-time
+
+    ClientPresenceDto:
+      type: object
+      required: [networkId, nick, status, lastSeenAtUtc]
+      properties:
+        networkId:
+          type: string
+        nick:
+          type: string
+        status:
+          type: string
+          enum: [Online, Offline]
+        lastSeenAtUtc:
+          type: string
+          format: date-time
+
+    ApiError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string

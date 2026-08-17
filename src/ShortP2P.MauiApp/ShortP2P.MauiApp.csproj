@@ -1,8 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <!-- .NET 10 MAUI: add net10.0-ios;net10.0-maccatalyst to TargetFrameworks after `dotnet workload restore` -->
-        <TargetFrameworks>net10.0-windows10.0.19041.0;net10.0-android</TargetFrameworks>
+        <!-- Windows always. Android only when SDK is present (or -p:IncludeAndroid=true). Avoids XA5300 without Android SDK. -->
+        <TargetFrameworks>net10.0-windows10.0.19041.0</TargetFrameworks>
+        <TargetFrameworks Condition="'$(ShortP2PBuildAndroid)' == 'true'">$(TargetFrameworks);net10.0-android</TargetFrameworks>
 
         <OutputType>Exe</OutputType>
         <RootNamespace>ShortP2P.MauiApp</RootNamespace>
@@ -57,8 +58,8 @@
         <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="$(MicrosoftExtensionsVersion)" />
         <PackageReference Include="NLog" Version="5.3.4" />
         <PackageReference Include="NLog.Extensions.Logging" Version="5.3.11" />
-        <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.13" />
-        <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3.android" Version="2.1.13" />
+        <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.13" Condition="!$(TargetFramework.Contains('-android'))" />
+        <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3.android" Version="2.1.13" Condition="$(TargetFramework.Contains('-android'))" />
     </ItemGroup>
 
     <!--

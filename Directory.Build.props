@@ -1,8 +1,9 @@
 <Project>
     <!--
-      Android / MAUI (CLI): https://aka.ms/dotnet-android-install-sdk
+      Android / MAUI: https://aka.ms/dotnet-android-install-sdk
       - AndroidSdkDirectory: -p:AndroidSdkDirectory → ANDROID_SDK_ROOT → ANDROID_HOME → %LocalAppData%\Android\Sdk
-      - JavaSdkDirectory:    -p:JavaSdkDirectory → JAVA_HOME (must be a JDK with bin\jar, e.g. 17; not a JRE 8)
+      - JavaSdkDirectory:    -p:JavaSdkDirectory → JAVA_HOME (JDK with bin\jar, e.g. 17)
+      - IncludeAndroid=true: force Android TFMs even if auto-detect fails (still needs a real SDK)
     -->
     <PropertyGroup>
         <NetCoreTargetFramework>net10.0</NetCoreTargetFramework>
@@ -16,5 +17,25 @@
 
         <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and '$(JAVA_HOME)' != '' and $([MSBuild]::IsOSPlatform('windows')) and Exists('$(JAVA_HOME)\bin\jar.exe')">$(JAVA_HOME)</JavaSdkDirectory>
         <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and '$(JAVA_HOME)' != '' and !$([MSBuild]::IsOSPlatform('windows')) and Exists('$(JAVA_HOME)/bin/jar')">$(JAVA_HOME)</JavaSdkDirectory>
+
+        <!-- True when a usable Android SDK tree is present (platforms/ or platform-tools/). -->
+        <ShortP2PHasAndroidSdk Condition="'$(ShortP2PHasAndroidSdk)' == '' and '$(AndroidSdkDirectory)' != '' and Exists('$(AndroidSdkDirectory)\platforms')">true</ShortP2PHasAndroidSdk>
+        <ShortP2PHasAndroidSdk Condition="'$(ShortP2PHasAndroidSdk)' == '' and '$(AndroidSdkDirectory)' != '' and Exists('$(AndroidSdkDirectory)\platform-tools')">true</ShortP2PHasAndroidSdk>
+        <ShortP2PHasAndroidSdk Condition="'$(ShortP2PHasAndroidSdk)' == ''">false</ShortP2PHasAndroidSdk>
+
+        <ShortP2PBuildAndroid Condition="'$(IncludeAndroid)' == 'true'">true</ShortP2PBuildAndroid>
+        <ShortP2PBuildAndroid Condition="'$(ShortP2PBuildAndroid)' == '' and '$(ShortP2PHasAndroidSdk)' == 'true'">true</ShortP2PBuildAndroid>
+        <ShortP2PBuildAndroid Condition="'$(ShortP2PBuildAndroid)' == ''">false</ShortP2PBuildAndroid>
     </PropertyGroup>
+
+    <!--
+      Android RID graph treats linux-arm64 as compatible with android-arm64, so NuGet pulls
+      SQLitePCLRaw.lib.e_sqlite3 linux .so into the APK instead of the Android AAR libs (DllNotFoundException).
+      Native SQLite for Android must come from SQLitePCLRaw.lib.e_sqlite3.android only.
+    -->
+    <ItemGroup Condition="$(TargetFramework.Contains('-android'))">
+        <PackageReference Update="SQLitePCLRaw.lib.e_sqlite3">
+            <ExcludeAssets>native</ExcludeAssets>
+        </PackageReference>
+    </ItemGroup>
 </Project>

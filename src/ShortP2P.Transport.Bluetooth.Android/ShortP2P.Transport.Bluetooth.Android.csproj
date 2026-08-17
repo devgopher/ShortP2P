@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
+    <!--
+      Real Android build when ShortP2PBuildAndroid=true (SDK detected or -p:IncludeAndroid=true).
+      Without SDK: empty net10.0 stub so the solution still loads/builds (no XA5300).
+    -->
+    <PropertyGroup Condition="'$(ShortP2PBuildAndroid)' == 'true'">
         <TargetFramework>net10.0-android</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
@@ -9,12 +13,23 @@
         <Description>Bluetooth Low Energy (GATT) transport for Android — тот же протокол, что Windows.</Description>
     </PropertyGroup>
 
-    <ItemGroup>
+    <PropertyGroup Condition="'$(ShortP2PBuildAndroid)' != 'true'">
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <RootNamespace>ShortP2P.Transport.Bluetooth.Android</RootNamespace>
+        <EnableDefaultItems>false</EnableDefaultItems>
+        <IsPackable>false</IsPackable>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+        <Description>Stub (Android SDK not installed). Set IncludeAndroid=true after installing Android SDK.</Description>
+    </PropertyGroup>
+
+    <ItemGroup Condition="'$(ShortP2PBuildAndroid)' == 'true'">
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="$(MicrosoftExtensionsVersion)" />
         <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3.android" Version="2.1.13" />
     </ItemGroup>
 
-    <ItemGroup>
+    <ItemGroup Condition="'$(ShortP2PBuildAndroid)' == 'true'">
         <ProjectReference Include="..\ShortP2P.Transport.Abstractions\ShortP2P.Transport.Abstractions.csproj" />
         <ProjectReference Include="..\ShortP2P.Transport\ShortP2P.Transport.csproj" />
     </ItemGroup>

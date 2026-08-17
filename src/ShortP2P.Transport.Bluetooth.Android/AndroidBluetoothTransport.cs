@@ -329,7 +329,7 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
     private string LocalBluetoothEndpoint()
     {
         var addr = _adapter?.Address;
-        return string.IsNullOrWhiteSpace(addr) ? "BLE:local" : addr.Replace('-', ':', StringComparison.Ordinal);
+        return string.IsNullOrWhiteSpace(addr) ? "BLE:local" : addr.Replace('-', ':');
     }
 
     private async Task PushNetworkIdToBondedPeersAsync(CancellationToken ct)
@@ -424,7 +424,7 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
                     .ConfigureAwait(false);
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (System.OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // expected on stop
         }
@@ -457,7 +457,7 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
             {
                 await _advertisingDutyCycleTask.ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (System.OperationCanceledException)
             {
                 // expected on stop
             }
@@ -575,7 +575,7 @@ public sealed class AndroidBluetoothTransport(Context context, AndroidBluetoothT
                           && value.Length > 0;
             if (matches)
             {
-                RegisterServerConnectedPeer(device);
+                owner.RegisterServerConnectedPeer(device);
                 owner.OnInboundFromPeer(device, value);
             }
 

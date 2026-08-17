@@ -1,7 +1,8 @@
 # ShortP2P.MauiApp
 
-Клиентское приложение на **.NET MAUI** (сейчас в решении настроен таргет **Windows**; в `.csproj` указано, как добавить
-Android/iOS/Mac Catalyst после `dotnet workload restore`). Использует `ShortP2P.Client` как общую логику.
+Клиент на **.NET MAUI**. По умолчанию собирается **Windows**. **Android** включается автоматически, если найден Android SDK (`%LocalAppData%\Android\Sdk` или `ANDROID_HOME` / `ANDROID_SDK_ROOT`), либо явно: `-p:IncludeAndroid=true`.
+
+Без SDK ошибка **XA5300** больше не блокирует Windows-сборку. Установка SDK: https://aka.ms/dotnet-android-install-sdk
 
 ## Структура
 

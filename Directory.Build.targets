@@ -1,0 +1,14 @@
+<Project>
+    <!--
+      Android RID graph can pick linux-* libe_sqlite3.so from SQLitePCLRaw.lib.e_sqlite3 before the Android AAR,
+      which breaks SQLite at runtime (DllNotFoundException). Keep only SQLitePCLRaw.lib.e_sqlite3.android natives.
+    -->
+    <Target Name="_ShortP2PExcludeDesktopSqliteNativeAssets"
+              AfterTargets="ResolvePackageAssets"
+              Condition="'$(TargetFramework)' != '' and $(TargetFramework.Contains('-android'))">
+        <ItemGroup>
+            <NativeCopyLocalItems Remove="@(NativeCopyLocalItems)"
+                                  Condition="'%(NativeCopyLocalItems.NuGetPackageId)' == 'SQLitePCLRaw.lib.e_sqlite3'" />
+        </ItemGroup>
+    </Target>
+</Project>

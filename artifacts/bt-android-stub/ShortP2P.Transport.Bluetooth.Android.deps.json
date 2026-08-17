@@ -1,0 +1,23 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {
+      "ShortP2P.Transport.Bluetooth.Android/1.0.0": {
+        "runtime": {
+          "ShortP2P.Transport.Bluetooth.Android.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "ShortP2P.Transport.Bluetooth.Android/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

@@ -20,8 +20,11 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     /// <summary>Default long-poll wait requested from the server (seconds).</summary>
     public const int LongPollTimeoutSeconds = 25;
 
-    /// <summary>Max concurrent long-poll workers (one server per worker).</summary>
+    /// <summary>Max concurrent outbound SendMessage calls (and long-poll workers).</summary>
     public const int MaxLongPollWorkers = 3;
+
+    /// <summary>Alias: max parallel fan-out when posting a message to joined servers.</summary>
+    public const int MaxSendWorkers = MaxLongPollWorkers;
 
     private readonly AuthService _auth;
     private readonly ChatRepository _chats;
@@ -151,7 +154,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Tries to deliver an already-built chat wire via active servers (E2EE envelope).
+    /// Delivers an already-built chat wire to all ready messenger servers (E2EE envelope),
+    /// in parallel with up to <see cref="MaxSendWorkers"/> concurrent requests.
     /// Returns true if at least one server accepted the message.
     /// </summary>
     public async Task<bool> TryDeliverWireAsync(
@@ -203,23 +207,30 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             EncryptedDataBase64 = encrypted
         };
 
-        var any = false;
-        foreach (var conn in ready)
-        {
-            try
-            {
-                await TrackAsync(conn, () => conn.Api.SendMessageAsync(dto, cancellationToken))
-                    .ConfigureAwait(false);
-                any = true;
-                break;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogDebug(ex, "SendMessage failed on {BaseUrl}", conn.Entity.BaseUrl);
-            }
-        }
+        var degree = Math.Clamp(ready.Count, 1, MaxSendWorkers);
+        var successCount = 0;
 
-        return any;
+        await Parallel.ForEachAsync(
+            ready,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = degree,
+                CancellationToken = cancellationToken
+            },
+            async (conn, ct) =>
+            {
+                try
+                {
+                    await TrackAsync(conn, () => conn.Api.SendMessageAsync(dto, ct)).ConfigureAwait(false);
+                    Interlocked.Increment(ref successCount);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogDebug(ex, "SendMessage failed on {BaseUrl}", conn.Entity.BaseUrl);
+                }
+            }).ConfigureAwait(false);
+
+        return successCount > 0;
     }
 
     private async Task<IReadOnlyList<ClientPresenceDto>> ListRemoteClientsAsync(
