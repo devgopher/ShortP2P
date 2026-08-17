@@ -60,7 +60,7 @@ public sealed class WindowsBluetoothTransport : ITransport
 
     public ValueTask DisposeAsync()
     {
-        throw new NotImplementedException();
+        return ValueTask.CompletedTask;
     }
 
     public TransportKind Kind => TransportKind.Bluetooth;

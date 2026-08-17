@@ -36,6 +36,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
     private CancellationTokenSource? _cts;
     private Task? _longPollLoop;
+    private Task? _pingLoop;
     private bool _started;
 
     public MessengerServerSyncService(
@@ -63,6 +64,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
             _longPollLoop = Task.Run(() => LongPollSupervisorAsync(token), token);
+            _pingLoop = Task.Run(() => PingLoopAsync(token), token);
             _started = true;
         }
     }
@@ -71,6 +73,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     {
         CancellationTokenSource? cts;
         Task? longPoll;
+        Task? pingLoop;
         lock (_startGate)
         {
             if (!_started)
@@ -78,8 +81,10 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             _started = false;
             cts = _cts;
             longPoll = _longPollLoop;
+            pingLoop = _pingLoop;
             _cts = null;
             _longPollLoop = null;
+            _pingLoop = null;
         }
 
         if (cts != null)
@@ -95,12 +100,41 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         }
 
         await WaitIgnoreCancelAsync(longPoll).ConfigureAwait(false);
+        await WaitIgnoreCancelAsync(pingLoop).ConfigureAwait(false);
         cts?.Dispose();
     }
 
     /// <summary>Discovery priority hook: auth + GetClients before UDP/BT.</summary>
     public Task RunDiscoveryRoundAsync(CancellationToken cancellationToken) =>
         ProbeAndListRemoteClientsAsync(cancellationToken);
+
+    private async Task PingLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await _manager.PingActiveTrustedServersAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Messenger server ping round failed");
+            }
+
+            try
+            {
+                await Task.Delay(MessengerServerManager.PingPeriod, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+    }
 
     public async Task<IReadOnlyList<ClientPresenceDto>> ProbeAndListRemoteClientsAsync(
         CancellationToken cancellationToken)
@@ -136,6 +170,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
         foreach (var conn in ready)
         {
+            if (!_manager.AllowsTraffic(conn))
+                continue;
             try
             {
                 await TrackAsync(conn, () => conn.Api.CreateChatRequestAsync(
@@ -219,6 +255,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             },
             async (conn, ct) =>
             {
+                if (!_manager.AllowsTraffic(conn))
+                    return;
                 try
                 {
                     await TrackAsync(conn, () => conn.Api.SendMessageAsync(dto, ct)).ConfigureAwait(false);
@@ -242,6 +280,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         foreach (var conn in ready)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (!_manager.AllowsTraffic(conn))
+                continue;
             IReadOnlyList<ClientPresenceDto> list;
             var sw = Stopwatch.StartNew();
             try
@@ -340,6 +380,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     {
         while (!cancellationToken.IsCancellationRequested)
         {
+            if (!_manager.AllowsTraffic(connection))
+                break;
+
             try
             {
                 var sw = Stopwatch.StartNew();
@@ -348,6 +391,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                         () => connection.Api.PollEventsAsync(LongPollTimeoutSeconds, cancellationToken))
                     .ConfigureAwait(false);
                 sw.Stop();
+
+                if (!_manager.AllowsTraffic(connection))
+                    break;
 
                 if (inbox.Messages.Count > 0 ||
                     inbox.ChatRequests.Count > 0 ||
@@ -370,6 +416,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             }
             catch (Exception ex)
             {
+                if (!_manager.AllowsTraffic(connection))
+                    break;
+
                 _logger.LogDebug(ex, "Long-poll failed on {BaseUrl}", connection.Entity.BaseUrl);
                 try
                 {
@@ -389,6 +438,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         IReadOnlyList<ChatRequestDto> requests,
         CancellationToken cancellationToken)
     {
+        if (!_manager.AllowsTraffic(connection))
+            return;
+
         if (requests.Count == 0)
             return;
 
@@ -450,6 +502,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         IReadOnlyList<MessageDto> messages,
         CancellationToken cancellationToken)
     {
+        if (!_manager.AllowsTraffic(connection))
+            return;
+
         if (messages.Count == 0)
             return;
 
@@ -519,6 +574,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
     private async Task TrackAsync(MessengerServerConnection connection, Func<Task> action)
     {
+        if (!_manager.AllowsTraffic(connection))
+            throw new InvalidOperationException("Messenger server is not trusted.");
+
         try
         {
             await action().ConfigureAwait(false);
@@ -533,6 +591,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
     private async Task<T> TrackAsync<T>(MessengerServerConnection connection, Func<Task<T>> action)
     {
+        if (!_manager.AllowsTraffic(connection))
+            throw new InvalidOperationException("Messenger server is not trusted.");
+
         try
         {
             var result = await action().ConfigureAwait(false);

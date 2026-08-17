@@ -26,7 +26,7 @@ public sealed class MessengerServerEntity
     /// <summary>Password used for this server account (auto-generated on first register).</summary>
     public string AccountPassword { get; set; } = "";
 
-    /// <summary>Network id used on this server (usually local NetworkIdShort).</summary>
+    /// <summary>Network id.</summary>
     public string NetworkId { get; set; } = "";
 
     public string Nick { get; set; } = "";

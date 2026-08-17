@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using ShortP2P.Auth;
@@ -15,6 +16,8 @@ namespace ShortP2P.Client.Services.MessengerServers;
 public sealed class MessengerServerManager : IAsyncDisposable
 {
     public static readonly TimeSpan DefaultHttpTimeout = TimeSpan.FromSeconds(90);
+    public static readonly TimeSpan PingPeriod = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan PingTimeout = TimeSpan.FromSeconds(5);
 
     private readonly AuthService _auth;
     private readonly DeviceIdProvider _deviceId;
@@ -286,6 +289,44 @@ public sealed class MessengerServerManager : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Pings every active trusted server. Unreachable servers are marked inactive (trust kept);
+    /// a TLS/fingerprint mismatch marks the server untrusted.
+    /// </summary>
+    public async Task PingActiveTrustedServersAsync(CancellationToken cancellationToken = default)
+    {
+        if (_auth.CurrentUser == null)
+            return;
+
+        var servers = await ListActiveTrustedAsync(cancellationToken).ConfigureAwait(false);
+        if (servers.Count == 0)
+            return;
+
+        await Parallel.ForEachAsync(
+            servers,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Math.Clamp(servers.Count, 1, 8),
+                CancellationToken = cancellationToken
+            },
+            async (server, ct) =>
+            {
+                try
+                {
+                    await PingServerAsync(server, ct).ConfigureAwait(false);
+                }
+                catch (InvalidOperationException)
+                {
+                    // Inactive/untrusted — do not rewrite trust from a stale snapshot.
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "Messenger server ping failed for {BaseUrl}", server.BaseUrl);
+                    await PersistInactiveAsync(server, ct).ConfigureAwait(false);
+                }
+            }).ConfigureAwait(false);
+    }
+
     public async Task SetActiveAsync(int serverId, bool active, CancellationToken cancellationToken = default)
     {
         var user = RequireUser();
@@ -293,6 +334,12 @@ public sealed class MessengerServerManager : IAsyncDisposable
         try
         {
             var entity = await RequireOwnedServerAsync(user.Id, serverId, cancellationToken).ConfigureAwait(false);
+            if (active && !entity.Trusted)
+            {
+                throw new InvalidOperationException(
+                    "Cannot activate an untrusted messenger server. Remove it and add again only if you trust the new certificate.");
+            }
+
             entity.Active = active;
             await _repository.UpdateAsync(entity, cancellationToken).ConfigureAwait(false);
             if (_connections.TryGetValue(serverId, out var conn))
@@ -335,13 +382,27 @@ public sealed class MessengerServerManager : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
-        if (!entity.Active || !entity.Trusted)
+        if (!AllowsTraffic(entity))
             return null;
 
         var user = RequireUser();
-        var connection = await GetOrCreateConnectionAsync(entity, cancellationToken).ConfigureAwait(false);
+        MessengerServerConnection connection;
+        try
+        {
+            connection = await GetOrCreateConnectionAsync(entity, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+
+        if (!AllowsTraffic(connection))
+            return null;
 
         if (!await VerifyCertificateOrMarkUntrustedAsync(connection, entity, cancellationToken).ConfigureAwait(false))
+            return null;
+
+        if (!AllowsTraffic(connection))
             return null;
 
         if (connection.HasValidToken)
@@ -379,10 +440,17 @@ public sealed class MessengerServerManager : IAsyncDisposable
         return SortConnectionsByRank(ready);
     }
 
+    /// <summary>True when the client may connect, send, receive, or take presence from this server.</summary>
+    public static bool AllowsTraffic(MessengerServerEntity entity) =>
+        entity is { Active: true, Trusted: true };
+
+    public bool AllowsTraffic(MessengerServerConnection connection) =>
+        AllowsTraffic(connection.Entity);
+
     /// <summary>Ready connections that currently look available (no consecutive request failures).</summary>
     public IReadOnlyList<MessengerServerConnection> FilterAvailable(
         IEnumerable<MessengerServerConnection> connections) =>
-        SortConnectionsByRank(connections.Where(c => IsServerAvailable(c.Entity.Id)));
+        SortConnectionsByRank(connections.Where(c => AllowsTraffic(c) && IsServerAvailable(c.Entity.Id)));
 
     private async Task RegisterOrLoginAsync(
         MessengerServerConnection connection,
@@ -496,11 +564,88 @@ public sealed class MessengerServerManager : IAsyncDisposable
         return false;
     }
 
+    private async Task PingServerAsync(MessengerServerEntity entity, CancellationToken cancellationToken)
+    {
+        if (!AllowsTraffic(entity))
+            return;
+
+        var connection = await GetOrCreateConnectionAsync(entity, cancellationToken).ConfigureAwait(false);
+        if (!AllowsTraffic(connection))
+            return;
+        using var pingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        pingCts.CancelAfter(PingTimeout);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            await connection.Api.PingAsync(pingCts.Token).ConfigureAwait(false);
+            sw.Stop();
+            RecordKeepAliveSuccess(entity.Id, sw.Elapsed);
+            return;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception pingEx)
+        {
+            _logger.LogWarning(pingEx, "Ping failed for {BaseUrl}", entity.BaseUrl);
+        }
+
+        try
+        {
+            await using var probe = MessengerServerConnection.CreateBootstrap(entity.BaseUrl, PingTimeout);
+            using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            probeCts.CancelAfter(PingTimeout);
+            var cert = await probe.Api.GetServerCertificateAsync(probeCts.Token).ConfigureAwait(false);
+            var actual = MessengerServerConnection.NormalizeFingerprint(cert.FingerprintSha256);
+            var expected = MessengerServerConnection.NormalizeFingerprint(entity.FingerprintSha256);
+            if (!MessengerServerConnection.FingerprintsEqual(expected, actual))
+            {
+                await PersistUntrustedAsync(entity, cancellationToken).ConfigureAwait(false);
+                _logger.LogError(
+                    "Messenger server ping mismatch for {BaseUrl}. Expected {Expected}, got {Actual}. Marked untrusted.",
+                    entity.BaseUrl,
+                    expected,
+                    actual);
+                TrustThreatDetected?.Invoke(this,
+                    new MessengerServerTrustThreatEventArgs(entity, expected, actual));
+                return;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception unreachableEx)
+        {
+            _logger.LogWarning(unreachableEx, "Messenger server unreachable for {BaseUrl}", entity.BaseUrl);
+        }
+
+        await PersistInactiveAsync(entity, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Server is down / does not ping: deactivate, keep trusted.</summary>
     private async Task PersistInactiveAsync(MessengerServerEntity entity, CancellationToken cancellationToken)
     {
+        var latest = await _repository.GetByIdAsync(entity.Id, cancellationToken).ConfigureAwait(false);
+        if (latest == null || !latest.Trusted)
+        {
+            entity.Active = false;
+            entity.Trusted = false;
+            return;
+        }
+
+        if (!latest.Active)
+        {
+            entity.Active = false;
+            entity.Trusted = true;
+            return;
+        }
+
+        latest.Active = false;
+        await _repository.UpdateAsync(latest, cancellationToken).ConfigureAwait(false);
         entity.Active = false;
-        await _repository.UpdateAsync(entity, cancellationToken).ConfigureAwait(false);
+        entity.Trusted = latest.Trusted;
         if (_connections.TryGetValue(entity.Id, out var conn))
         {
             conn.UpdateEntity(entity);
@@ -508,16 +653,30 @@ public sealed class MessengerServerManager : IAsyncDisposable
         }
     }
 
-    /// <summary>Fingerprint mismatch: untrusted and inactive.</summary>
+    /// <summary>Fingerprint mismatch: untrusted and inactive. Drops the live HTTP session.</summary>
     private async Task PersistUntrustedAsync(MessengerServerEntity entity, CancellationToken cancellationToken)
     {
         entity.Trusted = false;
         entity.Active = false;
         await _repository.UpdateAsync(entity, cancellationToken).ConfigureAwait(false);
-        if (_connections.TryGetValue(entity.Id, out var conn))
+        await DropConnectionAsync(entity).ConfigureAwait(false);
+        _logger.LogWarning("Dropped connection to untrusted messenger server {BaseUrl} (id={Id})", entity.BaseUrl, entity.Id);
+    }
+
+    private async Task DropConnectionAsync(MessengerServerEntity entity)
+    {
+        if (!_connections.TryRemove(entity.Id, out var conn))
+            return;
+
+        try
         {
             conn.UpdateEntity(entity);
             conn.ClearSession();
+            await conn.DisposeAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // already torn down
         }
     }
 
@@ -525,8 +684,17 @@ public sealed class MessengerServerManager : IAsyncDisposable
         MessengerServerEntity entity,
         CancellationToken cancellationToken)
     {
+        var latest = await _repository.GetByIdAsync(entity.Id, cancellationToken).ConfigureAwait(false);
+        if (latest == null || !AllowsTraffic(latest))
+            throw new InvalidOperationException("Cannot connect to an inactive or untrusted messenger server.");
+
+        entity.Trusted = latest.Trusted;
+        entity.Active = latest.Active;
+
         if (_connections.TryGetValue(entity.Id, out var existing))
         {
+            if (!AllowsTraffic(existing))
+                throw new InvalidOperationException("Cannot connect to an inactive or untrusted messenger server.");
             existing.UpdateEntity(entity);
             return existing;
         }
@@ -536,9 +704,14 @@ public sealed class MessengerServerManager : IAsyncDisposable
         {
             if (_connections.TryGetValue(entity.Id, out existing))
             {
+                if (!AllowsTraffic(existing))
+                    throw new InvalidOperationException("Cannot connect to an inactive or untrusted messenger server.");
                 existing.UpdateEntity(entity);
                 return existing;
             }
+
+            if (!AllowsTraffic(entity))
+                throw new InvalidOperationException("Cannot connect to an inactive or untrusted messenger server.");
 
             var created = MessengerServerConnection.Create(entity, DefaultHttpTimeout);
             _connections[entity.Id] = created;
