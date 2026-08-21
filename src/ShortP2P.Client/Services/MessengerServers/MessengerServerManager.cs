@@ -17,6 +17,7 @@ namespace ShortP2P.Client.Services.MessengerServers;
 public sealed class MessengerServerManager : IAsyncDisposable
 {
     public static readonly TimeSpan DefaultHttpTimeout = TimeSpan.FromSeconds(90);
+    public static readonly TimeSpan BlobHttpTimeout = TimeSpan.FromMinutes(10);
     public static readonly TimeSpan PingPeriod = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan PingTimeout = TimeSpan.FromSeconds(5);
 
@@ -217,7 +218,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
 
             entity = await _repository.InsertAsync(entity, cancellationToken).ConfigureAwait(false);
 
-            var connection = MessengerServerConnection.Create(entity, DefaultHttpTimeout);
+            var connection = MessengerServerConnection.Create(entity, BlobHttpTimeout);
             _connections[entity.Id] = connection;
 
             try
@@ -754,7 +755,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
             if (!AllowsTraffic(entity))
                 throw new InvalidOperationException("Cannot connect to an inactive or untrusted messenger server.");
 
-            var created = MessengerServerConnection.Create(entity, DefaultHttpTimeout);
+            var created = MessengerServerConnection.Create(entity, BlobHttpTimeout);
             _connections[entity.Id] = created;
             return created;
         }

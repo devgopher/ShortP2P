@@ -22,6 +22,8 @@
 | `GET` | `/api/v1/chats?networkId=` | Список чатов клиента |
 | `POST` | `/api/v1/chats/requests` | Запрос чата (fan-out на устройства tgt) |
 | `POST` | `/api/v1/messages` | Отправка `MessageDto` (fan-out) |
+| `PUT` | `/api/v1/blobs/{blobId}` | Opaque encrypted attachment (`application/octet-stream`) |
+| `GET` | `/api/v1/blobs/{blobId}` | Скачать ciphertext вложения |
 | `POST` | `/api/v1/messages/receipts` | Квитанция; удаляет inbox-копию устройства |
 | `GET` | `/api/v1/messages/receipts` | Квитанции для текущего networkId |
 | `GET` | `/api/v1/events/poll` | Long-poll inbox (messages + chatRequests) |

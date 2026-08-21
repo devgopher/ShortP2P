@@ -26,6 +26,18 @@ public interface IMessengerServerApi
     /// <summary>POST <see cref="ApiRoutes.Messages"/> — send an encrypted message.</summary>
     Task SendMessageAsync(MessageDto message, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// PUT <see cref="ApiRoutes.Blobs"/>/{blobId} — store an opaque encrypted attachment (same envelope as messages).
+    /// </summary>
+    Task PutBlobAsync(
+        string blobId,
+        string targetNetworkId,
+        ReadOnlyMemory<byte> ciphertext,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>GET <see cref="ApiRoutes.Blobs"/>/{blobId} — download opaque ciphertext.</summary>
+    Task<byte[]> GetBlobAsync(string blobId, CancellationToken cancellationToken = default);
+
     /// <summary>POST <see cref="ApiRoutes.MessageReceipts"/> — submit a delivery receipt (deletes this device's inbox copy).</summary>
     Task SubmitDeliveryReceiptAsync(DeliveryReceiptRequest request, CancellationToken cancellationToken = default);
 

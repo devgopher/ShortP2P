@@ -9,6 +9,7 @@ using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Crypto;
 using ShortP2P.MessengerServer.Contracts.Dtos;
+using ShortP2P.MessengerServer.Http;
 
 namespace ShortP2P.Client.Services.MessengerServers;
 
@@ -231,17 +232,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         if (peerId.Length == 0)
             return false;
 
-        var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
-        var targets = new List<MessengerServerConnection>(ready.Count);
-        foreach (var conn in ready)
-        {
-            if (!_manager.AllowsTraffic(conn))
-                continue;
-            if (!await PeerRegisteredOnTrustedServerAsync(conn, peerId, cancellationToken).ConfigureAwait(false))
-                continue;
-            targets.Add(conn);
-        }
-
+        var targets = await CollectPeerServerTargetsAsync(peerId, cancellationToken).ConfigureAwait(false);
         if (targets.Count == 0)
             return false;
 
@@ -283,6 +274,177 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             }).ConfigureAwait(false);
 
         return successCount > 0;
+    }
+
+    /// <summary>
+    /// Encrypts an inner chat-wire (image/file frame) and PUTs it to trusted servers where the peer is registered.
+    /// Returns true if at least one server accepted the blob.
+    /// </summary>
+    public async Task<bool> TryUploadBlobAsync(
+        ChatEntity chat,
+        UserEntity user,
+        string blobId,
+        byte[] innerWire,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(chat);
+        ArgumentNullException.ThrowIfNull(user);
+        ArgumentException.ThrowIfNullOrWhiteSpace(blobId);
+        ArgumentNullException.ThrowIfNull(innerWire);
+
+        if (string.IsNullOrWhiteSpace(chat.PeerRsaPublicJson))
+            return false;
+
+        RsaPublicKey peerKey;
+        try
+        {
+            peerKey = RsaKeySerializer.DeserializePublic(chat.PeerRsaPublicJson);
+        }
+        catch
+        {
+            return false;
+        }
+
+        byte[] ciphertext;
+        try
+        {
+            ciphertext = MessengerServerPayloadCodec.Encrypt(innerWire, peerKey);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to encrypt blob for chat {ChatId}", chat.Id);
+            return false;
+        }
+
+        var peerId = chat.PeerNetworkIdShort.Trim();
+        if (peerId.Length == 0)
+            return false;
+
+        var targets = await CollectPeerServerTargetsAsync(peerId, cancellationToken).ConfigureAwait(false);
+        if (targets.Count == 0)
+            return false;
+
+        var degree = Math.Clamp(targets.Count, 1, MaxSendWorkers);
+        var successCount = 0;
+
+        await Parallel.ForEachAsync(
+            targets,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = degree,
+                CancellationToken = cancellationToken
+            },
+            async (conn, ct) =>
+            {
+                if (!_manager.AllowsTraffic(conn) ||
+                    !_manager.IsClientRegisteredOnServer(conn.Entity.Id, peerId))
+                    return;
+                try
+                {
+                    await TrackAsync(conn, () => conn.Api.PutBlobAsync(blobId, peerId, ciphertext, ct))
+                        .ConfigureAwait(false);
+                    Interlocked.Increment(ref successCount);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogDebug(ex, "PutBlob failed on {BaseUrl}", conn.Entity.BaseUrl);
+                }
+            }).ConfigureAwait(false);
+
+        return successCount > 0;
+    }
+
+    /// <summary>
+    /// GETs an opaque blob from trusted servers. Tries <paramref name="preferredBaseUrl"/> first, then rank order.
+    /// Returns null if every server responded 404 or failed.
+    /// </summary>
+    public async Task<byte[]?> TryDownloadBlobAsync(
+        string blobId,
+        string? preferredBaseUrl,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(blobId);
+
+        var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
+        var ordered = OrderConnectionsForBlobDownload(ready, preferredBaseUrl);
+        if (ordered.Count == 0)
+            return null;
+
+        foreach (var conn in ordered)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_manager.AllowsTraffic(conn))
+                continue;
+
+            try
+            {
+                var bytes = await TrackAsync(conn, () => conn.Api.GetBlobAsync(blobId, cancellationToken))
+                    .ConfigureAwait(false);
+                if (bytes is { Length: > 0 })
+                    return bytes;
+            }
+            catch (MessengerServerApiException ex) when ((int)ex.StatusCode == 404)
+            {
+                _logger.LogDebug("Blob {BlobId} not found on {BaseUrl}", blobId, conn.Entity.BaseUrl);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "GetBlob failed on {BaseUrl}", conn.Entity.BaseUrl);
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<List<MessengerServerConnection>> CollectPeerServerTargetsAsync(
+        string peerId,
+        CancellationToken cancellationToken)
+    {
+        var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
+        var targets = new List<MessengerServerConnection>(ready.Count);
+        foreach (var conn in ready)
+        {
+            if (!_manager.AllowsTraffic(conn))
+                continue;
+            if (!await PeerRegisteredOnTrustedServerAsync(conn, peerId, cancellationToken).ConfigureAwait(false))
+                continue;
+            targets.Add(conn);
+        }
+
+        return targets;
+    }
+
+    private List<MessengerServerConnection> OrderConnectionsForBlobDownload(
+        IReadOnlyList<MessengerServerConnection> ready,
+        string? preferredBaseUrl)
+    {
+        var ordered = new List<MessengerServerConnection>(ready.Count);
+        if (!string.IsNullOrWhiteSpace(preferredBaseUrl))
+        {
+            var hint = SqliteMessengerServerRepository.NormalizeBaseUrl(preferredBaseUrl);
+            var hinted = ready.FirstOrDefault(c =>
+                _manager.AllowsTraffic(c) &&
+                string.Equals(
+                    SqliteMessengerServerRepository.NormalizeBaseUrl(c.Entity.BaseUrl),
+                    hint,
+                    StringComparison.OrdinalIgnoreCase));
+            if (hinted != null)
+                ordered.Add(hinted);
+        }
+
+        foreach (var conn in _manager.FilterAvailable(ready))
+        {
+            if (!ordered.Contains(conn))
+                ordered.Add(conn);
+        }
+
+        foreach (var conn in ready)
+        {
+            if (_manager.AllowsTraffic(conn) && !ordered.Contains(conn))
+                ordered.Add(conn);
+        }
+
+        return ordered;
     }
 
     private async Task<IReadOnlyList<ClientPresenceDto>> ListRemoteClientsAsync(
@@ -580,11 +742,13 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
                 if (_sessions.TryGetSession(chat.Id, out var session) && session != null)
                 {
-                    await session.IngestIncomingWireFromServerAsync(wire, cancellationToken).ConfigureAwait(false);
+                    await session.IngestIncomingWireFromServerAsync(wire, cancellationToken, connection.Entity.BaseUrl)
+                        .ConfigureAwait(false);
                 }
                 else
                 {
-                    await IngestWireIntoRepositoryAsync(chat.Id, wire).ConfigureAwait(false);
+                    await IngestWireIntoRepositoryAsync(chat.Id, wire, connection.Entity.BaseUrl)
+                        .ConfigureAwait(false);
                 }
             }
             finally
@@ -644,7 +808,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         }
     }
 
-    private async Task IngestWireIntoRepositoryAsync(int chatId, byte[] wire)
+    private async Task IngestWireIntoRepositoryAsync(int chatId, byte[] wire, string? blobServerBaseUrl = null)
     {
         if (ChatWireCodec.TryParse(wire, out var parsed) && parsed != null)
         {
@@ -661,6 +825,28 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                     await _chats.AddFileMessageAsync(chatId, false, f.FileName, f.MimeType, f.FileBytes)
                         .ConfigureAwait(false);
                     return;
+                case ChatWireTransferOffer offer:
+                    var text = string.IsNullOrWhiteSpace(offer.FileName) ? "[Входящее вложение]" : offer.FileName;
+                    var messageId = await _chats.AddMessageAsync(chatId, false, text).ConfigureAwait(false);
+                    await _chats.UpdateMessagePayloadAsync(
+                            messageId, ChatPayloadKind.TransferOffer, text, offer.MimeType, [])
+                        .ConfigureAwait(false);
+                    var host = !string.IsNullOrWhiteSpace(offer.Host)
+                        ? offer.Host
+                        : blobServerBaseUrl?.Trim() ?? "";
+                    await _chats.UpdateMessageTransferMetadataAsync(
+                            messageId,
+                            offer.TransferId,
+                            offer.TransferToken,
+                            offer.PayloadKind,
+                            offer.FileName,
+                            offer.SizeBytes,
+                            host,
+                            offer.Port,
+                            offer.ExpiresUtcTicks,
+                            ChatTransferState.AwaitingClick)
+                        .ConfigureAwait(false);
+                    return;
                 default:
                     await _chats.AddMessageAsync(chatId, false, "[Серверное сообщение: неподдерживаемый тип]")
                         .ConfigureAwait(false);
@@ -668,8 +854,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             }
         }
 
-        var text = Encoding.UTF8.GetString(wire);
-        await _chats.AddMessageAsync(chatId, false, text).ConfigureAwait(false);
+        var fallback = Encoding.UTF8.GetString(wire);
+        await _chats.AddMessageAsync(chatId, false, fallback).ConfigureAwait(false);
     }
 
     private static async Task WaitIgnoreCancelAsync(Task? task)

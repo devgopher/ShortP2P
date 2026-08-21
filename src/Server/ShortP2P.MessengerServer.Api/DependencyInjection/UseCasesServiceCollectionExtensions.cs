@@ -1,6 +1,7 @@
 using ShortP2P.MessengerServer.Api.HostPowers;
 using ShortP2P.MessengerServer.UseCases.Abstractions;
 using ShortP2P.MessengerServer.UseCases.Auth;
+using ShortP2P.MessengerServer.UseCases.Blobs;
 using ShortP2P.MessengerServer.UseCases.Chats;
 using ShortP2P.MessengerServer.UseCases.Hosting;
 using ShortP2P.MessengerServer.UseCases.Inbox;
@@ -29,6 +30,8 @@ public static class UseCasesServiceCollectionExtensions
         services.AddScoped<SendMessageUseCase>();
         services.AddScoped<SubmitDeliveryReceiptUseCase>();
         services.AddScoped<GetDeliveryReceiptsUseCase>();
+        services.AddScoped<PutBlobUseCase>();
+        services.AddScoped<GetBlobUseCase>();
         services.AddScoped<PollInboxEventsUseCase>();
         services.AddScoped<GetClientPresencesUseCase>();
         services.AddScoped<GetServerCertificateUseCase>();

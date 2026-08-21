@@ -156,3 +156,33 @@ public sealed class DeliveryTicketRecord
         ReceivedAtUtc = ticket.ReceivedAtUtc
     };
 }
+
+public sealed class BlobRecord
+{
+    public string BlobId { get; set; } = "";
+    public string SrcNetworkId { get; set; } = "";
+    public string TgtNetworkId { get; set; } = "";
+    public byte[] Ciphertext { get; set; } = [];
+    public long SizeBytes { get; set; }
+    public DateTime CreatedUtc { get; set; }
+
+    public Blob ToDomain() => new()
+    {
+        BlobId = BlobId,
+        SrcNetworkId = SrcNetworkId,
+        TgtNetworkId = TgtNetworkId,
+        Ciphertext = Ciphertext,
+        SizeBytes = SizeBytes,
+        CreatedUtc = CreatedUtc
+    };
+
+    public static BlobRecord FromDomain(Blob blob) => new()
+    {
+        BlobId = blob.BlobId,
+        SrcNetworkId = blob.SrcNetworkId,
+        TgtNetworkId = blob.TgtNetworkId,
+        Ciphertext = blob.Ciphertext,
+        SizeBytes = blob.SizeBytes,
+        CreatedUtc = blob.CreatedUtc
+    };
+}

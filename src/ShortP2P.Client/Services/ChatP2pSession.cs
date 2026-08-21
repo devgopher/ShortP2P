@@ -17,6 +17,7 @@ using ShortP2P.Crypto;
 using ShortP2P.Discovery;
 using ShortP2P.Discovery.Transceivers;
 using ShortP2P.Messenger;
+using ShortP2P.Client.Services.MessengerServers;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 
@@ -578,10 +579,13 @@ public sealed class ChatP2PSession : IAsyncDisposable
     }
 
     /// <summary>Ingest a decrypted chat wire delivered via messenger server (servers-first path).</summary>
-    public async Task IngestIncomingWireFromServerAsync(byte[] payload, CancellationToken cancellationToken = default)
+    public async Task IngestIncomingWireFromServerAsync(
+        byte[] payload,
+        CancellationToken cancellationToken = default,
+        string? blobServerBaseUrl = null)
     {
         ArgumentNullException.ThrowIfNull(payload);
-        if (await ProcessIncomingPayloadAsync(payload, cancellationToken).ConfigureAwait(false))
+        if (await ProcessIncomingPayloadAsync(payload, cancellationToken, blobServerBaseUrl).ConfigureAwait(false))
             RaiseMessagesChanged();
     }
 
@@ -601,7 +605,10 @@ public sealed class ChatP2PSession : IAsyncDisposable
     }
 
     /// <returns>True if UI should refresh the message list.</returns>
-    private async Task<bool> ProcessIncomingPayloadAsync(byte[] payload, CancellationToken cancellationToken)
+    private async Task<bool> ProcessIncomingPayloadAsync(
+        byte[] payload,
+        CancellationToken cancellationToken,
+        string? blobServerBaseUrl = null)
     {
         var shouldNotify = false;
         if (ChatWireCodec.TryParse(payload, out var wire) && wire != null)
@@ -639,7 +646,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
                     shouldNotify = true;
                     break;
                 case ChatWireTransferOffer offer:
-                    await HandleTransferOfferAsync(offer).ConfigureAwait(false);
+                    await HandleTransferOfferAsync(offer, blobServerBaseUrl).ConfigureAwait(false);
                     shouldNotify = true;
                     break;
                 case ChatWireTransferControl control:
@@ -1144,7 +1151,8 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 row.TransferSizeBytes,
                 row.TransferHost,
                 row.TransferPort,
-                row.TransferExpiresUtcTicks)),
+                row.TransferExpiresUtcTicks,
+                string.IsNullOrWhiteSpace(row.TransferId) ? null : row.TransferId)),
             _ => ChatWireCodec.EncodeText(row.Text)
         };
     }
@@ -1320,29 +1328,39 @@ public sealed class ChatP2PSession : IAsyncDisposable
         TransferStateChanged?.Invoke(this, messageId);
         RaiseMessagesChanged();
 
-        var localHost = TryResolveLocalHost() ?? "127.0.0.1";
-        var lease = await _tcpTransfer.CreateListenerAsync(row.TransferId, row.TransferToken, TimeSpan.FromSeconds(45),
-            cancellationToken).ConfigureAwait(false);
         try
         {
-            var ack = new ChatWireTransferControl("tcp-ack", row.TransferId, row.TransferToken, localHost, lease.Port,
-                lease.ExpiresAtUtc.UtcTicks, "");
-            await SendWireAsync(ChatWireCodec.EncodeTransferControl(ack), cancellationToken)
-                .ConfigureAwait(false);
-            var bytes = await _tcpTransfer.AcceptAndReceiveAsync(lease, row.TransferSizeBytes, cancellationToken)
-                .ConfigureAwait(false);
-            var targetKind = row.TransferPayloadKind.Equals("image", StringComparison.OrdinalIgnoreCase)
-                ? ChatPayloadKind.Image
-                : ChatPayloadKind.File;
-            var fileName = string.IsNullOrWhiteSpace(row.TransferFileName) ? row.Text : row.TransferFileName;
-            await _repo.UpdateMessagePayloadAsync(messageId, targetKind, fileName, row.MimeType, bytes)
-                .ConfigureAwait(false);
-            await _repo.UpdateMessageTransferMetadataAsync(messageId, row.TransferId, row.TransferToken,
-                    row.TransferPayloadKind, row.TransferFileName, row.TransferSizeBytes, "", 0, 0,
-                    ChatTransferState.Received)
-                .ConfigureAwait(false);
-            TransferStateChanged?.Invoke(this, messageId);
-            RaiseMessagesChanged();
+            if (await TryReceiveBlobFromMessengerServersAsync(row, cancellationToken).ConfigureAwait(false))
+                return;
+
+            var localHost = TryResolveLocalHost() ?? "127.0.0.1";
+            var lease = await _tcpTransfer.CreateListenerAsync(row.TransferId, row.TransferToken, TimeSpan.FromSeconds(45),
+                cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var ack = new ChatWireTransferControl("tcp-ack", row.TransferId, row.TransferToken, localHost, lease.Port,
+                    lease.ExpiresAtUtc.UtcTicks, "");
+                await SendWireAsync(ChatWireCodec.EncodeTransferControl(ack), cancellationToken)
+                    .ConfigureAwait(false);
+                var bytes = await _tcpTransfer.AcceptAndReceiveAsync(lease, row.TransferSizeBytes, cancellationToken)
+                    .ConfigureAwait(false);
+                var targetKind = row.TransferPayloadKind.Equals("image", StringComparison.OrdinalIgnoreCase)
+                    ? ChatPayloadKind.Image
+                    : ChatPayloadKind.File;
+                var fileName = string.IsNullOrWhiteSpace(row.TransferFileName) ? row.Text : row.TransferFileName;
+                await _repo.UpdateMessagePayloadAsync(messageId, targetKind, fileName, row.MimeType, bytes)
+                    .ConfigureAwait(false);
+                await _repo.UpdateMessageTransferMetadataAsync(messageId, row.TransferId, row.TransferToken,
+                        row.TransferPayloadKind, row.TransferFileName, row.TransferSizeBytes, "", 0, 0,
+                        ChatTransferState.Received)
+                    .ConfigureAwait(false);
+                TransferStateChanged?.Invoke(this, messageId);
+                RaiseMessagesChanged();
+            }
+            finally
+            {
+                lease.Dispose();
+            }
         }
         catch
         {
@@ -1351,11 +1369,80 @@ public sealed class ChatP2PSession : IAsyncDisposable
             RaiseMessagesChanged();
             throw;
         }
-        finally
-        {
-            lease.Dispose();
-        }
     }
+
+    private async Task<bool> TryReceiveBlobFromMessengerServersAsync(
+        ChatMessageEntity row,
+        CancellationToken cancellationToken)
+    {
+        var servers = _runtime.MessengerServers;
+        if (servers == null)
+            return false;
+
+        var blobId = row.TransferId.Trim();
+        if (blobId.Length == 0)
+            return false;
+
+        var hint = LooksLikeHttpBaseUrl(row.TransferHost) ? row.TransferHost : null;
+        var ciphertext = await servers.TryDownloadBlobAsync(blobId, hint, cancellationToken).ConfigureAwait(false);
+        if (ciphertext == null || ciphertext.Length == 0)
+            return false;
+
+        byte[] wire;
+        try
+        {
+            wire = MessengerServerPayloadCodec.Decrypt(ciphertext, _auth.GetCurrentPrivateKey());
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (!ChatWireCodec.TryParse(wire, out var parsed) || parsed == null)
+            return false;
+
+        byte[] bytes;
+        string mimeType;
+        string fileName;
+        ChatPayloadKind kind;
+        switch (parsed)
+        {
+            case ChatWireImage img:
+                _media.ValidateMime(img.MimeType);
+                _media.ValidateSize(img.ImageBytes.Length);
+                bytes = img.ImageBytes;
+                mimeType = img.MimeType;
+                fileName = string.IsNullOrWhiteSpace(row.TransferFileName) ? row.Text : row.TransferFileName;
+                kind = ChatPayloadKind.Image;
+                break;
+            case ChatWireFile f:
+                _media.ValidateDocumentMime(f.MimeType);
+                _media.ValidateDocumentSize(f.FileBytes.Length);
+                bytes = f.FileBytes;
+                mimeType = f.MimeType;
+                fileName = string.IsNullOrWhiteSpace(f.FileName)
+                    ? (string.IsNullOrWhiteSpace(row.TransferFileName) ? row.Text : row.TransferFileName)
+                    : f.FileName;
+                kind = ChatPayloadKind.File;
+                break;
+            default:
+                return false;
+        }
+
+        await _repo.UpdateMessagePayloadAsync(row.Id, kind, fileName, mimeType, bytes).ConfigureAwait(false);
+        await _repo.UpdateMessageTransferMetadataAsync(
+                row.Id, row.TransferId, row.TransferToken, row.TransferPayloadKind, row.TransferFileName,
+                bytes.Length, "", 0, 0, ChatTransferState.Received)
+            .ConfigureAwait(false);
+        TransferStateChanged?.Invoke(this, row.Id);
+        RaiseMessagesChanged();
+        return true;
+    }
+
+    private static bool LooksLikeHttpBaseUrl(string? host) =>
+        !string.IsNullOrWhiteSpace(host) &&
+        (host.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+         host.StartsWith("http://", StringComparison.OrdinalIgnoreCase));
 
     private async Task CreateAndSendTransferOfferAsync(string payloadKind, string fileName, string mimeType,
         byte[] bytes,
@@ -1375,8 +1462,29 @@ public sealed class ChatP2PSession : IAsyncDisposable
             .ConfigureAwait(false);
         RaiseMessagesChanged();
 
+        var innerWire = payloadKind.Equals("image", StringComparison.OrdinalIgnoreCase)
+            ? ChatWireCodec.EncodeImage(mimeType, bytes)
+            : ChatWireCodec.EncodeFile(fileName, mimeType, bytes);
+        var servers = _runtime.MessengerServers;
+        if (servers != null)
+        {
+            try
+            {
+                await servers.TryUploadBlobAsync(_chat, _user, transferId, innerWire, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // TCP remains the fallback when no server accepted the blob.
+            }
+        }
+
         var offer = new ChatWireTransferOffer(transferId, token, payloadKind, fileName, mimeType, bytes.Length, "", 0,
-            expires.UtcTicks);
+            expires.UtcTicks, transferId);
         try
         {
             await DeliverOutgoingWireAsync(messageId, ChatWireCodec.EncodeTransferOffer(offer), cancellationToken)
@@ -1395,18 +1503,17 @@ public sealed class ChatP2PSession : IAsyncDisposable
         }
     }
 
-    private async Task HandleTransferOfferAsync(ChatWireTransferOffer offer)
+    private async Task HandleTransferOfferAsync(ChatWireTransferOffer offer, string? blobServerBaseUrl = null)
     {
         var text = string.IsNullOrWhiteSpace(offer.FileName) ? "[Входящее вложение]" : offer.FileName;
-        var payloadKind = offer.PayloadKind.Equals("image", StringComparison.OrdinalIgnoreCase)
-            ? ChatPayloadKind.TransferOffer
-            : ChatPayloadKind.TransferOffer;
+        var payloadKind = ChatPayloadKind.TransferOffer;
         var messageId = await _repo.AddMessageAsync(_chat.Id, false, text).ConfigureAwait(false);
         await _repo.UpdateMessagePayloadAsync(messageId, payloadKind, text, offer.MimeType, [])
             .ConfigureAwait(false);
+        var host = !string.IsNullOrWhiteSpace(offer.Host) ? offer.Host : blobServerBaseUrl?.Trim() ?? "";
         await _repo.UpdateMessageTransferMetadataAsync(messageId, offer.TransferId, offer.TransferToken,
                 offer.PayloadKind,
-                offer.FileName, offer.SizeBytes, offer.Host, offer.Port, offer.ExpiresUtcTicks,
+                offer.FileName, offer.SizeBytes, host, offer.Port, offer.ExpiresUtcTicks,
                 ChatTransferState.AwaitingClick)
             .ConfigureAwait(false);
     }

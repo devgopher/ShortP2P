@@ -143,6 +143,78 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /api/v1/blobs/{blobId}:
+    put:
+      operationId: putBlob
+      summary: Store an opaque encrypted attachment
+      tags: [Blobs]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: blobId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: targetNetworkId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: X-ShortP2P-Target-NetworkId
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '202':
+          description: Accepted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Blob id already used by another pair
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    get:
+      operationId: getBlob
+      summary: Download opaque ciphertext
+      tags: [Blobs]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: blobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Encrypted attachment envelope
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Blob not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /api/v1/messages/receipts:
     post:
       operationId: submitDeliveryReceipt

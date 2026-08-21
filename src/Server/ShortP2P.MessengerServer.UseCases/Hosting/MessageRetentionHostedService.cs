@@ -6,7 +6,7 @@ using ShortP2P.MessengerServer.UseCases.Abstractions;
 
 namespace ShortP2P.MessengerServer.UseCases.Hosting;
 
-/// <summary>Purges messages and chat requests older than <see cref="MessengerInboxOptions.MessageRetention"/>.</summary>
+/// <summary>Purges messages, chat requests and blobs older than <see cref="MessengerInboxOptions.MessageRetention"/>.</summary>
 public sealed class MessageRetentionHostedService(
     IServiceScopeFactory scopeFactory,
     IOptions<MessengerInboxOptions> inboxOptions,
@@ -49,12 +49,16 @@ public sealed class MessageRetentionHostedService(
         await using var scope = scopeFactory.CreateAsyncScope();
         var messages = scope.ServiceProvider.GetService<IMessageRepository>();
         var chatRequests = scope.ServiceProvider.GetService<IChatRequestRepository>();
+        var blobs = scope.ServiceProvider.GetService<IBlobRepository>();
 
         if (messages is not null)
             await messages.RemoveOlderThanAsync(cutoff, cancellationToken).ConfigureAwait(false);
 
         if (chatRequests is not null)
             await chatRequests.RemoveOlderThanAsync(cutoff, cancellationToken).ConfigureAwait(false);
+
+        if (blobs is not null)
+            await blobs.RemoveOlderThanAsync(cutoff, cancellationToken).ConfigureAwait(false);
 
         logger.LogDebug("Retention purge completed for cutoff {CutoffUtc:o}.", cutoff);
     }

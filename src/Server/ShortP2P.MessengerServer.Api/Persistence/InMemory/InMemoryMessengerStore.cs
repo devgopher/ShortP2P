@@ -23,4 +23,6 @@ public sealed class InMemoryMessengerStore
 
     public ConcurrentDictionary<string, (DeliveryTicket Ticket, string SrcNetworkId)> DeliveryTickets { get; } =
         new(StringComparer.Ordinal);
+
+    public ConcurrentDictionary<string, Blob> Blobs { get; } = new(StringComparer.Ordinal);
 }

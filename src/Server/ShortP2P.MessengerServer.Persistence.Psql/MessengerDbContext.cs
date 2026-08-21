@@ -13,6 +13,7 @@ public sealed class MessengerDbContext(DbContextOptions<MessengerDbContext> opti
     public DbSet<MessageRecord> Messages => Set<MessageRecord>();
     public DbSet<MessageInboxRecord> MessageInboxes => Set<MessageInboxRecord>();
     public DbSet<DeliveryTicketRecord> DeliveryTickets => Set<DeliveryTicketRecord>();
+    public DbSet<BlobRecord> Blobs => Set<BlobRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -89,6 +90,18 @@ public sealed class MessengerDbContext(DbContextOptions<MessengerDbContext> opti
             e.ToTable("delivery_tickets");
             e.HasKey(x => x.MessageId);
             e.Property(x => x.MessageId).HasMaxLength(128);
+        });
+
+        modelBuilder.Entity<BlobRecord>(e =>
+        {
+            e.ToTable("blobs");
+            e.HasKey(x => x.BlobId);
+            e.Property(x => x.BlobId).HasMaxLength(128);
+            e.Property(x => x.SrcNetworkId).HasMaxLength(64);
+            e.Property(x => x.TgtNetworkId).HasMaxLength(64);
+            e.Property(x => x.Ciphertext).HasColumnType("bytea");
+            e.HasIndex(x => x.CreatedUtc);
+            e.HasIndex(x => x.TgtNetworkId);
         });
     }
 }

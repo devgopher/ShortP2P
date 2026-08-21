@@ -224,7 +224,12 @@ public sealed record ChatWireTransferOffer(
     long SizeBytes,
     string Host,
     int Port,
-    long ExpiresUtcTicks) : ChatWireMessage;
+    long ExpiresUtcTicks,
+    string? BlobId = null) : ChatWireMessage
+{
+    public string ResolveBlobId() =>
+        string.IsNullOrWhiteSpace(BlobId) ? TransferId : BlobId.Trim();
+}
 
 public sealed record ChatWireTransferControl(
     string Command,

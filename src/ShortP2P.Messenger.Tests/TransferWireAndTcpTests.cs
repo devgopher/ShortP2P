@@ -28,6 +28,13 @@ public class TransferWireAndTcpTests
         Assert.Equal(offer.TransferToken, got.TransferToken);
         Assert.Equal(offer.PayloadKind, got.PayloadKind);
         Assert.Equal(offer.FileName, got.FileName);
+        Assert.Null(got.BlobId);
+
+        var withBlob = offer with { BlobId = "tr-1" };
+        var wire2 = ChatWireCodec.EncodeTransferOffer(withBlob);
+        Assert.True(ChatWireCodec.TryParse(wire2, out var parsed2));
+        var got2 = Assert.IsType<ChatWireTransferOffer>(parsed2);
+        Assert.Equal("tr-1", got2.ResolveBlobId());
     }
 
     [Fact]

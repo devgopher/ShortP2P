@@ -14,7 +14,10 @@ public static class MessengerServerPayloadCodec
     private const int NonceBytes = 12;
     private const int TagBytes = 16;
 
-    public static string EncryptToBase64(ReadOnlySpan<byte> plaintext, RsaPublicKey recipientPublicKey)
+    public static string EncryptToBase64(ReadOnlySpan<byte> plaintext, RsaPublicKey recipientPublicKey) =>
+        Convert.ToBase64String(Encrypt(plaintext, recipientPublicKey));
+
+    public static byte[] Encrypt(ReadOnlySpan<byte> plaintext, RsaPublicKey recipientPublicKey)
     {
         ArgumentNullException.ThrowIfNull(recipientPublicKey);
 
@@ -51,15 +54,19 @@ public static class MessengerServerPayloadCodec
         var bodyOffset = 3 + wrappedKey.Length;
         Buffer.BlockCopy(ciphertext, 0, result, bodyOffset, ciphertext.Length);
         Buffer.BlockCopy(tag, 0, result, bodyOffset + ciphertext.Length, TagBytes);
-        return Convert.ToBase64String(result);
+        return result;
     }
 
     public static byte[] DecryptFromBase64(string encryptedDataBase64, RsaPrivateKey privateKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(encryptedDataBase64);
+        return Decrypt(Convert.FromBase64String(encryptedDataBase64.Trim()), privateKey);
+    }
+
+    public static byte[] Decrypt(ReadOnlySpan<byte> blob, RsaPrivateKey privateKey)
+    {
         ArgumentNullException.ThrowIfNull(privateKey);
 
-        var blob = Convert.FromBase64String(encryptedDataBase64.Trim());
         if (blob.Length < 1 + 2 + 1 + TagBytes)
             throw new CryptographicException("Server payload is too short.");
         if (blob[0] != Version)
@@ -69,8 +76,8 @@ public static class MessengerServerPayloadCodec
         if (keyLen <= 0 || 3 + keyLen + TagBytes > blob.Length)
             throw new CryptographicException("Invalid server payload key length.");
 
-        var wrappedKey = blob.AsSpan(3, keyLen).ToArray();
-        var cipherAndTag = blob.AsSpan(3 + keyLen);
+        var wrappedKey = blob.Slice(3, keyLen).ToArray();
+        var cipherAndTag = blob.Slice(3 + keyLen);
         var cipherLen = cipherAndTag.Length - TagBytes;
         if (cipherLen < 0)
             throw new CryptographicException("Invalid server payload ciphertext.");

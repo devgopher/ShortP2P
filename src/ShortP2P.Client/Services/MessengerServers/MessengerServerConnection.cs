@@ -61,6 +61,7 @@ public sealed class MessengerServerConnection : IAsyncDisposable
             Timeout = timeout
         };
         http.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+        http.DefaultRequestHeaders.Accept.ParseAdd("application/octet-stream");
 
         var api = new MessengerServerApiClient(http, session);
         return new MessengerServerConnection(entity, http, session, api, pinHolder);

@@ -2,6 +2,7 @@ using ShortP2P.MessengerServer.Api.DependencyInjection;
 using ShortP2P.MessengerServer.Api.Filters;
 using ShortP2P.MessengerServer.Auth.DependencyInjection;
 using ShortP2P.MessengerServer.Auth.LiteDB.DependencyInjection;
+using ShortP2P.MessengerServer.Contracts;
 using ShortP2P.MessengerServer.Infrastructure.HostPowers;
 using ShortP2P.MessengerServer.UseCases.Abstractions;
 
@@ -13,6 +14,7 @@ builder.WebHost.ConfigureKestrel(options =>
     // Long-poll can hold connections up to MaxPollTimeoutSeconds (~30s).
     options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(2);
     options.Limits.RequestHeadersTimeout = TimeSpan.FromMinutes(2);
+    options.Limits.MaxRequestBodySize = BlobLimits.MaxCiphertextBytes;
 });
 
 builder.Services

@@ -49,6 +49,7 @@ public static class PersistenceServiceCollectionExtensions
             services.AddSingleton<IMessageRepository, InMemoryMessageRepository>();
             services.AddSingleton<IMessageInboxRepository, InMemoryMessageInboxRepository>();
             services.AddSingleton<IDeliveryTicketRepository, InMemoryDeliveryTicketRepository>();
+            services.AddSingleton<IBlobRepository, InMemoryBlobRepository>();
         }
 
         return services;
