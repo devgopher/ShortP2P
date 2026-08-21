@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Data;
+using ShortP2P.Client.Qr;
 using ShortP2P.MessengerServer.Contracts.Dtos;
 using ShortP2P.MessengerServer.Http;
 
@@ -53,6 +54,18 @@ public sealed class MessengerServerManager : IAsyncDisposable
                 Comparer<MessengerServerRankStats>.Create(MessengerServerRankComparer.Compare))
             .ThenBy(e => e.Id)
             .ToList();
+    }
+
+    /// <summary>
+    /// Finds a saved server with the same scheme, host and port (default ports match with or without :443/:80).
+    /// </summary>
+    public async Task<MessengerServerEntity?> FindExistingByEndpointAsync(
+        string baseUrl,
+        CancellationToken cancellationToken = default)
+    {
+        var user = RequireUser();
+        var all = await _repository.ListByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
+        return all.FirstOrDefault(s => MessengerServerQrCodec.EndpointsEqual(s.BaseUrl, baseUrl));
     }
 
     public async Task<IReadOnlyList<MessengerServerEntity>> ListActiveTrustedAsync(
@@ -168,9 +181,8 @@ public sealed class MessengerServerManager : IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var existing = await _repository.FindByUserAndBaseUrlAsync(user.Id, normalized, cancellationToken)
-                .ConfigureAwait(false);
-            if (existing != null)
+            var known = await _repository.ListByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            if (known.Any(s => MessengerServerQrCodec.EndpointsEqual(s.BaseUrl, normalized)))
                 throw new InvalidOperationException("This server is already added.");
 
             var count = await _repository.CountByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);

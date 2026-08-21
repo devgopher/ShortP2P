@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Data;
+using ShortP2P.Client.Qr;
 using ShortP2P.Client.Services.MessengerServers;
 
 namespace ShortP2P.MauiApp;
@@ -16,6 +17,7 @@ public sealed class MessengerServersPage : ContentPage
     };
 
     private readonly Button _addButton = new() { Text = "Добавить сервер" };
+    private readonly Button _importButton = new() { Text = "Импортировать сервер" };
     private readonly CollectionView _list = new() { SelectionMode = SelectionMode.None };
     private readonly ObservableCollection<MessengerServerRowVm> _rows = [];
     private readonly MessengerServerManager _manager;
@@ -42,6 +44,13 @@ public sealed class MessengerServersPage : ContentPage
             active.SetBinding(Switch.IsToggledProperty, new Binding(nameof(MessengerServerRowVm.Active),
                 BindingMode.OneWay));
             active.Toggled += OnActiveToggled;
+
+            var share = new Button
+            {
+                Text = "Поделиться",
+                Padding = new Thickness(10, 4)
+            };
+            share.Clicked += OnShareClicked;
 
             var recheck = new Button
             {
@@ -73,20 +82,23 @@ public sealed class MessengerServersPage : ContentPage
                     new ColumnDefinition(GridLength.Star),
                     new ColumnDefinition(GridLength.Auto),
                     new ColumnDefinition(GridLength.Auto),
+                    new ColumnDefinition(GridLength.Auto),
                     new ColumnDefinition(GridLength.Auto)
                 },
                 ColumnSpacing = 8,
                 Children =
                 {
                     texts,
-                    recheck.AtColumn(1),
-                    active.AtColumn(2),
-                    delete.AtColumn(3)
+                    share.AtColumn(1),
+                    recheck.AtColumn(2),
+                    active.AtColumn(3),
+                    delete.AtColumn(4)
                 }
             };
         });
 
         _addButton.Clicked += OnAddClicked;
+        _importButton.Clicked += OnImportClicked;
 
         var root = new Grid
         {
@@ -115,7 +127,8 @@ public sealed class MessengerServersPage : ContentPage
             {
                 new Label { Text = "Base URL" },
                 _baseUrlEntry,
-                _addButton
+                _addButton,
+                _importButton
             }
         }, 0, 1);
         root.Add(_status, 0, 2);
@@ -197,6 +210,106 @@ public sealed class MessengerServersPage : ContentPage
         finally
         {
             _addButton.IsEnabled = true;
+        }
+    }
+
+    private async void OnShareClicked(object? sender, EventArgs e)
+    {
+        if (sender is not BindableObject { BindingContext: MessengerServerRowVm row })
+            return;
+
+        if (!MessengerServerQrService.TryBuildPayload(row.BaseUrl, out var payload, out var err))
+        {
+            await DisplayAlert("Поделиться сервером", err ?? "Не удалось собрать QR-код сервера.", "OK")
+                .ConfigureAwait(true);
+            return;
+        }
+
+        try
+        {
+            var png = MessengerServerQrService.EncodeQrPng(payload);
+            await Navigation.PushAsync(new MessengerServerQrPage(payload, png)).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Share messenger server QR {Id}", row.Id);
+            await DisplayAlert("Поделиться сервером", ex.Message, "OK").ConfigureAwait(true);
+        }
+    }
+
+    private async void OnImportClicked(object? sender, EventArgs e)
+    {
+        FileResult? picked;
+        try
+        {
+            picked = await FilePicker.Default.PickAsync(new PickOptions
+            {
+                PickerTitle = "Файл с QR-кодом сервера",
+                FileTypes = FilePickerFileType.Images
+            }).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Pick messenger server QR file");
+            await DisplayAlert("Импортировать сервер", ex.Message, "OK").ConfigureAwait(true);
+            return;
+        }
+
+        if (picked == null)
+            return;
+
+        byte[] bytes;
+        try
+        {
+            await using var stream = await picked.OpenReadAsync().ConfigureAwait(true);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms).ConfigureAwait(true);
+            bytes = ms.ToArray();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Read messenger server QR file");
+            await DisplayAlert("Импортировать сервер", ex.Message, "OK").ConfigureAwait(true);
+            return;
+        }
+
+        if (!MessengerServerQrService.TryDecodeImage(bytes, out var payload, out var err))
+        {
+            _logger.LogWarning("Messenger server QR decode failed from file: {Error}", err);
+            await DisplayAlert("Импортировать сервер", err ?? "Не удалось прочитать QR-код сервера.", "OK")
+                .ConfigureAwait(true);
+            return;
+        }
+
+        var url = MessengerServerQrCodec.ToBaseUrl(payload);
+        _importButton.IsEnabled = false;
+        _status.Text = "Импорт сервера…";
+        try
+        {
+            var existing = await _manager.FindExistingByEndpointAsync(url).ConfigureAwait(true);
+            if (existing != null)
+            {
+                _status.Text = $"Сервер уже добавлен: {existing.BaseUrl}";
+                await DisplayAlert(
+                    "Импортировать сервер",
+                    $"Этот сервер уже есть в списке:\n{existing.BaseUrl}",
+                    "OK").ConfigureAwait(true);
+                return;
+            }
+
+            var entity = await _manager.AddServerAsync(url).ConfigureAwait(true);
+            _status.Text = $"Импортирован: {entity.BaseUrl}";
+            await ReloadAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Import messenger server from QR");
+            _status.Text = ex.Message;
+            await DisplayAlert("Импортировать сервер", ex.Message, "OK").ConfigureAwait(true);
+        }
+        finally
+        {
+            _importButton.IsEnabled = true;
         }
     }
 

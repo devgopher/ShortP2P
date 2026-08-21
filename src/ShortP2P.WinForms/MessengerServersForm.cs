@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Data;
+using ShortP2P.Client.Qr;
 using ShortP2P.Client.Services.MessengerServers;
 
 namespace ShortP2P.WinForms;
@@ -13,6 +14,8 @@ public sealed class MessengerServersForm : Form
     };
 
     private readonly Button _addButton = new() { Text = "Добавить", AutoSize = true };
+    private readonly Button _importButton = new() { Text = "Импортировать сервер", AutoSize = true };
+    private readonly Button _shareButton = new() { Text = "Поделиться сервером", AutoSize = true };
     private readonly Button _recheckButton = new() { Text = "Проверить", AutoSize = true };
     private readonly Button _toggleActiveButton = new() { Text = "Вкл/выкл", AutoSize = true };
     private readonly Button _deleteButton = new() { Text = "Удалить", AutoSize = true };
@@ -42,7 +45,7 @@ public sealed class MessengerServersForm : Form
         _logger = logger;
         Text = "Messenger servers";
         StartPosition = FormStartPosition.CenterParent;
-        Width = 780;
+        Width = 860;
         Height = 480;
         MinimizeBox = false;
 
@@ -78,17 +81,19 @@ public sealed class MessengerServersForm : Form
         {
             AutoSize = true,
             FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false
+            WrapContents = true
         };
         addRow.Controls.Add(new Label { Text = "Base URL:", AutoSize = true, Padding = new Padding(0, 6, 0, 0) });
         addRow.Controls.Add(_baseUrl);
         addRow.Controls.Add(_addButton);
+        addRow.Controls.Add(_importButton);
 
         var actions = new FlowLayoutPanel
         {
             AutoSize = true,
             FlowDirection = FlowDirection.LeftToRight
         };
+        actions.Controls.Add(_shareButton);
         actions.Controls.Add(_recheckButton);
         actions.Controls.Add(_toggleActiveButton);
         actions.Controls.Add(_deleteButton);
@@ -103,6 +108,8 @@ public sealed class MessengerServersForm : Form
         Controls.Add(root);
 
         _addButton.Click += async (_, _) => await AddServerAsync().ConfigureAwait(true);
+        _importButton.Click += async (_, _) => await ImportServerAsync().ConfigureAwait(true);
+        _shareButton.Click += (_, _) => ShareSelected();
         _recheckButton.Click += async (_, _) => await RecheckSelectedAsync().ConfigureAwait(true);
         _toggleActiveButton.Click += async (_, _) => await ToggleActiveAsync().ConfigureAwait(true);
         _deleteButton.Click += async (_, _) => await DeleteSelectedAsync().ConfigureAwait(true);
@@ -184,6 +191,95 @@ public sealed class MessengerServersForm : Form
         finally
         {
             _addButton.Enabled = true;
+        }
+    }
+
+    private void ShareSelected()
+    {
+        if (_list.SelectedItems.Count == 0 || _list.SelectedItems[0].Tag is not MessengerServerEntity entity)
+        {
+            MessageBox.Show(this, "Выберите сервер в списке.", "Поделиться сервером", MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        if (!MessengerServerQrService.TryBuildPayload(entity.BaseUrl, out var payload, out var err))
+        {
+            MessageBox.Show(this, err ?? "Не удалось собрать QR-код сервера.", "Поделиться сервером",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        try
+        {
+            var png = MessengerServerQrService.EncodeQrPng(payload);
+            using var form = new MessengerServerQrForm(payload, png);
+            form.ShowDialog(this);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Share messenger server QR {Id}", entity.Id);
+            MessageBox.Show(this, ex.Message, "Поделиться сервером", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private async Task ImportServerAsync()
+    {
+        using var dlg = new OpenFileDialog
+        {
+            Title = "Файл с QR-кодом сервера",
+            Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp|All files|*.*"
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        byte[] bytes;
+        try
+        {
+            bytes = await File.ReadAllBytesAsync(dlg.FileName).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Read messenger server QR file");
+            MessageBox.Show(this, ex.Message, "Импортировать сервер", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (!MessengerServerQrService.TryDecodeImage(bytes, out var payload, out var err))
+        {
+            _logger.LogWarning("Messenger server QR decode failed from file {File}: {Error}", dlg.FileName, err);
+            MessageBox.Show(this, err ?? "Не удалось прочитать QR-код сервера.", "Импортировать сервер",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var url = MessengerServerQrCodec.ToBaseUrl(payload);
+        _importButton.Enabled = false;
+        _status.Text = "Импорт сервера…";
+        try
+        {
+            var existing = await _manager.FindExistingByEndpointAsync(url).ConfigureAwait(true);
+            if (existing != null)
+            {
+                _status.Text = $"Сервер уже добавлен: {existing.BaseUrl}";
+                MessageBox.Show(this, $"Этот сервер уже есть в списке:\n{existing.BaseUrl}", "Импортировать сервер",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var entity = await _manager.AddServerAsync(url).ConfigureAwait(true);
+            _status.Text = $"Импортирован: {entity.BaseUrl}";
+            await ReloadAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Import messenger server from QR");
+            _status.Text = ex.Message;
+            MessageBox.Show(this, ex.Message, "Импортировать сервер", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _importButton.Enabled = true;
         }
     }
 
