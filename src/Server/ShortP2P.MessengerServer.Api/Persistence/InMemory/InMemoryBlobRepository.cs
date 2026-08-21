@@ -17,6 +17,12 @@ public sealed class InMemoryBlobRepository(InMemoryMessengerStore store) : IBlob
         return Task.CompletedTask;
     }
 
+    public Task RemoveByIdAsync(string blobId, CancellationToken cancellationToken = default)
+    {
+        store.Blobs.TryRemove(blobId, out _);
+        return Task.CompletedTask;
+    }
+
     public Task RemoveOlderThanAsync(DateTime cutoffUtc, CancellationToken cancellationToken = default)
     {
         foreach (var id in store.Blobs.Values

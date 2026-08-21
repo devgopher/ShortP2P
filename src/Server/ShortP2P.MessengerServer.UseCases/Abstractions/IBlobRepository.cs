@@ -8,5 +8,7 @@ public interface IBlobRepository
 
     Task AddAsync(Blob blob, CancellationToken cancellationToken = default);
 
+    Task RemoveByIdAsync(string blobId, CancellationToken cancellationToken = default);
+
     Task RemoveOlderThanAsync(DateTime cutoffUtc, CancellationToken cancellationToken = default);
 }

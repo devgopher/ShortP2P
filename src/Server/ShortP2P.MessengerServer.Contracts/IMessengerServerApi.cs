@@ -38,6 +38,9 @@ public interface IMessengerServerApi
     /// <summary>GET <see cref="ApiRoutes.Blobs"/>/{blobId} — download opaque ciphertext.</summary>
     Task<byte[]> GetBlobAsync(string blobId, CancellationToken cancellationToken = default);
 
+    /// <summary>DELETE <see cref="ApiRoutes.Blobs"/>/{blobId} — remove blob after successful receipt.</summary>
+    Task DeleteBlobAsync(string blobId, CancellationToken cancellationToken = default);
+
     /// <summary>POST <see cref="ApiRoutes.MessageReceipts"/> — submit a delivery receipt (deletes this device's inbox copy).</summary>
     Task SubmitDeliveryReceiptAsync(DeliveryReceiptRequest request, CancellationToken cancellationToken = default);
 

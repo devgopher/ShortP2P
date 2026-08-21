@@ -24,6 +24,7 @@
 | `POST` | `/api/v1/messages` | Отправка `MessageDto` (fan-out) |
 | `PUT` | `/api/v1/blobs/{blobId}` | Opaque encrypted attachment (`application/octet-stream`) |
 | `GET` | `/api/v1/blobs/{blobId}` | Скачать ciphertext вложения |
+| `DELETE` | `/api/v1/blobs/{blobId}` | Удалить blob после успешного приёма |
 | `POST` | `/api/v1/messages/receipts` | Квитанция; удаляет inbox-копию устройства |
 | `GET` | `/api/v1/messages/receipts` | Квитанции для текущего networkId |
 | `GET` | `/api/v1/events/poll` | Long-poll inbox (messages + chatRequests) |

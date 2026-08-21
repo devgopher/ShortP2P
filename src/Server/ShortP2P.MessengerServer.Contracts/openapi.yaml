@@ -214,6 +214,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+    delete:
+      operationId: deleteBlob
+      summary: Delete blob after the recipient accepted it
+      tags: [Blobs]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: blobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted or already absent
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /api/v1/messages/receipts:
     post:

@@ -10,7 +10,10 @@ namespace ShortP2P.MessengerServer.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route($"{ApiRoutes.Prefix}/blobs")]
-public sealed class BlobsController(PutBlobUseCase putBlobUseCase, GetBlobUseCase getBlobUseCase) : ControllerBase
+public sealed class BlobsController(
+    PutBlobUseCase putBlobUseCase,
+    GetBlobUseCase getBlobUseCase,
+    DeleteBlobUseCase deleteBlobUseCase) : ControllerBase
 {
     [HttpPut("{blobId}")]
     [Consumes("application/octet-stream")]
@@ -55,6 +58,24 @@ public sealed class BlobsController(PutBlobUseCase putBlobUseCase, GetBlobUseCas
                 .ConfigureAwait(false);
 
             return File(blob.Ciphertext, "application/octet-stream");
+        }
+        catch (UseCaseException ex)
+        {
+            return this.ToApiErrorResult(ex);
+        }
+    }
+
+    [HttpDelete("{blobId}")]
+    public async Task<IActionResult> DeleteBlobAsync(string blobId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var caller = HttpContext.RequireNetworkId();
+            await deleteBlobUseCase
+                .ExecuteAsync(new DeleteBlobCommand(blobId, caller), cancellationToken)
+                .ConfigureAwait(false);
+
+            return NoContent();
         }
         catch (UseCaseException ex)
         {

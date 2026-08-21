@@ -32,6 +32,7 @@ public static class UseCasesServiceCollectionExtensions
         services.AddScoped<GetDeliveryReceiptsUseCase>();
         services.AddScoped<PutBlobUseCase>();
         services.AddScoped<GetBlobUseCase>();
+        services.AddScoped<DeleteBlobUseCase>();
         services.AddScoped<PollInboxEventsUseCase>();
         services.AddScoped<GetClientPresencesUseCase>();
         services.AddScoped<GetServerCertificateUseCase>();

@@ -1321,8 +1321,8 @@ public sealed class ChatP2PSession : IAsyncDisposable
         var row = await _repo.GetMessageAsync(messageId).ConfigureAwait(false);
         if (row == null || row.ChatId != _chat.Id || row.Outgoing || string.IsNullOrWhiteSpace(row.TransferId))
             return;
-        if ((ChatTransferState)row.TransferState is ChatTransferState.Received or ChatTransferState.Transferring)
-            return;
+        // if ((ChatTransferState)row.TransferState is ChatTransferState.Received or ChatTransferState.Transferring)
+        //     return;
 
         await _repo.UpdateTransferStateAsync(messageId, ChatTransferState.Transferring).ConfigureAwait(false);
         TransferStateChanged?.Invoke(this, messageId);
@@ -1436,6 +1436,20 @@ public sealed class ChatP2PSession : IAsyncDisposable
             .ConfigureAwait(false);
         TransferStateChanged?.Invoke(this, row.Id);
         RaiseMessagesChanged();
+
+        try
+        {
+            await servers.TryDeleteBlobAsync(blobId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // Local receive already succeeded; TTL will drop leftovers.
+        }
+
         return true;
     }
 

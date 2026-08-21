@@ -121,6 +121,16 @@ public sealed class MessengerServerApiClient(
         return await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task DeleteBlobAsync(string blobId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(blobId);
+
+        using var response = await httpClient
+            .DeleteAsync(BlobLimits.BlobById(blobId), cancellationToken)
+            .ConfigureAwait(false);
+        await MessengerServerJson.EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task SubmitDeliveryReceiptAsync(
         DeliveryReceiptRequest request,
         CancellationToken cancellationToken = default)

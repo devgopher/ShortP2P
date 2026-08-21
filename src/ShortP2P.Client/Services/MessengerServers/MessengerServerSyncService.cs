@@ -396,6 +396,42 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         return null;
     }
 
+    /// <summary>
+    /// Removes the blob from trusted servers after the recipient accepted it.
+    /// Failures are ignored: TTL retention still applies.
+    /// </summary>
+    public async Task TryDeleteBlobAsync(string blobId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(blobId);
+
+        var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
+        var targets = ready.Where(c => _manager.AllowsTraffic(c)).ToArray();
+        if (targets.Length == 0)
+            return;
+
+        var degree = Math.Clamp(targets.Length, 1, MaxSendWorkers);
+        await Parallel.ForEachAsync(
+            targets,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = degree,
+                CancellationToken = cancellationToken
+            },
+            async (conn, ct) =>
+            {
+                if (!_manager.AllowsTraffic(conn))
+                    return;
+                try
+                {
+                    await TrackAsync(conn, () => conn.Api.DeleteBlobAsync(blobId, ct)).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogDebug(ex, "DeleteBlob failed on {BaseUrl}", conn.Entity.BaseUrl);
+                }
+            }).ConfigureAwait(false);
+    }
+
     private async Task<List<MessengerServerConnection>> CollectPeerServerTargetsAsync(
         string peerId,
         CancellationToken cancellationToken)

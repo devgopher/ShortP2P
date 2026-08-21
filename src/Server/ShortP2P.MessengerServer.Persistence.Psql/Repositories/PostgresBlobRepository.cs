@@ -21,6 +21,14 @@ public sealed class PostgresBlobRepository(MessengerDbContext db) : IBlobReposit
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task RemoveByIdAsync(string blobId, CancellationToken cancellationToken = default)
+    {
+        await db.Blobs
+            .Where(x => x.BlobId == blobId)
+            .ExecuteDeleteAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public async Task RemoveOlderThanAsync(DateTime cutoffUtc, CancellationToken cancellationToken = default)
     {
         await db.Blobs
