@@ -11,6 +11,13 @@ public sealed class ChatMessageAppendedEventArgs(int chatId, bool outgoing) : Ev
     public bool Outgoing { get; } = outgoing;
 }
 
+public sealed class ChatCreatedEventArgs(int chatId, bool remote) : EventArgs
+{
+    public int ChatId { get; } = chatId;
+    /// <summary>True — чат появился извне (invite / сервер), не создан вручную пользователем.</summary>
+    public bool Remote { get; } = remote;
+}
+
 public sealed class ChatRepository(AppDatabase db)
 {
     private readonly SemaphoreSlim _addChatGate = new(1, 1);
@@ -21,6 +28,9 @@ public sealed class ChatRepository(AppDatabase db)
 
     /// <summary>Новое сообщение записано в БД (входящее или исходящее).</summary>
     public event EventHandler<ChatMessageAppendedEventArgs>? ChatMessageAppended;
+
+    /// <summary>В БД вставлен новый чат (не обновление существующего).</summary>
+    public event EventHandler<ChatCreatedEventArgs>? ChatCreated;
 
     public void NotifyChatListChanged()
     {
@@ -48,7 +58,7 @@ public sealed class ChatRepository(AppDatabase db)
     }
 
     public async Task<ChatEntity> AddChatAsync(int userId, string peerNickname, string peerNetworkIdShort,
-        string peerRsaPublicJson, string peerHost, int peerPort)
+        string peerRsaPublicJson, string peerHost, int peerPort, bool remote = false)
     {
         await _addChatGate.WaitAsync().ConfigureAwait(false);
         try
@@ -98,6 +108,7 @@ public sealed class ChatRepository(AppDatabase db)
             };
             await conn.InsertAsync(chat);
             NotifyChatListChanged();
+            ChatCreated?.Invoke(this, new ChatCreatedEventArgs(chat.Id, remote));
             return chat;
         }
         finally

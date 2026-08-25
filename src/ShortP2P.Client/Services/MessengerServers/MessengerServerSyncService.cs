@@ -699,7 +699,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                     peerId,
                     request.PublicKey,
                     peerId,
-                    user.DataUdpPort).ConfigureAwait(false);
+                    user.DataUdpPort,
+                    remote: true).ConfigureAwait(false);
             }
             else
             {

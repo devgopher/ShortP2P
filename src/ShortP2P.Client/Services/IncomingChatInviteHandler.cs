@@ -75,8 +75,8 @@ public static class IncomingChatInviteHandler
             return;
         }
 
-        await repo.AddChatAsync(user.Id, nick, idShort, pubJson, effectiveHost, PresencePingCodec.DefaultDataUdpPort)
-            .ConfigureAwait(false);
+        await repo.AddChatAsync(user.Id, nick, idShort, pubJson, effectiveHost, PresencePingCodec.DefaultDataUdpPort,
+                remote: true).ConfigureAwait(false);
 
         ScheduleInviteReply(auth, user, host, port, sourceAddress, sendInviteReplyAsync, routingSettings,
             bluetoothAdapterMac);
