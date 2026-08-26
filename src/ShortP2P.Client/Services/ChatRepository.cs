@@ -1,7 +1,9 @@
 using System.Net;
+using ShortP2P.Auth.Data;
 using ShortP2P.Client.Data;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
+using SQLite;
 
 namespace ShortP2P.Client.Services;
 
@@ -39,13 +41,17 @@ public sealed class ChatRepository(AppDatabase db)
 
     public async Task<IReadOnlyList<ChatEntity>> ListChatsAsync(int userId)
     {
-        var conn = await _db.GetConnectionAsync();
+        var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
         var rows = await conn.Table<ChatEntity>()
             .Where(c => c.UserId == userId)
-            .ToListAsync();
-        // Один пир на network id (защита от дубликатов после повторной доставки UDP / гонки).
+            .ToListAsync()
+            .ConfigureAwait(false);
+
+        // Persist merge of duplicate peers (same canonical network id) so offline history stays on one row.
+        rows = await DeduplicateChatsInDbAsync(conn, rows, notify: false).ConfigureAwait(false);
+
         return rows
-            .GroupBy(c => c.PeerNetworkIdShort.Trim(), StringComparer.Ordinal)
+            .GroupBy(CanonicalPeerNetworkIdKey, StringComparer.Ordinal)
             .Select(g => g.OrderByDescending(c => c.UpdatedUtcTicks).First())
             .OrderByDescending(c => c.UpdatedUtcTicks)
             .ToList();
@@ -63,8 +69,11 @@ public sealed class ChatRepository(AppDatabase db)
         await _addChatGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            var existing = await FindChatByPeerNetworkIdAsync(userId, peerNetworkIdShort).ConfigureAwait(false);
-            var idShort = peerNetworkIdShort.Trim();
+            var idShort = CanonicalPeerNetworkId(peerNetworkIdShort);
+            if (idShort.Length == 0)
+                throw new ArgumentException("Peer network id is required.", nameof(peerNetworkIdShort));
+
+            var existing = await FindChatByPeerNetworkIdAsync(userId, idShort).ConfigureAwait(false);
             var preferredNick = PreferPeerNickname(peerNickname, idShort);
             if (existing != null)
             {
@@ -131,12 +140,172 @@ public sealed class ChatRepository(AppDatabase db)
 
     public async Task<ChatEntity?> FindChatByPeerNetworkIdAsync(int userId, string peerNetworkIdShort)
     {
-        var id = peerNetworkIdShort.Trim();
-        var conn = await _db.GetConnectionAsync();
+        var id = CanonicalPeerNetworkId(peerNetworkIdShort);
+        if (id.Length == 0)
+            return null;
+
+        var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
         var list = await conn.Table<ChatEntity>()
-            .Where(c => c.UserId == userId && c.PeerNetworkIdShort == id)
-            .ToListAsync();
-        return list.OrderByDescending(c => c.UpdatedUtcTicks).FirstOrDefault();
+            .Where(c => c.UserId == userId)
+            .ToListAsync()
+            .ConfigureAwait(false);
+        var matches = list.Where(c => PeerNetworkIdsEqual(c.PeerNetworkIdShort, id)).ToList();
+        if (matches.Count == 0)
+            return null;
+        if (matches.Count == 1)
+        {
+            var only = matches[0];
+            if (!string.Equals(only.PeerNetworkIdShort, id, StringComparison.Ordinal))
+            {
+                only.PeerNetworkIdShort = id;
+                only.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
+                await conn.UpdateAsync(only).ConfigureAwait(false);
+            }
+
+            return only;
+        }
+
+        var merged = await DeduplicateChatsInDbAsync(conn, matches, notify: true).ConfigureAwait(false);
+        return merged.OrderByDescending(c => c.UpdatedUtcTicks).FirstOrDefault();
+    }
+
+    /// <summary>Canonical base64url network id used as the chat list key.</summary>
+    public static string CanonicalPeerNetworkId(string? peerNetworkIdShort)
+    {
+        var raw = peerNetworkIdShort?.Trim() ?? "";
+        if (raw.Length == 0)
+            return "";
+        return CompressedNetworkId.TryParseShortString(raw, out var parsed) && !parsed.IsEmpty
+            ? parsed.ToShortString()
+            : raw;
+    }
+
+    public static bool PeerNetworkIdsEqual(string? a, string? b)
+    {
+        var ca = CanonicalPeerNetworkId(a);
+        var cb = CanonicalPeerNetworkId(b);
+        if (ca.Length == 0 || cb.Length == 0)
+            return string.Equals(a?.Trim(), b?.Trim(), StringComparison.Ordinal);
+        return string.Equals(ca, cb, StringComparison.Ordinal);
+    }
+
+    private static string CanonicalPeerNetworkIdKey(ChatEntity chat) =>
+        CanonicalPeerNetworkId(chat.PeerNetworkIdShort);
+
+    /// <summary>
+    /// Merges chats that represent the same peer into one DB row (keeps the row with the most messages).
+    /// </summary>
+    private async Task<List<ChatEntity>> DeduplicateChatsInDbAsync(SQLiteAsyncConnection conn,
+        List<ChatEntity> rows, bool notify)
+    {
+        if (rows.Count <= 1)
+        {
+            if (rows.Count == 1)
+            {
+                var single = rows[0];
+                var canonical = CanonicalPeerNetworkId(single.PeerNetworkIdShort);
+                if (canonical.Length > 0 &&
+                    !string.Equals(single.PeerNetworkIdShort, canonical, StringComparison.Ordinal))
+                {
+                    single.PeerNetworkIdShort = canonical;
+                    single.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
+                    await conn.UpdateAsync(single).ConfigureAwait(false);
+                }
+            }
+
+            return rows;
+        }
+
+        var result = new List<ChatEntity>(rows.Count);
+        var changed = false;
+        foreach (var group in rows.GroupBy(CanonicalPeerNetworkIdKey, StringComparer.Ordinal))
+        {
+            var members = group.ToList();
+            if (members.Count == 1)
+            {
+                var single = members[0];
+                var canonical = group.Key;
+                if (canonical.Length > 0 &&
+                    !string.Equals(single.PeerNetworkIdShort, canonical, StringComparison.Ordinal))
+                {
+                    single.PeerNetworkIdShort = canonical;
+                    single.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
+                    await conn.UpdateAsync(single).ConfigureAwait(false);
+                    changed = true;
+                }
+
+                result.Add(single);
+                continue;
+            }
+
+            var keeper = await PickChatToKeepAsync(conn, members).ConfigureAwait(false);
+            var canonicalId = group.Key.Length > 0 ? group.Key : CanonicalPeerNetworkId(keeper.PeerNetworkIdShort);
+            foreach (var orphan in members.Where(c => c.Id != keeper.Id))
+            {
+                await conn.ExecuteAsync("UPDATE messages SET ChatId = ? WHERE ChatId = ?", keeper.Id, orphan.Id)
+                    .ConfigureAwait(false);
+                keeper.PeerHost = PeerHostList.MergeAppend(keeper.PeerHost, orphan.PeerHost);
+                if (orphan.PeerPort > 0)
+                    keeper.PeerPort = orphan.PeerPort;
+                keeper.PeerEndpointsJson = MergePeerEndpointsJson(keeper.PeerEndpointsJson, orphan.PeerEndpointsJson);
+                if (!string.IsNullOrWhiteSpace(orphan.PeerRsaPublicJson) &&
+                    (string.IsNullOrWhiteSpace(keeper.PeerRsaPublicJson) ||
+                     orphan.UpdatedUtcTicks >= keeper.UpdatedUtcTicks))
+                    keeper.PeerRsaPublicJson = orphan.PeerRsaPublicJson;
+                if (ShouldReplacePeerNickname(keeper.PeerNickname, orphan.PeerNickname, canonicalId))
+                    keeper.PeerNickname = PreferPeerNickname(orphan.PeerNickname, canonicalId);
+                if (string.IsNullOrWhiteSpace(keeper.RelayRouteBlob) &&
+                    !string.IsNullOrWhiteSpace(orphan.RelayRouteBlob))
+                    keeper.RelayRouteBlob = orphan.RelayRouteBlob;
+                await conn.DeleteAsync(orphan).ConfigureAwait(false);
+                changed = true;
+            }
+
+            if (!string.Equals(keeper.PeerNetworkIdShort, canonicalId, StringComparison.Ordinal) &&
+                canonicalId.Length > 0)
+                keeper.PeerNetworkIdShort = canonicalId;
+            keeper.UpdatedUtcTicks = Math.Max(keeper.UpdatedUtcTicks,
+                members.Max(c => c.UpdatedUtcTicks));
+            await conn.UpdateAsync(keeper).ConfigureAwait(false);
+            result.Add(keeper);
+            changed = true;
+        }
+
+        if (changed && notify)
+            NotifyChatListChanged();
+        return result;
+    }
+
+    private static async Task<ChatEntity> PickChatToKeepAsync(SQLiteAsyncConnection conn, List<ChatEntity> members)
+    {
+        ChatEntity? best = null;
+        var bestCount = -1;
+        foreach (var chat in members.OrderBy(c => c.Id))
+        {
+            var count = await conn.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM messages WHERE ChatId = ?", chat.Id).ConfigureAwait(false);
+            if (best == null || count > bestCount ||
+                (count == bestCount && chat.UpdatedUtcTicks > best.UpdatedUtcTicks))
+            {
+                best = chat;
+                bestCount = count;
+            }
+        }
+
+        return best!;
+    }
+
+    private static string MergePeerEndpointsJson(string? a, string? b)
+    {
+        var merged = new List<TransportAddress>();
+        if (!string.IsNullOrWhiteSpace(a))
+            merged.AddRange(PeerTransportEndpoints.Parse(new ChatEntity { PeerEndpointsJson = a }));
+        if (!string.IsNullOrWhiteSpace(b))
+            merged.AddRange(PeerTransportEndpoints.Parse(new ChatEntity { PeerEndpointsJson = b }));
+        var dedup = new Dictionary<string, TransportAddress>(StringComparer.Ordinal);
+        foreach (var x in merged)
+            dedup[$"{(int)x.Kind}:{Convert.ToBase64String(x.Data)}"] = x;
+        return PeerTransportEndpoints.Serialize(dedup.Values);
     }
 
     /// <returns>True if the stored MAC / endpoints actually changed.</returns>
