@@ -64,6 +64,8 @@ public sealed class ChatRepository(AppDatabase db)
         try
         {
             var existing = await FindChatByPeerNetworkIdAsync(userId, peerNetworkIdShort).ConfigureAwait(false);
+            var idShort = peerNetworkIdShort.Trim();
+            var preferredNick = PreferPeerNickname(peerNickname, idShort);
             if (existing != null)
             {
                 var mergedHost = PeerHostList.MergeAppend(existing.PeerHost, peerHost);
@@ -71,11 +73,13 @@ public sealed class ChatRepository(AppDatabase db)
                 var newPub = peerRsaPublicJson?.Trim();
                 var pubChanged = newPub != null &&
                                  !string.Equals(existing.PeerRsaPublicJson, newPub, StringComparison.Ordinal);
+                var nickChanged = ShouldReplacePeerNickname(existing.PeerNickname, preferredNick, idShort);
                 var changed =
                     !string.Equals(mergedHost, existing.PeerHost, StringComparison.Ordinal) ||
                     existing.PeerPort != peerPort ||
                     !string.Equals(mergedEndpoints, existing.PeerEndpointsJson ?? "", StringComparison.Ordinal) ||
                     pubChanged ||
+                    nickChanged ||
                     !string.IsNullOrEmpty(existing.RelayRouteBlob);
 
                 if (!changed)
@@ -88,8 +92,16 @@ public sealed class ChatRepository(AppDatabase db)
                 existing.PeerEndpointsJson = mergedEndpoints;
                 if (newPub != null)
                     existing.PeerRsaPublicJson = newPub;
+                if (nickChanged)
+                    existing.PeerNickname = preferredNick;
                 existing.RelayRouteBlob = null;
                 existing.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
+                if (nickChanged)
+                {
+                    var connUpdate = await _db.GetConnectionAsync().ConfigureAwait(false);
+                    await connUpdate.UpdateAsync(existing).ConfigureAwait(false);
+                }
+
                 NotifyChatListChanged();
                 return existing;
             }
@@ -98,8 +110,8 @@ public sealed class ChatRepository(AppDatabase db)
             var chat = new ChatEntity
             {
                 UserId = userId,
-                PeerNickname = peerNickname.Trim(),
-                PeerNetworkIdShort = peerNetworkIdShort.Trim(),
+                PeerNickname = preferredNick,
+                PeerNetworkIdShort = idShort,
                 PeerRsaPublicJson = peerRsaPublicJson.Trim(),
                 PeerHost = peerHost.Trim(),
                 PeerPort = peerPort,
@@ -167,6 +179,59 @@ public sealed class ChatRepository(AppDatabase db)
             chat.PeerRsaPublicJson = peerRsaPublicJson.Trim();
         chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
         await conn.UpdateAsync(chat);
+    }
+
+    /// <summary>
+    /// Обновляет ник пира, если пришёл реальный ник (не пустой и не совпадающий с network id),
+    /// а в БД сейчас пусто / network id / другой устаревший placeholder.
+    /// </summary>
+    public async Task<bool> TryUpdatePeerNicknameAsync(int chatId, string? peerNickname)
+    {
+        var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
+        var chat = await conn.FindAsync<ChatEntity>(chatId).ConfigureAwait(false);
+        if (chat == null)
+            return false;
+
+        var preferred = PreferPeerNickname(peerNickname, chat.PeerNetworkIdShort);
+        if (!ShouldReplacePeerNickname(chat.PeerNickname, preferred, chat.PeerNetworkIdShort))
+            return false;
+
+        chat.PeerNickname = preferred;
+        chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
+        await conn.UpdateAsync(chat).ConfigureAwait(false);
+        NotifyChatListChanged();
+        return true;
+    }
+
+    public static bool IsPlaceholderNickname(string? nickname, string networkIdShort)
+    {
+        var nick = nickname?.Trim() ?? "";
+        var id = networkIdShort?.Trim() ?? "";
+        return nick.Length == 0 ||
+               (id.Length > 0 && string.Equals(nick, id, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string PreferPeerNickname(string? peerNickname, string networkIdShort)
+    {
+        var nick = peerNickname?.Trim() ?? "";
+        var id = networkIdShort.Trim();
+        if (nick.Length == 0)
+            return id;
+        return nick;
+    }
+
+    private static bool ShouldReplacePeerNickname(string? currentNickname, string incomingNickname, string networkIdShort)
+    {
+        var incoming = PreferPeerNickname(incomingNickname, networkIdShort);
+        var current = currentNickname?.Trim() ?? "";
+        if (string.Equals(current, incoming, StringComparison.Ordinal))
+            return false;
+
+        var incomingIsPlaceholder = IsPlaceholderNickname(incoming, networkIdShort);
+        var currentIsPlaceholder = IsPlaceholderNickname(current, networkIdShort);
+        if (incomingIsPlaceholder)
+            return current.Length == 0;
+        return currentIsPlaceholder || !string.Equals(current, incoming, StringComparison.Ordinal);
     }
 
     private static string MergePeerEndpoints(ChatEntity? existing, string peerHost, int peerPort)

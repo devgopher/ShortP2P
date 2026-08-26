@@ -65,6 +65,7 @@ public static class IncomingChatInviteHandler
                 : existing.PeerPort;
             await repo.UpdateChatP2pRouteAsync(existing.Id, mergedHost, chatPeerPort, null)
                 .ConfigureAwait(false);
+            await repo.TryUpdatePeerNicknameAsync(existing.Id, nick).ConfigureAwait(false);
             existing.PeerHost = mergedHost;
             existing.PeerPort = chatPeerPort;
             existing.RelayRouteBlob = null;

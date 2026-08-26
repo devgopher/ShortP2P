@@ -88,12 +88,39 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 var remote = await MessengerServers.KeepAliveAndListRemoteClientsAsync(ct).ConfigureAwait(false);
                 var entries = remote.Select(ToDirectoryEntry).ToArray();
                 LocalScan.ApplyMessengerServerDirectory(entries);
+                await SyncChatNicknamesFromPresenceAsync(remote, ct).ConfigureAwait(false);
             };
         }
     }
 
     /// <summary>Optional HTTPS messenger-server sync (long-poll inbox, ChatRequest, messages).</summary>
     public MessengerServerSyncService? MessengerServers { get; }
+
+    private async Task SyncChatNicknamesFromPresenceAsync(
+        IReadOnlyList<ClientPresenceDto> remote,
+        CancellationToken cancellationToken)
+    {
+        var user = _auth.CurrentUser;
+        if (user == null || remote.Count == 0)
+            return;
+
+        foreach (var client in remote)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var id = client.NetworkId.Trim();
+            var nick = client.Nick?.Trim() ?? "";
+            if (id.Length == 0 || nick.Length == 0)
+                continue;
+            if (string.Equals(nick, id, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var chat = await _chats.FindChatByPeerNetworkIdAsync(user.Id, id).ConfigureAwait(false);
+            if (chat == null)
+                continue;
+            if (await _chats.TryUpdatePeerNicknameAsync(chat.Id, nick).ConfigureAwait(false))
+                await RefreshSessionChatRowAsync(chat.Id, cancellationToken).ConfigureAwait(false);
+        }
+    }
 
     private static MessengerServerDirectoryEntry ToDirectoryEntry(ClientPresenceDto client)
     {
@@ -688,6 +715,10 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         var chat = await _chats.FindChatByPeerNetworkIdAsync(user.Id, shortId).ConfigureAwait(false);
         if (chat == null)
             return;
+
+        if (!string.IsNullOrWhiteSpace(peer.Nickname) &&
+            await _chats.TryUpdatePeerNicknameAsync(chat.Id, peer.Nickname).ConfigureAwait(false))
+            await RefreshSessionChatRowAsync(chat.Id, cancellationToken).ConfigureAwait(false);
 
         var seenDirect = peer.TransportKind == TransportKind.Udp
             ? UdpTransportAddress.ToIPEndPoint(peer.SourceAddress).Address.ToString()

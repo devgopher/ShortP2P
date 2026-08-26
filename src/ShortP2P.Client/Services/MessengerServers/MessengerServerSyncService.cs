@@ -689,13 +689,14 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                 continue;
 
             var existing = await _chats.FindChatByPeerNetworkIdAsync(user.Id, peerId).ConfigureAwait(false);
+            var peerNick = await ResolvePeerNicknameAsync(connection, peerId, cancellationToken).ConfigureAwait(false);
             ChatEntity chat;
             if (existing == null ||
                 !string.Equals(existing.PeerRsaPublicJson, request.PublicKey.Trim(), StringComparison.Ordinal))
             {
                 chat = await _chats.AddChatAsync(
                     user.Id,
-                    peerId,
+                    peerNick,
                     peerId,
                     request.PublicKey,
                     peerId,
@@ -705,6 +706,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             else
             {
                 chat = existing;
+                await _chats.TryUpdatePeerNicknameAsync(chat.Id, peerNick).ConfigureAwait(false);
             }
 
             try
@@ -730,6 +732,31 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                     chat.Id);
             }
         }
+    }
+
+    private async Task<string> ResolvePeerNicknameAsync(
+        MessengerServerConnection connection,
+        string peerNetworkId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var list = await TrackAsync(connection, () => connection.Api.GetClientsAsync(cancellationToken))
+                .ConfigureAwait(false);
+            _manager.ReplaceRegisteredClients(connection.Entity.Id, list.Select(c => c.NetworkId));
+            var hit = list.FirstOrDefault(c =>
+                string.Equals(c.NetworkId.Trim(), peerNetworkId, StringComparison.Ordinal));
+            var nick = hit?.Nick?.Trim() ?? "";
+            if (nick.Length > 0 &&
+                !string.Equals(nick, peerNetworkId, StringComparison.OrdinalIgnoreCase))
+                return nick;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "GetClients for nickname of {PeerId} failed", peerNetworkId);
+        }
+
+        return peerNetworkId;
     }
 
     private async Task ProcessIncomingMessagesAsync(
