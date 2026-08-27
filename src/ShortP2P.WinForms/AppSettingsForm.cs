@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Routing;
 using ShortP2P.Client.Services;
+using ShortP2P.Discovery;
 
 namespace ShortP2P.WinForms;
 
@@ -20,10 +21,10 @@ public sealed class AppSettingsForm : Form
     private readonly Button _saveButton = new() { Text = "Сохранить", AutoSize = true };
     private readonly AppSettingsStore _settings;
 
-    private readonly CheckBox _trafficSavingEnabled = new()
+    private readonly ComboBox _trafficQualityCombo = new()
     {
-        AutoSize = true,
-        Text = "Включить экономию трафика"
+        DropDownStyle = ComboBoxStyle.DropDownList,
+        Width = 440
     };
 
     private readonly ILogger<UserAction> _userActions;
@@ -44,7 +45,7 @@ public sealed class AppSettingsForm : Form
         Text = "Настройки приложения";
         StartPosition = FormStartPosition.CenterParent;
         Width = 560;
-        Height = 300;
+        Height = 320;
         MaximizeBox = false;
         MinimizeBox = false;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -135,22 +136,32 @@ public sealed class AppSettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             Padding = new Padding(12)
         };
         trafficRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         trafficRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        trafficRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         trafficRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var trafficLabel = new Label
+        {
+            AutoSize = true,
+            Text = "Режим экономии трафика:"
+        };
+        _trafficQualityCombo.Items.Add(new TrafficQualityOptionItem(TrafficQualityMode.Normal));
+        _trafficQualityCombo.Items.Add(new TrafficQualityOptionItem(TrafficQualityMode.Economy));
+        _trafficQualityCombo.Items.Add(new TrafficQualityOptionItem(TrafficQualityMode.UltraEconomy));
         var trafficHint = new Label
         {
             AutoSize = true,
             ForeColor = SystemColors.GrayText,
             MaximumSize = new Size(500, 0),
-            Text = "В режиме экономии трафика голосовые сообщения кодируются с битрейтом 6 kbit/s " +
-                   "(вместо 24 kbit/s), а presence-пинги отправляются раз в 10 секунд."
+            Text = "Ультраэкономия: голос 4 kbit/s, видео 144p. Экономия: голос 6 kbit/s, видео 240p. " +
+                   "Нормальный: голос 24 kbit/s, видео 480p. При экономии и ультраэкономии presence-пинги — раз в 10 с."
         };
-        trafficRoot.Controls.Add(_trafficSavingEnabled, 0, 0);
-        trafficRoot.Controls.Add(trafficHint, 0, 1);
+        trafficRoot.Controls.Add(trafficLabel, 0, 0);
+        trafficRoot.Controls.Add(_trafficQualityCombo, 0, 1);
+        trafficRoot.Controls.Add(trafficHint, 0, 2);
         trafficTab.Controls.Add(trafficRoot);
 
         var bottomButtons = new FlowLayoutPanel
@@ -178,7 +189,20 @@ public sealed class AppSettingsForm : Form
         await _settings.InitializeAsync().ConfigureAwait(true);
         ReloadAudioInputs(false);
         await ReloadVideoInputsAsync(false).ConfigureAwait(true);
-        _trafficSavingEnabled.Checked = _settings.Current.TrafficSavingEnabled;
+        SelectTrafficQuality(_settings.Current.TrafficQuality);
+    }
+
+    private void SelectTrafficQuality(TrafficQualityMode mode)
+    {
+        for (var i = 0; i < _trafficQualityCombo.Items.Count; i++)
+        {
+            if (_trafficQualityCombo.Items[i] is not TrafficQualityOptionItem item || item.Mode != mode)
+                continue;
+            _trafficQualityCombo.SelectedIndex = i;
+            return;
+        }
+
+        _trafficQualityCombo.SelectedIndex = 0;
     }
 
     private void ReloadAudioInputs(bool keepCurrentSelection)
@@ -213,19 +237,20 @@ public sealed class AppSettingsForm : Form
             return;
         if (_videoSourceCombo.SelectedItem is not VideoInputOptionItem selectedVideo)
             return;
+        if (_trafficQualityCombo.SelectedItem is not TrafficQualityOptionItem selectedTraffic)
+            return;
         await _settings.SetVoiceInputDeviceNumberAsync(selected.DeviceNumber).ConfigureAwait(true);
         await _settings.SetVideoInputDeviceIdAsync(selectedVideo.DeviceId).ConfigureAwait(true);
-        await _settings.SetTrafficSavingEnabledAsync(_trafficSavingEnabled.Checked).ConfigureAwait(true);
+        await _settings.SetTrafficQualityAsync(selectedTraffic.Mode).ConfigureAwait(true);
         var routing = await _routingStore.LoadAsync().ConfigureAwait(true);
-        routing.TrafficSavingEnabled = _trafficSavingEnabled.Checked;
+        routing.TrafficQuality = selectedTraffic.Mode;
         await _routingStore.SaveAsync(routing).ConfigureAwait(true);
-        _runtime.Settings.TrafficSavingEnabled = routing.TrafficSavingEnabled;
+        _runtime.Settings.TrafficQuality = routing.TrafficQuality;
         _userActions.LogInformation("Settings: voice input device changed to {DeviceNumber} ({DeviceLabel})",
             selected.DeviceNumber, selected.DisplayText);
         _userActions.LogInformation("Settings: video input device changed to {DeviceId} ({DeviceLabel})",
             selectedVideo.DeviceId, selectedVideo.DisplayText);
-        _userActions.LogInformation("Settings: traffic saving mode {Mode}",
-            _trafficSavingEnabled.Checked ? "enabled" : "disabled");
+        _userActions.LogInformation("Settings: traffic quality mode {Mode}", selectedTraffic.Mode);
         DialogResult = DialogResult.OK;
         Close();
     }
@@ -270,6 +295,14 @@ public sealed class AppSettingsForm : Form
         public override string ToString()
         {
             return DisplayText;
+        }
+    }
+
+    private sealed record TrafficQualityOptionItem(TrafficQualityMode Mode)
+    {
+        public override string ToString()
+        {
+            return Mode.GetDisplayLabel();
         }
     }
 }

@@ -26,7 +26,7 @@ public class RoutingSettingsPage : ContentPage
     private readonly Entry _searchTimeoutMs = new() { Keyboard = Keyboard.Numeric };
     private readonly P2pRoutingSettingsStore _store;
     private readonly Switch _suggestBluetoothPairing = new();
-    private bool _trafficSavingEnabled;
+    private TrafficQualityMode _trafficQuality = TrafficQualityMode.Normal;
 
     public RoutingSettingsPage(P2pRoutingSettingsStore store, UserP2pRuntime runtime,
         IBluetoothRadioCatalog bluetoothCatalog, IBluetoothTransportProvider bluetoothTransport,
@@ -86,7 +86,7 @@ public class RoutingSettingsPage : ContentPage
             _searchTimeoutMs.Text = ((int)s.SearchWaitTimeout.TotalMilliseconds).ToString();
             var idx = Array.IndexOf(LinkTechnologyPresetExtensions.AllPresets, s.LinkTechnology);
             _linkTechnology.SelectedIndex = idx >= 0 ? idx : 0;
-            _trafficSavingEnabled = s.TrafficSavingEnabled;
+            _trafficQuality = s.TrafficQuality;
             _enableUdpTransport.IsToggled = s.EnableUdpTransport;
             _enableBluetoothTransport.IsToggled = s.EnableBluetoothTransport;
             _suggestBluetoothPairing.IsToggled = s.SuggestBluetoothPairing;
@@ -195,7 +195,7 @@ public class RoutingSettingsPage : ContentPage
             SendFailureRetryDelay = TimeSpan.FromMilliseconds(dm),
             SearchWaitTimeout = TimeSpan.FromMilliseconds(st),
             LinkTechnology = LinkTechnologyPresetExtensions.AllPresets[li],
-            TrafficSavingEnabled = _trafficSavingEnabled,
+            TrafficQuality = _trafficQuality,
             EnableUdpTransport = _enableUdpTransport.IsToggled,
             EnableBluetoothTransport = _enableBluetoothTransport.IsToggled,
             SuggestBluetoothPairing = _suggestBluetoothPairing.IsToggled,
@@ -208,7 +208,7 @@ public class RoutingSettingsPage : ContentPage
         _runtime.Settings.SendFailureRetryDelay = settings.SendFailureRetryDelay;
         _runtime.Settings.SearchWaitTimeout = settings.SearchWaitTimeout;
         _runtime.Settings.LinkTechnology = settings.LinkTechnology;
-        _runtime.Settings.TrafficSavingEnabled = settings.TrafficSavingEnabled;
+        _runtime.Settings.TrafficQuality = settings.TrafficQuality;
         _runtime.Settings.EnableUdpTransport = settings.EnableUdpTransport;
         _runtime.Settings.EnableBluetoothTransport = settings.EnableBluetoothTransport;
         _runtime.Settings.SelectedBluetoothAdapterDeviceId = settings.SelectedBluetoothAdapterDeviceId;

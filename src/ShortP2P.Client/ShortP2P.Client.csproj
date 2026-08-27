@@ -34,6 +34,7 @@
         <Compile Remove="Qr\LocalIPv4Resolver.cs" />
         <Compile Remove="Routing\P2pRoutingSettings.cs" />
         <Compile Remove="Routing\LinkTechnologyPreset.cs" />
+        <Compile Remove="Routing\TrafficQualityMode.cs" />
         <Compile Remove="Routing\PresencePeerCapabilities.cs" />
         <Compile Remove="Routing\PresencePingCodec.cs" />
         <Compile Remove="Routing\DiscoveredLocalPeer.cs" />

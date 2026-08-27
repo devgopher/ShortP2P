@@ -22,6 +22,7 @@
         <Compile Include="..\ShortP2P.Client\Qr\LocalIPv4Resolver.cs" Link="Qr\LocalIPv4Resolver.cs" />
         <Compile Include="..\ShortP2P.Client\Routing\P2pRoutingSettings.cs" Link="Routing\P2pRoutingSettings.cs" />
         <Compile Include="..\ShortP2P.Client\Routing\LinkTechnologyPreset.cs" Link="Routing\LinkTechnologyPreset.cs" />
+        <Compile Include="..\ShortP2P.Client\Routing\TrafficQualityMode.cs" Link="Routing\TrafficQualityMode.cs" />
         <Compile Include="..\ShortP2P.Client\Routing\PresencePeerCapabilities.cs" Link="Routing\PresencePeerCapabilities.cs" />
         <Compile Include="..\ShortP2P.Client\Routing\PresencePingCodec.cs" Link="Routing\PresencePingCodec.cs" />
         <Compile Include="..\ShortP2P.Client\Routing\DiscoveredLocalPeer.cs" Link="Routing\DiscoveredLocalPeer.cs" />

@@ -6,6 +6,7 @@ using ShortP2P.Client;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
+using ShortP2P.Discovery;
 
 namespace ShortP2P.MauiApp;
 
@@ -388,7 +389,7 @@ public partial class ChatDetailPage : ContentPage
             recorder.SetAudioSource(global::Android.Media.AudioSource.Mic);
             recorder.SetOutputFormat(global::Android.Media.OutputFormat.Ogg);
             recorder.SetAudioEncoder(global::Android.Media.AudioEncoder.Opus);
-            recorder.SetAudioEncodingBitRate(18_000);
+            recorder.SetAudioEncodingBitRate(_p2p.Settings.TrafficQuality.GetVoiceBitrate());
             recorder.SetAudioSamplingRate(48_000);
             recorder.SetOutputFile(_voiceTempPath);
             recorder.Prepare();

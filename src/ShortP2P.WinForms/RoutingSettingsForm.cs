@@ -58,7 +58,7 @@ internal sealed class RoutingSettingsForm : Form
     };
 
     private readonly ILogger<UserAction> _userActions;
-    private bool _trafficSavingEnabled;
+    private TrafficQualityMode _trafficQuality = TrafficQualityMode.Normal;
 
     public RoutingSettingsForm(P2pRoutingSettingsStore store, UserP2pRuntime runtime,
         IBluetoothRadioCatalog bluetoothCatalog, IBluetoothTransportProvider bluetoothTransport,
@@ -184,7 +184,7 @@ internal sealed class RoutingSettingsForm : Form
         _enableUdpTransport.Checked = s.EnableUdpTransport;
         _enableBluetoothTransport.Checked = s.EnableBluetoothTransport;
         _suggestBluetoothPairing.Checked = s.SuggestBluetoothPairing;
-        _trafficSavingEnabled = s.TrafficSavingEnabled;
+        _trafficQuality = s.TrafficQuality;
         _advertisePeerSearch.Checked = s.AdvertisedPeerCapabilities.HasFlag(PresencePeerCapabilities.PeerSearch);
         await LoadBluetoothAdaptersAsync(s).ConfigureAwait(true);
     }
@@ -264,7 +264,7 @@ internal sealed class RoutingSettingsForm : Form
             EnableUdpTransport = _enableUdpTransport.Checked,
             EnableBluetoothTransport = _enableBluetoothTransport.Checked,
             SuggestBluetoothPairing = _suggestBluetoothPairing.Checked,
-            TrafficSavingEnabled = _trafficSavingEnabled,
+            TrafficQuality = _trafficQuality,
             AdvertisedPeerCapabilities = cap
         };
         ApplySelectedAdapter(s);
@@ -283,7 +283,7 @@ internal sealed class RoutingSettingsForm : Form
         _runtime.Settings.SelectedBluetoothAdapterDeviceId = s.SelectedBluetoothAdapterDeviceId;
         _runtime.Settings.SelectedBluetoothAdapterMac = s.SelectedBluetoothAdapterMac;
         _runtime.Settings.SuggestBluetoothPairing = s.SuggestBluetoothPairing;
-        _runtime.Settings.TrafficSavingEnabled = s.TrafficSavingEnabled;
+        _runtime.Settings.TrafficQuality = s.TrafficQuality;
         _runtime.Settings.AdvertisedPeerCapabilities = s.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
         _bluetoothTransport.ApplySettings(s);
     }

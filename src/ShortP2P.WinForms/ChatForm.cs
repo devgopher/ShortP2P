@@ -11,6 +11,7 @@ using ShortP2P.Client;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
+using ShortP2P.Discovery;
 using ShortP2P.Transport.Bluetooth.Windows;
 using Timer = System.Windows.Forms.Timer;
 
@@ -221,7 +222,7 @@ public sealed class ChatForm : Form
         bottom.Controls.Add(_send, 6, 0);
 
         _buttonTooltips.SetToolTip(_attachVoice,
-            "Голосовое (Ogg Opus, моно ~6 kbps, без ffmpeg): нажмите для начала записи, ещё раз — остановить и отправить.");
+            "Голосовое (Ogg Opus, моно): нажмите для начала записи, ещё раз — остановить и отправить. Битрейт зависит от режима экономии трафика.");
         _buttonTooltips.SetToolTip(_attachImage, "Отправить изображение");
         _buttonTooltips.SetToolTip(_attachVideo,
             "Отправить видео OGV (обычный: 320x240, экономия: 160x120, до 60 сек)");
@@ -381,7 +382,7 @@ public sealed class ChatForm : Form
             string.Equals(m.MimeType, VoiceRecordHelper.VoiceMessageMime, StringComparison.OrdinalIgnoreCase))
         {
             var kb = (voiceBlob.Length + 1023) / 1024;
-            var caption = $"{whoPrefix} [{ts}] · голосовое · Ogg Opus · ~6 kbps mono · {kb} КБ";
+            var caption = $"{whoPrefix} [{ts}] · голосовое · Ogg Opus · mono · {kb} КБ";
             return new ChatLine(m.Id, caption, color, m.Outgoing, ds, ChatLineKind.Voice, voiceBlob,
                 VoiceRecordHelper.VoiceFileName);
         }
@@ -456,9 +457,7 @@ public sealed class ChatForm : Form
 
         using var dlg = new OpenFileDialog
         {
-            Title = _appSettings.Current.TrafficSavingEnabled
-                ? "Видео OGV (160x120, до 60 секунд)"
-                : "Видео OGV (320x240, до 60 секунд)",
+            Title = BuildOgvDialogTitle(_appSettings.Current.TrafficQuality),
             Filter = "Видео OGV|*.ogv|Все файлы|*.*",
             CheckFileExists = true
         };
@@ -476,7 +475,7 @@ public sealed class ChatForm : Form
 
             var prepared = await VideoAttachHelper
                 .TryLoadAndValidateOgvAsync(dlg.FileName, _media.MaxDocumentBytes,
-                    _appSettings.Current.TrafficSavingEnabled)
+                    _appSettings.Current.TrafficQuality)
                 .ConfigureAwait(true);
             if (!prepared.Success || prepared.Bytes == null || prepared.OutputFileName == null ||
                 prepared.OutputMime == null)
@@ -514,12 +513,18 @@ public sealed class ChatForm : Form
         }
     }
 
+    private static string BuildOgvDialogTitle(TrafficQualityMode mode)
+    {
+        var (w, h) = mode.GetVideoResolution();
+        return $"Видео OGV ({w}x{h}, до 60 секунд)";
+    }
+
     private async Task OnAttachCameraAsync()
     {
         if (_p2PSession == null)
             return;
         ClearDeliveryIssue();
-        using var win = new CameraRecordForm(_appSettings.Current.TrafficSavingEnabled,
+        using var win = new CameraRecordForm(_appSettings.Current.TrafficQuality,
             _appSettings.Current.VideoInputDeviceId);
         if (await win.ShowDialogAsync(this) != DialogResult.OK || win.Result == null)
             return;
@@ -986,7 +991,7 @@ public sealed class ChatForm : Form
             try
             {
                 var (ok, ogg, err) = await VoiceRecordHelper
-                    .EncodeWavPcmToOggOpusAsync(wav, _appSettings.Current.TrafficSavingEnabled)
+                    .EncodeWavPcmToOggOpusAsync(wav, _appSettings.Current.TrafficQuality)
                     .ConfigureAwait(true);
                 if (!ok || ogg == null)
                 {

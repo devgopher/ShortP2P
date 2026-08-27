@@ -2,10 +2,11 @@ using Concentus;
 using Concentus.Enums;
 using Concentus.Oggfile;
 using NAudio.Wave;
+using ShortP2P.Discovery;
 
 namespace ShortP2P.WinForms;
 
-/// <summary>Голосовые сообщения: Ogg + Opus, моно ~6 kbit/s, без ffmpeg.</summary>
+/// <summary>Голосовые сообщения: Ogg + Opus, моно, без ffmpeg.</summary>
 internal static class VoiceRecordHelper
 {
     public const string VoiceMessageMime = "audio/ogg";
@@ -13,18 +14,19 @@ internal static class VoiceRecordHelper
 
     private const int OpusDecodeSampleRate = 48000;
 
-    public const int TrafficSavingBitrate = 6_000;
-    public const int DefaultBitrate = 18_000;
+    public const int UltraEconomyBitrate = TrafficQualityModeExtensions.UltraEconomyVoiceBitrate;
+    public const int TrafficSavingBitrate = TrafficQualityModeExtensions.EconomyVoiceBitrate;
+    public const int DefaultBitrate = TrafficQualityModeExtensions.NormalVoiceBitrate;
 
-    /// <summary>WAV (RIFF) в памяти → Ogg Opus mono (6 или 24 kbps в зависимости от настроек).</summary>
+    /// <summary>WAV (RIFF) в памяти → Ogg Opus mono (битрейт по режиму качества).</summary>
     public static Task<(bool Ok, byte[]? OggBytes, string? Error)> EncodeWavPcmToOggOpusAsync(byte[] wavBytes,
-        bool trafficSavingEnabled, CancellationToken cancellationToken = default)
+        TrafficQualityMode trafficQuality, CancellationToken cancellationToken = default)
     {
-        return Task.Run(() => EncodeWavPcmToOggOpus(wavBytes, trafficSavingEnabled), cancellationToken);
+        return Task.Run(() => EncodeWavPcmToOggOpus(wavBytes, trafficQuality), cancellationToken);
     }
 
     private static (bool Ok, byte[]? OggBytes, string? Error) EncodeWavPcmToOggOpus(byte[] wavBytes,
-        bool trafficSavingEnabled)
+        TrafficQualityMode trafficQuality)
     {
         if (wavBytes.Length < 44)
             return (false, null, "Слишком короткая запись.");
@@ -75,7 +77,7 @@ internal static class VoiceRecordHelper
             var oggMs = new MemoryStream();
             var encoder =
                 OpusCodecFactory.CreateEncoder(OpusDecodeSampleRate, 1, OpusApplication.OPUS_APPLICATION_VOIP);
-            encoder.Bitrate = trafficSavingEnabled ? TrafficSavingBitrate : DefaultBitrate;
+            encoder.Bitrate = trafficQuality.GetVoiceBitrate();
             var tags = new OpusTags();
             var oggOut = new OpusOggWriteStream(encoder, oggMs, tags, sampleRate);
             oggOut.WriteSamples(monoPcm, 0, monoPcm.Length);

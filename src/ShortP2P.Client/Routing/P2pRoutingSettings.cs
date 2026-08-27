@@ -39,8 +39,8 @@ public sealed class P2pRoutingSettings
     /// <summary>Показывать предложение открыть системное сопряжение Bluetooth при недоступном BT-пире.</summary>
     public bool SuggestBluetoothPairing { get; set; }
 
-    /// <summary>Режим экономии трафика: более редкие presence-пинги и экономный голосовой битрейт.</summary>
-    public bool TrafficSavingEnabled { get; set; }
+    /// <summary>Режим качества медиа и частоты presence-пингов.</summary>
+    public TrafficQualityMode TrafficQuality { get; set; } = TrafficQualityMode.Normal;
 
     /// <summary>
     ///     Возможности, заявляемые в presence-пинге (всегда включается <see cref="PresencePeerCapabilities.Chat" /> в кодеке).

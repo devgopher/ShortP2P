@@ -82,11 +82,12 @@ public static class LinkTechnologyPresetExtensions
     }
 
     /// <summary>
-    ///     Период UDP/BT presence/discovery-пинга: 1 с; при включённой экономии трафика — 10 с.
+    ///     Период UDP/BT presence/discovery-пинга: 1 с; при экономии / ультраэкономии — 10 с.
     /// </summary>
-    public static TimeSpan GetPresencePingPeriod(this LinkTechnologyPreset preset, bool trafficSavingEnabled = false)
+    public static TimeSpan GetPresencePingPeriod(this LinkTechnologyPreset preset,
+        TrafficQualityMode trafficQuality = TrafficQualityMode.Normal)
     {
-        if (trafficSavingEnabled)
+        if (trafficQuality.UsesReducedPresencePing())
             return TimeSpan.FromSeconds(10);
         return TimeSpan.FromSeconds(1);
     }

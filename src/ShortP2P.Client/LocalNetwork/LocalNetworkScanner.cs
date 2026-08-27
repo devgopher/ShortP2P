@@ -84,7 +84,7 @@ public sealed class LocalNetworkScanner(
     /// <summary>Удалять пира из списка, если не было пинга дольше этого (несколько периодов рассылки).</summary>
     private TimeSpan DiscoveryStaleAfter =>
         TimeSpan.FromTicks(Math.Max(TimeSpan.FromSeconds(45).Ticks,
-            routingSettings.LinkTechnology.GetPresencePingPeriod(routingSettings.TrafficSavingEnabled).Ticks * 6));
+            routingSettings.LinkTechnology.GetPresencePingPeriod(routingSettings.TrafficQuality).Ticks * 6));
 
     /// <summary>Снимок последних найденных пиров (кроме текущего пользователя).</summary>
     public IReadOnlyList<DiscoveredLocalPeer> Clients
@@ -1000,7 +1000,7 @@ public sealed class LocalNetworkScanner(
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            var period = routingSettings.LinkTechnology.GetPresencePingPeriod(routingSettings.TrafficSavingEnabled);
+            var period = routingSettings.LinkTechnology.GetPresencePingPeriod(routingSettings.TrafficQuality);
             try
             {
                 await SendDiscoveryBroadcastRoundAsync(cancellationToken).ConfigureAwait(false);

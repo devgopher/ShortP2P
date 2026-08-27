@@ -16,7 +16,8 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
     private const string KBluetoothAdapterDeviceId = "p2p_bluetooth_adapter_device_id";
     private const string KBluetoothAdapterMac = "p2p_bluetooth_adapter_mac";
     private const string KBluetoothPairingPrompt = "p2p_bluetooth_pairing_prompt";
-    private const string KTrafficSavingEnabled = "p2p_traffic_saving_enabled";
+    private const string KTrafficQuality = "p2p_traffic_quality";
+    private const string KTrafficSavingEnabledLegacy = "p2p_traffic_saving_enabled";
     private const string KAdvertisedCaps = "p2p_advertised_caps";
 
     private readonly ISessionStorage _storage = storage ?? throw new ArgumentNullException(nameof(storage));
@@ -45,8 +46,7 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
             NullIfWhiteSpace(await _storage.GetAsync(KBluetoothAdapterMac).ConfigureAwait(false));
         if (bool.TryParse(await _storage.GetAsync(KBluetoothPairingPrompt).ConfigureAwait(false), out var bp))
             s.SuggestBluetoothPairing = bp;
-        if (bool.TryParse(await _storage.GetAsync(KTrafficSavingEnabled).ConfigureAwait(false), out var ts))
-            s.TrafficSavingEnabled = ts;
+        s.TrafficQuality = await LoadTrafficQualityAsync().ConfigureAwait(false);
         if (int.TryParse(await _storage.GetAsync(KAdvertisedCaps).ConfigureAwait(false), out var capsRaw) &&
             capsRaw is >= 0 and <= ushort.MaxValue)
         {
@@ -55,6 +55,16 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
         }
 
         return s;
+    }
+
+    private async Task<TrafficQualityMode> LoadTrafficQualityAsync()
+    {
+        var raw = await _storage.GetAsync(KTrafficQuality).ConfigureAwait(false);
+        if (TrafficQualityModeExtensions.TryParse(raw, out var mode))
+            return mode;
+        if (bool.TryParse(await _storage.GetAsync(KTrafficSavingEnabledLegacy).ConfigureAwait(false), out var ts))
+            return TrafficQualityModeExtensions.FromLegacyTrafficSavingEnabled(ts);
+        return TrafficQualityMode.Normal;
     }
 
     private static string? NullIfWhiteSpace(string? s)
@@ -80,8 +90,7 @@ public sealed class P2pRoutingSettingsStore(ISessionStorage storage)
             .ConfigureAwait(false);
         await _storage.SetAsync(KBluetoothPairingPrompt, settings.SuggestBluetoothPairing.ToString())
             .ConfigureAwait(false);
-        await _storage.SetAsync(KTrafficSavingEnabled, settings.TrafficSavingEnabled.ToString())
-            .ConfigureAwait(false);
+        await _storage.SetAsync(KTrafficQuality, settings.TrafficQuality.ToString()).ConfigureAwait(false);
         var caps = settings.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
         await _storage.SetAsync(KAdvertisedCaps, ((ushort)caps).ToString()).ConfigureAwait(false);
     }

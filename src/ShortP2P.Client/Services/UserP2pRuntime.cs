@@ -659,7 +659,7 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         Settings.SelectedBluetoothAdapterDeviceId = persisted.SelectedBluetoothAdapterDeviceId;
         Settings.SelectedBluetoothAdapterMac = persisted.SelectedBluetoothAdapterMac;
         Settings.SuggestBluetoothPairing = persisted.SuggestBluetoothPairing;
-        Settings.TrafficSavingEnabled = persisted.TrafficSavingEnabled;
+        Settings.TrafficQuality = persisted.TrafficQuality;
         Settings.AdvertisedPeerCapabilities = persisted.AdvertisedPeerCapabilities | PresencePeerCapabilities.Chat;
         _bluetooth?.SetLocalNetworkId(CompressedNetworkId.FromShortString(user.NetworkIdShort));
         _bluetooth?.ApplySettings(Settings);

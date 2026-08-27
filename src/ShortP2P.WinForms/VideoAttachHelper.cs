@@ -1,13 +1,17 @@
+using ShortP2P.Discovery;
+
 namespace ShortP2P.WinForms;
 
 internal static class VideoAttachHelper
 {
     public const string VideoMessageMime = "video/ogg";
     public const string VideoMessageExtension = ".ogv";
-    public const int NormalVideoWidth = 320;
-    public const int NormalVideoHeight = 240;
-    public const int TrafficSavingVideoWidth = 160;
-    public const int TrafficSavingVideoHeight = 120;
+    public const int NormalVideoWidth = TrafficQualityModeExtensions.NormalVideoWidth;
+    public const int NormalVideoHeight = TrafficQualityModeExtensions.NormalVideoHeight;
+    public const int TrafficSavingVideoWidth = TrafficQualityModeExtensions.EconomyVideoWidth;
+    public const int TrafficSavingVideoHeight = TrafficQualityModeExtensions.EconomyVideoHeight;
+    public const int UltraEconomyVideoWidth = TrafficQualityModeExtensions.UltraEconomyVideoWidth;
+    public const int UltraEconomyVideoHeight = TrafficQualityModeExtensions.UltraEconomyVideoHeight;
     public const int MaxDurationSeconds = 60;
 
     public static bool TryGetMimeFromExtension(string filePath, out string mime)
@@ -19,7 +23,7 @@ internal static class VideoAttachHelper
     }
 
     public static async Task<(bool Success, byte[]? Bytes, string? OutputFileName, string? OutputMime, string? Error)>
-        TryLoadAndValidateOgvAsync(string inputPath, int maxBytes, bool trafficSavingEnabled,
+        TryLoadAndValidateOgvAsync(string inputPath, int maxBytes, TrafficQualityMode trafficQuality,
             CancellationToken cancellationToken = default)
     {
         if (!File.Exists(inputPath))
@@ -40,7 +44,7 @@ internal static class VideoAttachHelper
 
         if (meta.DurationSeconds <= 0 || meta.DurationSeconds > MaxDurationSeconds)
             return (false, null, null, null, $"Длительность должна быть от 1 до {MaxDurationSeconds} секунд.");
-        var (expectedW, expectedH) = GetRequiredResolution(trafficSavingEnabled);
+        var (expectedW, expectedH) = GetRequiredResolution(trafficQuality);
         if (meta.Width != expectedW || meta.Height != expectedH)
             return (false, null, null, null, $"Разрешение должно быть ровно {expectedW}x{expectedH}.");
 
@@ -52,11 +56,9 @@ internal static class VideoAttachHelper
         return (true, bytes, Path.GetFileName(inputPath), mime, null);
     }
 
-    public static (int Width, int Height) GetRequiredResolution(bool trafficSavingEnabled)
+    public static (int Width, int Height) GetRequiredResolution(TrafficQualityMode trafficQuality)
     {
-        return trafficSavingEnabled
-            ? (TrafficSavingVideoWidth, TrafficSavingVideoHeight)
-            : (NormalVideoWidth, NormalVideoHeight);
+        return trafficQuality.GetVideoResolution();
     }
 
     private static VideoMeta ReadMeta(string filePath)

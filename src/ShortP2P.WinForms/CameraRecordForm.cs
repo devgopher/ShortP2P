@@ -6,6 +6,7 @@ using Windows.Media.Capture;
 using Windows.Media.Capture.Frames;
 using Windows.Media.MediaProperties;
 using Windows.Storage;
+using ShortP2P.Discovery;
 using Timer = System.Windows.Forms.Timer;
 
 namespace ShortP2P.WinForms;
@@ -22,7 +23,7 @@ internal sealed class CameraRecordForm : Form
     private readonly Label _status = new()
         { Dock = DockStyle.Top, Height = 26, TextAlign = ContentAlignment.MiddleLeft };
 
-    private readonly bool _trafficSavingEnabled;
+    private readonly TrafficQualityMode _trafficQuality;
     private readonly string? _videoDeviceId;
     private MediaCapture? _capture;
     private MediaFrameReader? _frameReader;
@@ -33,11 +34,11 @@ internal sealed class CameraRecordForm : Form
     private string? _recordTempPath;
     private bool _stopping;
 
-    public CameraRecordForm(bool trafficSavingEnabled, string? videoDeviceId)
+    public CameraRecordForm(TrafficQualityMode trafficQuality, string? videoDeviceId)
     {
-        _trafficSavingEnabled = trafficSavingEnabled;
+        _trafficQuality = trafficQuality;
         _videoDeviceId = string.IsNullOrWhiteSpace(videoDeviceId) ? null : videoDeviceId.Trim();
-        var resolution = VideoAttachHelper.GetRequiredResolution(_trafficSavingEnabled);
+        var resolution = VideoAttachHelper.GetRequiredResolution(_trafficQuality);
         _captureWidth = resolution.Width;
         _captureHeight = resolution.Height;
         Text = "Камера";
@@ -92,9 +93,7 @@ internal sealed class CameraRecordForm : Form
             await _frameReader.StartAsync().AsTask().ConfigureAwait(true);
 
             _ready = true;
-            var audioKbps = (_trafficSavingEnabled
-                ? VoiceRecordHelper.TrafficSavingBitrate
-                : VoiceRecordHelper.DefaultBitrate) / 1000;
+            var audioKbps = _trafficQuality.GetVoiceBitrate() / 1000;
             _status.Text =
                 $"Готово: {_captureWidth}x{_captureHeight}, audio ~{audioKbps} kbit/s (MP4). Нажмите Record.";
         }
@@ -205,10 +204,8 @@ internal sealed class CameraRecordForm : Form
 
     private MediaEncodingProfile CreateEncodingProfile()
     {
-        var audioBitrate = (uint)(_trafficSavingEnabled
-            ? VoiceRecordHelper.TrafficSavingBitrate
-            : VoiceRecordHelper.DefaultBitrate);
-        var videoBitrate = (uint)(_trafficSavingEnabled ? 250_000 : 700_000);
+        var audioBitrate = (uint)_trafficQuality.GetVoiceBitrate();
+        var videoBitrate = (uint)_trafficQuality.GetCameraVideoBitrate();
         var template = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.Wvga);
         var profile = new MediaEncodingProfile
         {
