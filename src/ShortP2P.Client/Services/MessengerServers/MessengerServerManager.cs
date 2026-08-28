@@ -29,6 +29,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
     private readonly ILogger<MessengerServerManager> _logger;
     private readonly IMessengerServerRepository _repository;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private int _failoverBusy;
 
     public MessengerServerManager(
         IMessengerServerRepository repository,
@@ -44,6 +45,9 @@ public sealed class MessengerServerManager : IAsyncDisposable
 
     /// <summary>Raised when a saved server TLS fingerprint no longer matches (MITM risk).</summary>
     public event EventHandler<MessengerServerTrustThreatEventArgs>? TrustThreatDetected;
+
+    /// <summary>Raised after a server is marked untrusted: fallback server or mesh.</summary>
+    public event EventHandler<MessengerServerFailoverEventArgs>? FailoverCompleted;
 
     public async Task<IReadOnlyList<MessengerServerEntity>> ListAsync(CancellationToken cancellationToken = default)
     {
@@ -74,6 +78,44 @@ public sealed class MessengerServerManager : IAsyncDisposable
     {
         var all = await ListAsync(cancellationToken).ConfigureAwait(false);
         return all.Where(s => s.Active && s.Trusted).ToList();
+    }
+
+    /// <summary>
+    /// Marks a messenger server untrusted (same path as TLS fingerprint mismatch) and
+    /// activates another available trusted server, or reports mesh fallback.
+    /// </summary>
+    public async Task<MessengerServerFailoverEventArgs> MarkUntrustedWithFailoverAsync(
+        int? serverId,
+        string? baseUrlHint,
+        CancellationToken cancellationToken = default)
+    {
+        var user = RequireUser();
+        MessengerServerEntity? target = null;
+        if (serverId is > 0)
+        {
+            target = await _repository.GetByIdAsync(serverId.Value, cancellationToken).ConfigureAwait(false);
+            if (target != null && target.UserId != user.Id)
+                target = null;
+        }
+
+        if (target == null && !string.IsNullOrWhiteSpace(baseUrlHint))
+            target = await FindExistingByEndpointAsync(baseUrlHint, cancellationToken).ConfigureAwait(false);
+
+        if (target == null)
+        {
+            var active = await ListActiveTrustedAsync(cancellationToken).ConfigureAwait(false);
+            target = SortServersByRank(active).FirstOrDefault();
+        }
+
+        if (target == null)
+        {
+            var mesh = new MessengerServerFailoverEventArgs(null, null, switchedToMesh: true);
+            FailoverCompleted?.Invoke(this, mesh);
+            return mesh;
+        }
+
+        await PersistUntrustedAsync(target, cancellationToken).ConfigureAwait(false);
+        return await FailoverAfterUntrustAsync(target, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Snapshot of live rank metrics for UI / diagnostics.</summary>
@@ -254,6 +296,8 @@ public sealed class MessengerServerManager : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         var user = RequireUser();
+        MessengerServerEntity? needFailover = null;
+        MessengerServerRecheckResult? result = null;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -315,7 +359,8 @@ public sealed class MessengerServerManager : IAsyncDisposable
                 expected,
                 actual);
 
-            return new MessengerServerRecheckResult
+            needFailover = entity;
+            result = new MessengerServerRecheckResult
             {
                 Server = entity,
                 Status = MessengerServerRecheckStatus.FingerprintMismatch,
@@ -327,6 +372,10 @@ public sealed class MessengerServerManager : IAsyncDisposable
         {
             _gate.Release();
         }
+
+        if (needFailover != null)
+            await FailoverAfterUntrustAsync(needFailover, cancellationToken).ConfigureAwait(false);
+        return result!;
     }
 
     /// <summary>
@@ -602,6 +651,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
 
         TrustThreatDetected?.Invoke(this,
             new MessengerServerTrustThreatEventArgs(entity, expected, actual));
+        await FailoverAfterUntrustAsync(entity, cancellationToken).ConfigureAwait(false);
         return false;
     }
 
@@ -650,6 +700,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
                     actual);
                 TrustThreatDetected?.Invoke(this,
                     new MessengerServerTrustThreatEventArgs(entity, expected, actual));
+                await FailoverAfterUntrustAsync(entity, cancellationToken).ConfigureAwait(false);
                 return;
             }
         }
@@ -704,6 +755,80 @@ public sealed class MessengerServerManager : IAsyncDisposable
         _registeredClients.TryRemove(entity.Id, out _);
         _logger.LogWarning("Dropped connection to untrusted messenger server {BaseUrl} (id={Id})", entity.BaseUrl, entity.Id);
     }
+
+    private async Task<MessengerServerFailoverEventArgs> FailoverAfterUntrustAsync(
+        MessengerServerEntity untrusted,
+        CancellationToken cancellationToken)
+    {
+        if (Interlocked.CompareExchange(ref _failoverBusy, 1, 0) != 0)
+            return new MessengerServerFailoverEventArgs(untrusted, null, switchedToMesh: false);
+
+        try
+        {
+            var user = RequireUser();
+            var all = await _repository.ListByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            var trusted = all.Where(s => s.Trusted && s.Id != untrusted.Id).ToList();
+            if (trusted.Count == 0)
+            {
+                var mesh = new MessengerServerFailoverEventArgs(untrusted, null, switchedToMesh: true);
+                _logger.LogWarning("No remaining trusted messenger servers; switching to mesh.");
+                FailoverCompleted?.Invoke(this, mesh);
+                return mesh;
+            }
+
+            var ordered = SortServersByRank(trusted);
+            foreach (var candidate in ordered)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    if (!candidate.Active)
+                    {
+                        candidate.Active = true;
+                        await _repository.UpdateAsync(candidate, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    var conn = await EnsureReadyAsync(candidate, cancellationToken).ConfigureAwait(false);
+                    if (conn == null)
+                        continue;
+
+                    _logger.LogInformation(
+                        "Messenger server failover: {From} → {To}",
+                        untrusted.BaseUrl,
+                        candidate.BaseUrl);
+                    var switched = new MessengerServerFailoverEventArgs(untrusted, candidate, switchedToMesh: false);
+                    FailoverCompleted?.Invoke(this, switched);
+                    return switched;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failover candidate {BaseUrl} is not ready", candidate.BaseUrl);
+                }
+            }
+
+            var meshFallback = new MessengerServerFailoverEventArgs(untrusted, null, switchedToMesh: true);
+            _logger.LogWarning("No available trusted messenger server after untrust; switching to mesh.");
+            FailoverCompleted?.Invoke(this, meshFallback);
+            return meshFallback;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _failoverBusy, 0);
+        }
+    }
+
+    private IReadOnlyList<MessengerServerEntity> SortServersByRank(IEnumerable<MessengerServerEntity> servers) =>
+        servers
+            .OrderByDescending(s => s.Active)
+            .ThenBy(s => IsServerAvailable(s.Id) ? 0 : 1)
+            .ThenBy(s => GetRankStatsRef(s.Id),
+                Comparer<MessengerServerRankStats>.Create(MessengerServerRankComparer.Compare))
+            .ThenBy(s => s.Id)
+            .ToList();
 
     private async Task DropConnectionAsync(MessengerServerEntity entity)
     {

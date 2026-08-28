@@ -15,6 +15,12 @@ public class ChatEntity
 
     public string PeerRsaPublicJson { get; set; } = "";
 
+    /// <summary>How the current peer public key was obtained: udp, bluetooth, server, qr, manual.</summary>
+    public string? PeerKeySourceKind { get; set; }
+
+    /// <summary>Server BaseUrl when <see cref="PeerKeySourceKind"/> is server.</summary>
+    public string? PeerKeySourceDetail { get; set; }
+
     /// <summary>
     ///     Один или несколько IPv4/IPv6 через запятую; пополняется при новых контактах с пиром (приглашение, поиск,
     ///     ручной ввод).

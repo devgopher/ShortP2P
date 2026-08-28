@@ -1,6 +1,7 @@
 using System.Net;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Data;
+using ShortP2P.Crypto;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
 using SQLite;
@@ -20,6 +21,15 @@ public sealed class ChatCreatedEventArgs(int chatId, bool remote) : EventArgs
     public bool Remote { get; } = remote;
 }
 
+public sealed class PeerPublicKeyChangedEventArgs : EventArgs
+{
+    public int ChatId { get; init; }
+    public string PeerNickname { get; init; } = "";
+    public string PeerNetworkIdShort { get; init; } = "";
+    public string PreviousSafetyNumber { get; init; } = "";
+    public string NewSafetyNumber { get; init; } = "";
+}
+
 public sealed class ChatRepository(AppDatabase db)
 {
     private readonly SemaphoreSlim _addChatGate = new(1, 1);
@@ -33,6 +43,9 @@ public sealed class ChatRepository(AppDatabase db)
 
     /// <summary>В БД вставлен новый чат (не обновление существующего).</summary>
     public event EventHandler<ChatCreatedEventArgs>? ChatCreated;
+
+    /// <summary>Сохранённый публичный ключ пира заменён другим (возможный MITM).</summary>
+    public event EventHandler<PeerPublicKeyChangedEventArgs>? PeerPublicKeyChanged;
 
     public void NotifyChatListChanged()
     {
@@ -64,7 +77,8 @@ public sealed class ChatRepository(AppDatabase db)
     }
 
     public async Task<ChatEntity> AddChatAsync(int userId, string peerNickname, string peerNetworkIdShort,
-        string peerRsaPublicJson, string peerHost, int peerPort, bool remote = false)
+        string peerRsaPublicJson, string peerHost, int peerPort, bool remote = false,
+        PeerKeySource? keySource = null)
     {
         await _addChatGate.WaitAsync().ConfigureAwait(false);
         try
@@ -80,29 +94,44 @@ public sealed class ChatRepository(AppDatabase db)
                 var mergedHost = PeerHostList.MergeAppend(existing.PeerHost, peerHost);
                 var mergedEndpoints = MergePeerEndpoints(existing, peerHost, peerPort);
                 var newPub = peerRsaPublicJson?.Trim();
-                var pubChanged = newPub != null &&
-                                 !string.Equals(existing.PeerRsaPublicJson, newPub, StringComparison.Ordinal);
+                var pubChanged = !string.IsNullOrEmpty(newPub) &&
+                                 !SafetyNumber.PublicKeyJsonEquals(existing.PeerRsaPublicJson, newPub);
                 var nickChanged = ShouldReplacePeerNickname(existing.PeerNickname, preferredNick, idShort);
+                var sourceChanged = keySource.HasValue &&
+                                    (!string.Equals(existing.PeerKeySourceKind, keySource.Value.Kind,
+                                         StringComparison.Ordinal) ||
+                                     !string.Equals(existing.PeerKeySourceDetail ?? "",
+                                         keySource.Value.Detail ?? "", StringComparison.Ordinal));
                 var changed =
                     !string.Equals(mergedHost, existing.PeerHost, StringComparison.Ordinal) ||
                     existing.PeerPort != peerPort ||
                     !string.Equals(mergedEndpoints, existing.PeerEndpointsJson ?? "", StringComparison.Ordinal) ||
                     pubChanged ||
                     nickChanged ||
+                    (pubChanged && sourceChanged) ||
+                    (existing.PeerKeySourceKind is null or "" && keySource.HasValue) ||
                     !string.IsNullOrEmpty(existing.RelayRouteBlob);
 
                 if (!changed)
                     return existing;
 
-                await UpdateChatP2pRouteAsync(existing.Id, mergedHost, peerPort, null, peerRsaPublicJson)
+                await UpdateChatP2pRouteAsync(existing.Id, mergedHost, peerPort, null, peerRsaPublicJson,
+                        pubChanged || string.IsNullOrWhiteSpace(existing.PeerKeySourceKind) ? keySource : null)
                     .ConfigureAwait(false);
                 existing.PeerHost = mergedHost;
                 existing.PeerPort = peerPort;
                 existing.PeerEndpointsJson = mergedEndpoints;
-                if (newPub != null)
+                if (newPub != null && newPub.Length > 0)
                     existing.PeerRsaPublicJson = newPub;
                 if (nickChanged)
                     existing.PeerNickname = preferredNick;
+                if (keySource.HasValue &&
+                    (pubChanged || string.IsNullOrWhiteSpace(existing.PeerKeySourceKind)))
+                {
+                    existing.PeerKeySourceKind = keySource.Value.Kind;
+                    existing.PeerKeySourceDetail = keySource.Value.Detail;
+                }
+
                 existing.RelayRouteBlob = null;
                 existing.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
                 if (nickChanged)
@@ -125,6 +154,8 @@ public sealed class ChatRepository(AppDatabase db)
                 PeerHost = peerHost.Trim(),
                 PeerPort = peerPort,
                 PeerEndpointsJson = MergePeerEndpoints(null, peerHost, peerPort),
+                PeerKeySourceKind = keySource?.Kind,
+                PeerKeySourceDetail = keySource?.Detail,
                 UpdatedUtcTicks = DateTime.UtcNow.Ticks
             };
             await conn.InsertAsync(chat);
@@ -251,7 +282,21 @@ public sealed class ChatRepository(AppDatabase db)
                 if (!string.IsNullOrWhiteSpace(orphan.PeerRsaPublicJson) &&
                     (string.IsNullOrWhiteSpace(keeper.PeerRsaPublicJson) ||
                      orphan.UpdatedUtcTicks >= keeper.UpdatedUtcTicks))
+                {
                     keeper.PeerRsaPublicJson = orphan.PeerRsaPublicJson;
+                    if (!string.IsNullOrWhiteSpace(orphan.PeerKeySourceKind))
+                    {
+                        keeper.PeerKeySourceKind = orphan.PeerKeySourceKind;
+                        keeper.PeerKeySourceDetail = orphan.PeerKeySourceDetail;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(keeper.PeerKeySourceKind) &&
+                    !string.IsNullOrWhiteSpace(orphan.PeerKeySourceKind))
+                {
+                    keeper.PeerKeySourceKind = orphan.PeerKeySourceKind;
+                    keeper.PeerKeySourceDetail = orphan.PeerKeySourceDetail;
+                }
                 if (ShouldReplacePeerNickname(keeper.PeerNickname, orphan.PeerNickname, canonicalId))
                     keeper.PeerNickname = PreferPeerNickname(orphan.PeerNickname, canonicalId);
                 if (string.IsNullOrWhiteSpace(keeper.RelayRouteBlob) &&
@@ -335,7 +380,7 @@ public sealed class ChatRepository(AppDatabase db)
     }
 
     public async Task UpdateChatP2pRouteAsync(int chatId, string peerHost, int peerPort, string? relayRouteBlob,
-        string? peerRsaPublicJson = null)
+        string? peerRsaPublicJson = null, PeerKeySource? keySource = null)
     {
         var conn = await _db.GetConnectionAsync();
         var chat = await conn.FindAsync<ChatEntity>(chatId);
@@ -345,9 +390,44 @@ public sealed class ChatRepository(AppDatabase db)
         chat.PeerEndpointsJson = MergePeerEndpoints(chat, peerHost, peerPort);
         chat.RelayRouteBlob = string.IsNullOrWhiteSpace(relayRouteBlob) ? null : relayRouteBlob.Trim();
         if (peerRsaPublicJson != null)
-            chat.PeerRsaPublicJson = peerRsaPublicJson.Trim();
+        {
+            var trimmed = peerRsaPublicJson.Trim();
+            if (trimmed.Length > 0)
+            {
+                var previous = chat.PeerRsaPublicJson;
+                var pubChanged = !SafetyNumber.PublicKeyJsonEquals(previous, trimmed);
+                chat.PeerRsaPublicJson = trimmed;
+                if (keySource.HasValue &&
+                    (pubChanged || string.IsNullOrWhiteSpace(chat.PeerKeySourceKind)))
+                {
+                    chat.PeerKeySourceKind = keySource.Value.Kind;
+                    chat.PeerKeySourceDetail = keySource.Value.Detail;
+                }
+
+                if (pubChanged && !string.IsNullOrWhiteSpace(previous))
+                    RaisePeerPublicKeyChanged(chat, previous, trimmed);
+            }
+        }
+        else if (keySource.HasValue && string.IsNullOrWhiteSpace(chat.PeerKeySourceKind))
+        {
+            chat.PeerKeySourceKind = keySource.Value.Kind;
+            chat.PeerKeySourceDetail = keySource.Value.Detail;
+        }
+
         chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
         await conn.UpdateAsync(chat);
+    }
+
+    private void RaisePeerPublicKeyChanged(ChatEntity chat, string previousJson, string newJson)
+    {
+        PeerPublicKeyChanged?.Invoke(this, new PeerPublicKeyChangedEventArgs
+        {
+            ChatId = chat.Id,
+            PeerNickname = chat.PeerNickname,
+            PeerNetworkIdShort = chat.PeerNetworkIdShort,
+            PreviousSafetyNumber = SafetyNumber.FromPublicKeyJsonOrEmpty(previousJson),
+            NewSafetyNumber = SafetyNumber.FromPublicKeyJsonOrEmpty(newJson)
+        });
     }
 
     /// <summary>

@@ -99,6 +99,10 @@ public partial class ChatsPage : ContentPage
         _p2p.LocalScan.ClientsChanged += OnLanPresenceChanged;
         _messengerServers.TrustThreatDetected -= OnMessengerServerTrustThreat;
         _messengerServers.TrustThreatDetected += OnMessengerServerTrustThreat;
+        _chats.PeerPublicKeyChanged -= OnPeerPublicKeyChanged;
+        _chats.PeerPublicKeyChanged += OnPeerPublicKeyChanged;
+        _messengerServers.FailoverCompleted -= OnMessengerServerFailover;
+        _messengerServers.FailoverCompleted += OnMessengerServerFailover;
         EnsurePresenceRefreshTimerStarted();
         var u = _auth.CurrentUser;
         if (u != null)
@@ -120,6 +124,8 @@ public partial class ChatsPage : ContentPage
     {
         _p2p.LocalScan.ClientsChanged -= OnLanPresenceChanged;
         _messengerServers.TrustThreatDetected -= OnMessengerServerTrustThreat;
+        _chats.PeerPublicKeyChanged -= OnPeerPublicKeyChanged;
+        _messengerServers.FailoverCompleted -= OnMessengerServerFailover;
         if (_presenceRefreshTimer != null)
             _presenceRefreshTimer.Stop();
         base.OnDisappearing();
@@ -136,6 +142,56 @@ public partial class ChatsPage : ContentPage
                 "Сервер отключён и помечен как недоверенный.",
                 "OK").ConfigureAwait(true);
         });
+    }
+
+    private void OnPeerPublicKeyChanged(object? sender, PeerPublicKeyChangedEventArgs e)
+    {
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            var u = _auth.CurrentUser;
+            if (u != null)
+                RefreshSafetyHeader(u);
+            await DisplayAlert(
+                PeerSafetyDisplay.KeyChangeTitle,
+                PeerSafetyDisplay.FormatKeyChangeWarning(e),
+                "OK").ConfigureAwait(true);
+        });
+    }
+
+    private void OnMessengerServerFailover(object? sender, MessengerServerFailoverEventArgs e)
+    {
+        if (!e.SwitchedToMesh)
+            return;
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            await DisplayAlert("Messenger-сервер", PeerSafetyDisplay.MeshWarning, "OK").ConfigureAwait(true);
+        });
+    }
+
+    private void RefreshSafetyHeader(UserEntity user)
+    {
+        try
+        {
+            var mine = SafetyNumber.FromPublicKey(_auth.GetCurrentPublicKey());
+            SafetyNumberLabel.Text = $"{user.Nickname}: {mine}";
+        }
+        catch
+        {
+            SafetyNumberLabel.Text = "";
+        }
+    }
+
+    private async void OnEmergencyUntrustClicked(object? sender, EventArgs e)
+    {
+        try
+        {
+            await _messengerServers.MarkUntrustedWithFailoverAsync(null, null).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Emergency untrust failed");
+            await DisplayAlert("🚨", ex.Message, "OK").ConfigureAwait(true);
+        }
     }
 
     private void OnLanPresenceChanged(object? sender, EventArgs e)
@@ -177,6 +233,7 @@ public partial class ChatsPage : ContentPage
 
         ProfileLabel.Text =
             $"You: {u.Nickname} · id {u.NetworkIdShort} · local UDP {u.DataUdpPort}";
+        RefreshSafetyHeader(u);
 
         var list = await _chats.ListChatsAsync(u.Id).ConfigureAwait(true);
         ApplyChatList(list);

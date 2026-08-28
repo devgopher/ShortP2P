@@ -10,14 +10,20 @@
         <ToolbarItem Text="Document" Order="Primary" Priority="1" Clicked="OnAttachDocumentClicked" />
     </ContentPage.ToolbarItems>
     <Grid RowDefinitions="Auto,*,Auto,Auto,Auto" Padding="8" RowSpacing="8">
-        <VerticalStackLayout Grid.Row="0" Spacing="6" Padding="0,0,0,4">
-            <Label x:Name="PeerIdLabel" FontSize="12" TextColor="Gray" />
-            <HorizontalStackLayout Spacing="8" VerticalOptions="Center">
-                <Ellipse x:Name="PeerPresenceDot" WidthRequest="10" HeightRequest="10" VerticalOptions="Center"
-                         Fill="#CD5C5C" />
-                <Label x:Name="PeerStatusLabel" FontSize="12" TextColor="Gray" VerticalOptions="Center" />
-            </HorizontalStackLayout>
-        </VerticalStackLayout>
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+            <VerticalStackLayout Grid.Column="0" Spacing="6" Padding="0,0,0,4">
+                <Label x:Name="PeerIdLabel" FontSize="12" TextColor="Gray" />
+                <HorizontalStackLayout Spacing="8" VerticalOptions="Center">
+                    <Ellipse x:Name="PeerPresenceDot" WidthRequest="10" HeightRequest="10" VerticalOptions="Center"
+                             Fill="#CD5C5C" />
+                    <Label x:Name="PeerStatusLabel" FontSize="12" TextColor="Gray" VerticalOptions="Center" />
+                </HorizontalStackLayout>
+            </VerticalStackLayout>
+            <Label x:Name="SafetyNumberLabel" Grid.Column="1" FontSize="13" HorizontalTextAlignment="End"
+                   VerticalOptions="Start" LineBreakMode="WordWrap" MaxWidthRequest="280" />
+            <Button x:Name="EmergencyUntrustButton" Grid.Column="2" Text="🚨" Clicked="OnEmergencyUntrustClicked"
+                    Padding="6,2" VerticalOptions="Start" />
+        </Grid>
         <CollectionView x:Name="MessagesCollection" Grid.Row="1"
                         RemainingItemsThreshold="2"
                         RemainingItemsThresholdReached="OnMessagesRemainingItemsThresholdReached">

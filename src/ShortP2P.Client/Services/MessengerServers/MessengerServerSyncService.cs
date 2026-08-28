@@ -64,6 +64,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                 return;
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
+            _manager.FailoverCompleted -= OnFailoverCompleted;
+            _manager.FailoverCompleted += OnFailoverCompleted;
             _longPollLoop = Task.Run(() => LongPollSupervisorAsync(token), token);
             _pingLoop = Task.Run(() => PingLoopAsync(token), token);
             _started = true;
@@ -86,6 +88,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             _cts = null;
             _longPollLoop = null;
             _pingLoop = null;
+            _manager.FailoverCompleted -= OnFailoverCompleted;
         }
 
         if (cts != null)
@@ -175,6 +178,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                 continue;
             try
             {
+                LogChatRequest("send", conn, target);
                 await TrackAsync(conn, () => conn.Api.CreateChatRequestAsync(
                     new ChatRequestCreateRequest
                     {
@@ -185,7 +189,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogDebug(ex, "CreateChatRequest failed on {BaseUrl}", conn.Entity.BaseUrl);
+                var (host, port) = SplitServerHostPort(conn.Entity.BaseUrl);
+                _logger.LogWarning(ex, "CreateChatRequest failed on {Host}:{Port} ({BaseUrl})",
+                    host, port, conn.Entity.BaseUrl);
             }
         }
     }
@@ -690,9 +696,11 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
             var existing = await _chats.FindChatByPeerNetworkIdAsync(user.Id, peerId).ConfigureAwait(false);
             var peerNick = await ResolvePeerNicknameAsync(connection, peerId, cancellationToken).ConfigureAwait(false);
+            var source = PeerKeySource.Server(connection.Entity.BaseUrl);
+            LogChatRequest("receive", connection, peerId);
             ChatEntity chat;
             if (existing == null ||
-                !string.Equals(existing.PeerRsaPublicJson, request.PublicKey.Trim(), StringComparison.Ordinal))
+                !SafetyNumber.PublicKeyJsonEquals(existing.PeerRsaPublicJson, request.PublicKey.Trim()))
             {
                 chat = await _chats.AddChatAsync(
                     user.Id,
@@ -701,7 +709,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                     request.PublicKey,
                     peerId,
                     user.DataUdpPort,
-                    remote: true).ConfigureAwait(false);
+                    remote: true,
+                    keySource: source).ConfigureAwait(false);
             }
             else
             {
@@ -711,6 +720,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
             try
             {
+                LogChatRequest("reply", connection, peerId);
                 await TrackAsync(connection, () => connection.Api.CreateChatRequestAsync(
                     new ChatRequestCreateRequest
                     {
@@ -721,7 +731,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogDebug(ex, "Reply ChatRequest failed for peer {PeerId}", peerId);
+                var (host, port) = SplitServerHostPort(connection.Entity.BaseUrl);
+                _logger.LogWarning(ex, "Reply ChatRequest failed for peer {PeerId} on {Host}:{Port}",
+                    peerId, host, port);
             }
 
             if (existing == null)
@@ -920,6 +932,60 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
         var fallback = Encoding.UTF8.GetString(wire);
         await _chats.AddMessageAsync(chatId, false, fallback).ConfigureAwait(false);
+    }
+
+    private void OnFailoverCompleted(object? sender, MessengerServerFailoverEventArgs e)
+    {
+        if (e.SwitchedToMesh || e.FallbackServer == null)
+            return;
+        var token = _cts?.Token ?? CancellationToken.None;
+        _ = RepublishAllChatRequestsAsync(token);
+    }
+
+    private async Task RepublishAllChatRequestsAsync(CancellationToken cancellationToken)
+    {
+        var user = _auth.CurrentUser;
+        if (user == null)
+            return;
+        try
+        {
+            var chats = await _chats.ListChatsAsync(user.Id).ConfigureAwait(false);
+            foreach (var chat in chats)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await PublishChatRequestAsync(chat.PeerNetworkIdShort, cancellationToken).ConfigureAwait(false);
+            }
+
+            _logger.LogInformation(
+                "Republished ChatRequest for {Count} chats after messenger-server failover",
+                chats.Count);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // expected
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to republish ChatRequest after messenger-server failover");
+        }
+    }
+
+    private void LogChatRequest(string action, MessengerServerConnection connection, string peerNetworkId)
+    {
+        var (host, port) = SplitServerHostPort(connection.Entity.BaseUrl);
+        _logger.LogInformation(
+            "ChatRequest {Action} server {Host}:{Port} ({BaseUrl}) peer={PeerNetworkId}",
+            action, host, port, connection.Entity.BaseUrl, peerNetworkId);
+    }
+
+    internal static (string Host, int Port) SplitServerHostPort(string? baseUrl)
+    {
+        if (!Uri.TryCreate((baseUrl ?? "").Trim(), UriKind.Absolute, out var uri))
+            return ((baseUrl ?? "").Trim(), 0);
+        var port = uri.IsDefaultPort
+            ? uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ? 443 : 80
+            : uri.Port;
+        return (uri.Host, port);
     }
 
     private static async Task WaitIgnoreCancelAsync(Task? task)

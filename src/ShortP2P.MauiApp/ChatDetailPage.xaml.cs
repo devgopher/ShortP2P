@@ -6,6 +6,8 @@ using ShortP2P.Client;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
+using ShortP2P.Client.Services.MessengerServers;
+using ShortP2P.Crypto;
 using ShortP2P.Discovery;
 
 namespace ShortP2P.MauiApp;
@@ -45,7 +47,9 @@ public partial class ChatDetailPage : ContentPage
     private readonly ChatRepository _repo;
     private readonly UserP2pRuntime _p2p;
     private readonly ChatMediaOptions _media;
+    private readonly MessengerServerManager _messengerServers;
     private readonly ILogger<ChatDetailPage> _logger;
+    private ChatEntity? _chat;
     private const int MessagesPageSize = 10;
     private readonly ObservableCollection<MessageRowVm> _messageItems = [];
     private readonly List<ChatMessageEntity> _loadedRows = [];
@@ -63,13 +67,14 @@ public partial class ChatDetailPage : ContentPage
     private bool _isVoiceRecording;
 
     public ChatDetailPage(AuthService auth, ChatRepository repo, UserP2pRuntime p2p, ChatMediaOptions media,
-        ILogger<ChatDetailPage> logger)
+        MessengerServerManager messengerServers, ILogger<ChatDetailPage> logger)
     {
         InitializeComponent();
         _auth = auth;
         _repo = repo;
         _p2p = p2p;
         _media = media;
+        _messengerServers = messengerServers;
         _logger = logger;
         MessagesCollection.ItemsSource = _messageItems;
     }
@@ -89,7 +94,9 @@ public partial class ChatDetailPage : ContentPage
 
         Title = chat.PeerNickname;
         PeerIdLabel.Text = $"Id: {chat.PeerNetworkIdShort}";
+        _chat = chat;
         _peerNetworkIdShort = chat.PeerNetworkIdShort;
+        RefreshSafetyLabel(chat);
         var user = _auth.CurrentUser;
         if (user == null)
         {
@@ -108,6 +115,8 @@ public partial class ChatDetailPage : ContentPage
         }
 
         _p2p.LocalScan.ClientsChanged += OnPeerLanPresenceChanged;
+        _repo.PeerPublicKeyChanged += OnPeerPublicKeyChanged;
+        _messengerServers.FailoverCompleted += OnMessengerServerFailover;
         EnsurePresenceRefreshTimerStarted();
         var uiSync = SynchronizationContext.Current;
         _p2pSession = _p2p.GetSession(chat, user, _auth, _repo, uiSync);
@@ -133,9 +142,12 @@ public partial class ChatDetailPage : ContentPage
         base.OnDisappearing();
         _ = StopVoiceRecordingAndDiscardAsync();
         _p2p.LocalScan.ClientsChanged -= OnPeerLanPresenceChanged;
+        _repo.PeerPublicKeyChanged -= OnPeerPublicKeyChanged;
+        _messengerServers.FailoverCompleted -= OnMessengerServerFailover;
         if (_presenceRefreshTimer != null)
             _presenceRefreshTimer.Stop();
         _peerNetworkIdShort = null;
+        _chat = null;
         if (_p2pSession != null)
         {
             _p2pSession.MessagesChanged -= OnP2PMessagesChanged;
@@ -146,6 +158,75 @@ public partial class ChatDetailPage : ContentPage
     private void OnPeerLanPresenceChanged(object? sender, EventArgs e)
     {
         MainThread.BeginInvokeOnMainThread(RefreshPeerPresenceLabel);
+    }
+
+    private void RefreshSafetyLabel(ChatEntity chat)
+    {
+        var u = _auth.CurrentUser;
+        if (u == null)
+        {
+            SafetyNumberLabel.Text = "";
+            return;
+        }
+
+        try
+        {
+            SafetyNumberLabel.Text = PeerSafetyDisplay.FormatPanel(
+                PeerSafetyDisplay.FormatFingerprints(u.Nickname, _auth.GetCurrentPublicKey(), chat.PeerNickname,
+                    chat.PeerRsaPublicJson),
+                chat);
+        }
+        catch
+        {
+            SafetyNumberLabel.Text = "";
+        }
+    }
+
+    private void OnPeerPublicKeyChanged(object? sender, PeerPublicKeyChangedEventArgs e)
+    {
+        if (e.ChatId != ChatId)
+            return;
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            var fresh = await _repo.GetChatAsync(ChatId).ConfigureAwait(true);
+            if (fresh != null)
+            {
+                _chat = fresh;
+                Title = fresh.PeerNickname;
+                RefreshSafetyLabel(fresh);
+            }
+
+            await DisplayAlert(
+                PeerSafetyDisplay.KeyChangeTitle,
+                PeerSafetyDisplay.FormatKeyChangeWarning(e),
+                "OK").ConfigureAwait(true);
+        });
+    }
+
+    private void OnMessengerServerFailover(object? sender, MessengerServerFailoverEventArgs e)
+    {
+        if (!e.SwitchedToMesh)
+            return;
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            await DisplayAlert("Messenger-сервер", PeerSafetyDisplay.MeshWarning, "OK").ConfigureAwait(true);
+        });
+    }
+
+    private async void OnEmergencyUntrustClicked(object? sender, EventArgs e)
+    {
+        var hint = _chat != null && PeerKeySource.IsServer(_chat.PeerKeySourceKind)
+            ? _chat.PeerKeySourceDetail
+            : null;
+        try
+        {
+            await _messengerServers.MarkUntrustedWithFailoverAsync(null, hint).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Emergency untrust failed");
+            await DisplayAlert("🚨", ex.Message, "OK").ConfigureAwait(true);
+        }
     }
 
     private void OnP2PMessagesChanged(object? sender, EventArgs e)

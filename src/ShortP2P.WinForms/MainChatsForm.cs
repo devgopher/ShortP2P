@@ -31,6 +31,20 @@ public sealed class MainChatsForm : Form
     private readonly HashSet<int> _newChatIds = [];
     private readonly UserP2pRuntime _p2P;
     private readonly Label _profile = new() { AutoSize = true };
+    private readonly Label _safetyNumberLabel = new()
+    {
+        AutoSize = true,
+        Font = new Font("Segoe UI Emoji", 10f),
+        TextAlign = ContentAlignment.TopRight,
+        Padding = new Padding(8, 0, 4, 0)
+    };
+    private readonly Button _emergencyUntrust = new()
+    {
+        Text = "🚨",
+        AutoSize = true,
+        Font = new Font("Segoe UI Emoji", 11f),
+        FlatStyle = FlatStyle.Flat
+    };
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly IServiceProvider _services;
     private readonly Label _udpTransportIndicator = new() { AutoSize = true };
@@ -62,6 +76,9 @@ public sealed class MainChatsForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         Width = 680;
         Height = 480;
+        _emergencyUntrust.FlatAppearance.BorderSize = 0;
+        new ToolTip { ShowAlways = true }.SetToolTip(_emergencyUntrust,
+            "Срочно пометить текущий messenger-сервер как недоверенный и переключиться.");
 
         var root = new TableLayoutPanel
         {
@@ -135,8 +152,24 @@ public sealed class MainChatsForm : Form
         _list.ValueMember = nameof(ChatEntity.Id);
         _list.DoubleClick += async (_, _) => await OpenSelectedChatAsync().ConfigureAwait(true);
         _list.DrawItem += OnDrawChatItem;
+        _list.SelectedIndexChanged += (_, _) => RefreshSafetyHeader();
+        _emergencyUntrust.Click += async (_, _) => await OnEmergencyUntrustAsync().ConfigureAwait(true);
 
-        root.Controls.Add(_profile, 0, 0);
+        var header = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ColumnCount = 3,
+            RowCount = 1
+        };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.Controls.Add(_profile, 0, 0);
+        header.Controls.Add(_safetyNumberLabel, 1, 0);
+        header.Controls.Add(_emergencyUntrust, 2, 0);
+
+        root.Controls.Add(header, 0, 0);
         root.Controls.Add(hint, 0, 1);
         root.Controls.Add(_list, 0, 2);
         root.Controls.Add(toolbar, 0, 3);
@@ -169,14 +202,18 @@ public sealed class MainChatsForm : Form
         Activated += async (_, _) => await RefreshAsync().ConfigureAwait(true);
         _chats.ChatListChanged += OnChatListChangedFromInvite;
         _chats.ChatMessageAppended += OnChatMessageAppended;
+        _chats.PeerPublicKeyChanged += OnPeerPublicKeyChanged;
         _p2P.LocalScan.ClientsChanged += OnLanPresenceChanged;
         _messengerServers.TrustThreatDetected += OnMessengerServerTrustThreat;
+        _messengerServers.FailoverCompleted += OnMessengerServerFailover;
         FormClosed += (_, _) =>
         {
             _chats.ChatListChanged -= OnChatListChangedFromInvite;
             _chats.ChatMessageAppended -= OnChatMessageAppended;
+            _chats.PeerPublicKeyChanged -= OnPeerPublicKeyChanged;
             _p2P.LocalScan.ClientsChanged -= OnLanPresenceChanged;
             _messengerServers.TrustThreatDetected -= OnMessengerServerTrustThreat;
+            _messengerServers.FailoverCompleted -= OnMessengerServerFailover;
         };
     }
 
@@ -201,6 +238,103 @@ public sealed class MainChatsForm : Form
         catch (ObjectDisposedException)
         {
             // ignore
+        }
+    }
+
+    private void OnPeerPublicKeyChanged(object? sender, PeerPublicKeyChangedEventArgs e)
+    {
+        if (!IsHandleCreated || IsDisposed)
+            return;
+        try
+        {
+            BeginInvoke(() =>
+            {
+                RefreshSafetyHeader();
+                if (_focusedChatId == e.ChatId)
+                    return;
+                MessageBox.Show(
+                    this,
+                    PeerSafetyDisplay.FormatKeyChangeWarning(e),
+                    PeerSafetyDisplay.KeyChangeTitle,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // ignore
+        }
+    }
+
+    private void OnMessengerServerFailover(object? sender, MessengerServerFailoverEventArgs e)
+    {
+        if (!IsHandleCreated || IsDisposed)
+            return;
+        try
+        {
+            BeginInvoke(() =>
+            {
+                RefreshSafetyHeader();
+                if (!e.SwitchedToMesh || _focusedChatId != null)
+                    return;
+                MessageBox.Show(
+                    this,
+                    PeerSafetyDisplay.MeshWarning,
+                    "Messenger-сервер",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // ignore
+        }
+    }
+
+    private void RefreshSafetyHeader()
+    {
+        var u = _auth.CurrentUser;
+        if (u == null)
+        {
+            _safetyNumberLabel.Text = "";
+            return;
+        }
+
+        try
+        {
+            var myKey = _auth.GetCurrentPublicKey();
+            if (_list.SelectedItem is ChatEntity chat)
+            {
+                _safetyNumberLabel.Text = PeerSafetyDisplay.FormatPanel(
+                    PeerSafetyDisplay.FormatFingerprints(u.Nickname, myKey, chat.PeerNickname, chat.PeerRsaPublicJson),
+                    chat);
+            }
+            else
+            {
+                var mine = SafetyNumber.FromPublicKey(myKey);
+                _safetyNumberLabel.Text = $"{u.Nickname}: {mine}";
+            }
+        }
+        catch
+        {
+            _safetyNumberLabel.Text = "";
+        }
+    }
+
+    private async Task OnEmergencyUntrustAsync()
+    {
+        var chat = _list.SelectedItem as ChatEntity;
+        var hint = chat != null && PeerKeySource.IsServer(chat.PeerKeySourceKind)
+            ? chat.PeerKeySourceDetail
+            : null;
+        try
+        {
+            await _messengerServers.MarkUntrustedWithFailoverAsync(null, hint).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Emergency untrust failed");
+            MessageBox.Show(this, ex.Message, "🚨", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 
@@ -345,6 +479,8 @@ public sealed class MainChatsForm : Form
                     row.PeerNickname = src.PeerNickname;
                     row.PeerNetworkIdShort = src.PeerNetworkIdShort;
                     row.PeerRsaPublicJson = src.PeerRsaPublicJson;
+                    row.PeerKeySourceKind = src.PeerKeySourceKind;
+                    row.PeerKeySourceDetail = src.PeerKeySourceDetail;
                     row.PeerHost = src.PeerHost;
                     row.PeerPort = src.PeerPort;
                     row.PeerEndpointsJson = src.PeerEndpointsJson;
@@ -355,6 +491,7 @@ public sealed class MainChatsForm : Form
                 }
 
                 UpdateTransportIndicators();
+                RefreshSafetyHeader();
                 return;
             }
 
@@ -379,6 +516,7 @@ public sealed class MainChatsForm : Form
 
             _list.EndUpdate();
             UpdateTransportIndicators();
+            RefreshSafetyHeader();
         }
         finally
         {
@@ -413,7 +551,7 @@ public sealed class MainChatsForm : Form
                 _unreadChatIds.Remove(chat.Id);
                 _list.Invalidate();
                 using var win = new ChatForm(chat, u, _auth, _chats, _p2P, _chatLog, _userActions, _chatMedia,
-                    _appSettings);
+                    _appSettings, _messengerServers);
                 win.ShowDialog(owner);
                 _focusedChatId = null;
             },
@@ -507,7 +645,8 @@ public sealed class MainChatsForm : Form
 
         var chat = await _chats.AddChatAsync(u.Id, dlg.PeerNickname, dlg.PeerNetworkIdShort,
             dlg.PeerPublicKeyJson.Trim(),
-            dlg.PeerHosts, dlg.PeerPort).ConfigureAwait(true);
+            dlg.PeerHosts, dlg.PeerPort, keySource: dlg.FilledFromQr ? PeerKeySource.Qr() : PeerKeySource.Manual())
+            .ConfigureAwait(true);
         _userActions.LogInformation(
             "Chats: chat added (peer {Peer}, network id {NetworkId}, host {Host}:{Port})",
             dlg.PeerNickname, dlg.PeerNetworkIdShort, dlg.PeerHosts, dlg.PeerPort);
@@ -629,7 +768,8 @@ public sealed class MainChatsForm : Form
         if (u == null) return;
 
         _focusedChatId = chat.Id;
-        using var win = new ChatForm(chat, u, _auth, _chats, _p2P, _chatLog, _userActions, _chatMedia, _appSettings);
+        using var win = new ChatForm(chat, u, _auth, _chats, _p2P, _chatLog, _userActions, _chatMedia, _appSettings,
+            _messengerServers);
         await win.ShowDialogAsync(this);
         _focusedChatId = null;
         await RefreshAsync().ConfigureAwait(true);

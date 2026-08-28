@@ -44,6 +44,24 @@ public sealed class AppDatabase(string databasePath)
 
         try
         {
+            await _connection.ExecuteAsync("ALTER TABLE chats ADD COLUMN PeerKeySourceKind TEXT NULL");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
+            await _connection.ExecuteAsync("ALTER TABLE chats ADD COLUMN PeerKeySourceDetail TEXT NULL");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
             await _connection.ExecuteAsync(
                 "ALTER TABLE messages ADD COLUMN DeliveryStatus INTEGER NOT NULL DEFAULT 2");
         }

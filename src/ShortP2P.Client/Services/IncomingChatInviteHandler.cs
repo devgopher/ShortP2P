@@ -57,13 +57,16 @@ public static class IncomingChatInviteHandler
         var effectiveHost = ResolvePeerHost(host, sourceAddress);
         cancellationToken.ThrowIfCancellationRequested();
         var existing = await repo.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);
+        var keySource = sourceAddress?.Kind == TransportKind.Bluetooth
+            ? PeerKeySource.Bluetooth()
+            : PeerKeySource.Udp();
         if (existing != null)
         {
             var mergedHost = PeerHostList.WithPrimaryFirst(existing.PeerHost, effectiveHost);
             var chatPeerPort = existing.PeerPort is < 1 or > 65535 || existing.PeerPort == ChatInviteCodec.InviteUdpPort
                 ? PresencePingCodec.DefaultDataUdpPort
                 : existing.PeerPort;
-            await repo.UpdateChatP2pRouteAsync(existing.Id, mergedHost, chatPeerPort, null)
+            await repo.UpdateChatP2pRouteAsync(existing.Id, mergedHost, chatPeerPort, null, pubJson, keySource)
                 .ConfigureAwait(false);
             await repo.TryUpdatePeerNicknameAsync(existing.Id, nick).ConfigureAwait(false);
             existing.PeerHost = mergedHost;
@@ -77,7 +80,7 @@ public static class IncomingChatInviteHandler
         }
 
         await repo.AddChatAsync(user.Id, nick, idShort, pubJson, effectiveHost, PresencePingCodec.DefaultDataUdpPort,
-                remote: true).ConfigureAwait(false);
+                remote: true, keySource: keySource).ConfigureAwait(false);
 
         ScheduleInviteReply(auth, user, host, port, sourceAddress, sendInviteReplyAsync, routingSettings,
             bluetoothAdapterMac);

@@ -165,7 +165,8 @@ public partial class AddChatPage : ContentPage
         try
         {
             var chat = await _chats
-                .AddChatAsync(u.Id, payload.N, payload.Id, payload.K, payload.GetCommaSeparatedHosts(), payload.P)
+                .AddChatAsync(u.Id, payload.N, payload.Id, payload.K, payload.GetCommaSeparatedHosts(), payload.P,
+                    keySource: PeerKeySource.Qr())
                 .ConfigureAwait(true);
 
             await _p2p.TryEnsureChatSessionStartedAsync(chat.Id, SynchronizationContext.Current).ConfigureAwait(true);
@@ -216,7 +217,8 @@ public partial class AddChatPage : ContentPage
             return;
         }
 
-        var chat = await _chats.AddChatAsync(u.Id, nick, id, pub, host, port).ConfigureAwait(true);
+        var chat = await _chats.AddChatAsync(u.Id, nick, id, pub, host, port, keySource: PeerKeySource.Manual())
+            .ConfigureAwait(true);
         try
         {
             await _p2p.TryEnsureChatSessionStartedAsync(chat.Id, SynchronizationContext.Current).ConfigureAwait(true);

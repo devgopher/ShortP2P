@@ -391,17 +391,27 @@ public sealed class ChatP2PSession : IAsyncDisposable
     {
         if (row.Id != _chat.Id)
             throw new ArgumentException("Chat id mismatch.", nameof(row));
+        var previousKey = _chat.PeerRsaPublicJson;
         _chat.PeerNickname = row.PeerNickname;
         _chat.PeerNetworkIdShort = row.PeerNetworkIdShort;
         _chat.PeerRsaPublicJson = row.PeerRsaPublicJson;
         _chat.PeerHost = row.PeerHost;
         _chat.PeerPort = row.PeerPort;
+        _chat.PeerEndpointsJson = row.PeerEndpointsJson;
+        _chat.PeerKeySourceKind = row.PeerKeySourceKind;
+        _chat.PeerKeySourceDetail = row.PeerKeySourceDetail;
         _chat.RelayRouteBlob = row.RelayRouteBlob;
         _chat.UpdatedUtcTicks = row.UpdatedUtcTicks;
         _logger.LogInformation(
             "Chat {ChatId}: chat row applied (peer={PeerNetworkId}, host={PeerHost}, port={PeerPort})",
             _chat.Id, _chat.PeerNetworkIdShort, _chat.PeerHost, _chat.PeerPort);
         RebuildRouteFromChat();
+        if (!string.IsNullOrWhiteSpace(previousKey) &&
+            !SafetyNumber.PublicKeyJsonEquals(previousKey, row.PeerRsaPublicJson))
+        {
+            _logger.LogWarning("Chat {ChatId}: peer public key changed, clearing crypto session", _chat.Id);
+            ClearCryptoSession();
+        }
     }
 
     private bool ShouldAcceptIncomingFrom(TransportAddress from)

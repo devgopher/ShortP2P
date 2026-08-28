@@ -17,11 +17,17 @@
     </ContentPage.ToolbarItems>
 
     <Grid RowDefinitions="Auto,*" Padding="12" RowSpacing="8">
-        <VerticalStackLayout Grid.Row="0" Spacing="4">
-            <Label x:Name="ProfileLabel" FontSize="12" TextColor="Gray" />
-            <Label Text="P2P chats (UDP). Swipe left on a row and tap Delete to remove the chat on this device only."
-                   FontSize="12" TextColor="Gray" />
-        </VerticalStackLayout>
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+            <VerticalStackLayout Grid.Column="0" Spacing="4">
+                <Label x:Name="ProfileLabel" FontSize="12" TextColor="Gray" />
+                <Label Text="P2P chats (UDP). Swipe left on a row and tap Delete to remove the chat on this device only."
+                       FontSize="12" TextColor="Gray" />
+            </VerticalStackLayout>
+            <Label x:Name="SafetyNumberLabel" Grid.Column="1" FontSize="13" HorizontalTextAlignment="End"
+                   VerticalOptions="Start" LineBreakMode="WordWrap" MaxWidthRequest="260" />
+            <Button x:Name="EmergencyUntrustButton" Grid.Column="2" Text="🚨" Clicked="OnEmergencyUntrustClicked"
+                    Padding="6,2" VerticalOptions="Start" />
+        </Grid>
         <CollectionView x:Name="ChatsCollection" Grid.Row="1" SelectionMode="Single" SelectionChanged="OnChatSelected">
             <CollectionView.ItemTemplate>
                 <DataTemplate>

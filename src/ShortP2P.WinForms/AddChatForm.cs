@@ -22,6 +22,7 @@ public sealed class AddChatForm : Form
     };
 
     private readonly ILogger<UserAction> _userActions;
+    private bool _filledFromQr;
 
     public AddChatForm(ILogger<AddChatForm> logger, ILogger<UserAction> userActions)
     {
@@ -79,6 +80,7 @@ public sealed class AddChatForm : Form
     public string PeerPublicKeyJson => _pub.Text.Trim();
     public string PeerHosts => _host.Text.Trim();
     public int PeerPort => int.TryParse(_port.Text, out var p) ? p : 0;
+    public bool FilledFromQr => _filledFromQr;
 
     private void ApplyPayload(PeerQrPayload payload)
     {
@@ -87,6 +89,7 @@ public sealed class AddChatForm : Form
         _pub.Text = payload.K;
         _host.Text = payload.GetCommaSeparatedHosts();
         _port.Text = payload.P.ToString();
+        _filledFromQr = true;
     }
 
     private void OnQrFromFile(object? sender, EventArgs e)

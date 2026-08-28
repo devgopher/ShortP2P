@@ -11,6 +11,8 @@ using ShortP2P.Client;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services;
+using ShortP2P.Client.Services.MessengerServers;
+using ShortP2P.Crypto;
 using ShortP2P.Discovery;
 using ShortP2P.Transport.Bluetooth.Windows;
 using Timer = System.Windows.Forms.Timer;
@@ -114,12 +116,29 @@ public sealed class ChatForm : Form
     };
 
     private readonly UserP2pRuntime _p2PRuntime;
+    private readonly MessengerServerManager _messengerServers;
 
     private readonly Label _peerInfoLabel = new()
     {
         AutoSize = true,
         ForeColor = SystemColors.GrayText,
         Padding = new Padding(0, 0, 0, 2)
+    };
+
+    private readonly Label _safetyNumberLabel = new()
+    {
+        AutoSize = true,
+        Font = new Font("Segoe UI Emoji", 10f),
+        TextAlign = ContentAlignment.TopRight,
+        Padding = new Padding(4, 0, 4, 0)
+    };
+
+    private readonly Button _emergencyUntrust = new()
+    {
+        Text = "🚨",
+        AutoSize = true,
+        Font = new Font("Segoe UI Emoji", 11f),
+        FlatStyle = FlatStyle.Flat
     };
 
     private readonly ChatRepository _repo;
@@ -166,7 +185,8 @@ public sealed class ChatForm : Form
     private WaveFileWriter? _voiceWaveWriter;
 
     public ChatForm(ChatEntity chat, UserEntity user, AuthService auth, ChatRepository repo, UserP2pRuntime p2PRuntime,
-        ILogger<ChatForm> logger, ILogger<UserAction> userActions, ChatMediaOptions media, AppSettingsStore appSettings)
+        ILogger<ChatForm> logger, ILogger<UserAction> userActions, ChatMediaOptions media, AppSettingsStore appSettings,
+        MessengerServerManager messengerServers)
     {
         _chat = chat;
         _user = user;
@@ -177,26 +197,38 @@ public sealed class ChatForm : Form
         _appSettings = appSettings;
         _logger = logger;
         _userActions = userActions;
+        _messengerServers = messengerServers;
         Text = chat.PeerNickname;
         StartPosition = FormStartPosition.CenterParent;
-        Width = 520;
+        Width = 560;
         Height = 572;
         MaximizeBox = false;
+        _emergencyUntrust.FlatAppearance.BorderSize = 0;
+        _buttonTooltips.SetToolTip(_emergencyUntrust,
+            "Срочно пометить текущий messenger-сервер как недоверенный и переключиться.");
 
         _peerInfoLabel.Text = PeerInfoText("Статус: офлайн");
+        RefreshSafetyLabel();
 
         var top = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             AutoSize = true,
             Padding = new Padding(8, 6, 8, 2),
-            ColumnCount = 2,
+            ColumnCount = 4,
             RowCount = 1
         };
         top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         top.Controls.Add(_peerInfoLabel, 0, 0);
-        top.Controls.Add(_clearChat, 1, 0);
+        top.Controls.Add(_safetyNumberLabel, 1, 0);
+        top.Controls.Add(_emergencyUntrust, 2, 0);
+        top.Controls.Add(_clearChat, 3, 0);
+        _emergencyUntrust.Click += async (_, _) => await OnEmergencyUntrustAsync().ConfigureAwait(true);
+        _repo.PeerPublicKeyChanged += OnPeerPublicKeyChanged;
+        _messengerServers.FailoverCompleted += OnMessengerServerFailover;
 
         var deliveryIssuePanel = new Panel
         {
@@ -1256,7 +1288,98 @@ public sealed class ChatForm : Form
         }
 
         StopVoicePlaybackInternal();
+        _repo.PeerPublicKeyChanged -= OnPeerPublicKeyChanged;
+        _messengerServers.FailoverCompleted -= OnMessengerServerFailover;
         base.OnFormClosing(e);
+    }
+
+    private void RefreshSafetyLabel()
+    {
+        try
+        {
+            _safetyNumberLabel.Text = PeerSafetyDisplay.FormatPanel(
+                PeerSafetyDisplay.FormatFingerprints(
+                    _user.Nickname,
+                    _auth.GetCurrentPublicKey(),
+                    _chat.PeerNickname,
+                    _chat.PeerRsaPublicJson),
+                _chat);
+        }
+        catch
+        {
+            _safetyNumberLabel.Text = "";
+        }
+    }
+
+    private void OnPeerPublicKeyChanged(object? sender, PeerPublicKeyChangedEventArgs e)
+    {
+        if (e.ChatId != _chat.Id || !IsHandleCreated || IsDisposed)
+            return;
+        try
+        {
+            BeginInvoke(async () =>
+            {
+                var fresh = await _repo.GetChatAsync(_chat.Id).ConfigureAwait(true);
+                if (fresh != null)
+                {
+                    _chat.PeerRsaPublicJson = fresh.PeerRsaPublicJson;
+                    _chat.PeerKeySourceKind = fresh.PeerKeySourceKind;
+                    _chat.PeerKeySourceDetail = fresh.PeerKeySourceDetail;
+                    _chat.PeerNickname = fresh.PeerNickname;
+                }
+
+                RefreshSafetyLabel();
+                MessageBox.Show(
+                    this,
+                    PeerSafetyDisplay.FormatKeyChangeWarning(e),
+                    PeerSafetyDisplay.KeyChangeTitle,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // ignore
+        }
+    }
+
+    private void OnMessengerServerFailover(object? sender, MessengerServerFailoverEventArgs e)
+    {
+        if (!IsHandleCreated || IsDisposed)
+            return;
+        try
+        {
+            BeginInvoke(() =>
+            {
+                if (e.SwitchedToMesh)
+                {
+                    MessageBox.Show(
+                        this,
+                        PeerSafetyDisplay.MeshWarning,
+                        "Messenger-сервер",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                }
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // ignore
+        }
+    }
+
+    private async Task OnEmergencyUntrustAsync()
+    {
+        var hint = PeerKeySource.IsServer(_chat.PeerKeySourceKind) ? _chat.PeerKeySourceDetail : null;
+        try
+        {
+            await _messengerServers.MarkUntrustedWithFailoverAsync(null, hint).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Emergency untrust failed");
+            MessageBox.Show(this, ex.Message, "🚨", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
 
     private void RefreshPeerPresenceLabel()
