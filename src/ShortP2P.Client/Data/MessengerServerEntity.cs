@@ -34,4 +34,7 @@ public sealed class MessengerServerEntity
     public long CreatedUtcTicks { get; set; }
 
     public long UpdatedUtcTicks { get; set; }
+
+    /// <summary>Client-side trust rating 0..1 (default 0.8). Poll <c>AskServers</c> when ≥ 0.3.</summary>
+    public float TrustRating { get; set; } = 0.8f;
 }

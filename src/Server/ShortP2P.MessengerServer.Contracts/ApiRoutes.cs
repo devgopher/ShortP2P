@@ -31,4 +31,13 @@ public static class ApiRoutes
 
     /// <summary>GET anonymous liveness ping (200 OK).</summary>
     public const string ServerTechPing = Prefix + "/server-tech/ping";
+
+    /// <summary>GET gossip + ratings: ensure the named server exists (default 0.8) and return all ratings.</summary>
+    public const string TrustAskRating = Prefix + "/trust/ask-rating";
+
+    /// <summary>GET trusted peers (rating ≥ 0.3) with ratings.</summary>
+    public const string TrustAskServers = Prefix + "/trust/ask-servers";
+
+    /// <summary>POST claim about another server (UNAVAILABLE / MALFUNCTIONED / WRONGCERT).</summary>
+    public const string TrustClaim = Prefix + "/trust/claim";
 }

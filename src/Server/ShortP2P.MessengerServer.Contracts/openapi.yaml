@@ -348,6 +348,80 @@ paths:
         '200':
           description: Empty OK
 
+  /api/v1/trust/ask-rating:
+    get:
+      operationId: askRating
+      summary: Report a known peer server and list ratings
+      tags: [Trust]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: serverIp
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: serverPort
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 65535
+      responses:
+        '200':
+          description: Ratings of known peer servers (0..1)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServerRatingDto'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/trust/ask-servers:
+    get:
+      operationId: askServers
+      summary: List peer servers with rating at least 0.3
+      tags: [Trust]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Trusted peers (rating ≥ 0.3)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServerRatingDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/trust/claim:
+    post:
+      operationId: claimServer
+      summary: Complain about another messenger server
+      tags: [Trust]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimServerRequest'
+      responses:
+        '202':
+          description: Claim accepted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -555,6 +629,32 @@ components:
         lastSeenAtUtc:
           type: string
           format: date-time
+
+    ServerRatingDto:
+      type: object
+      required: [serverIp, serverPort, rating]
+      properties:
+        serverIp:
+          type: string
+        serverPort:
+          type: integer
+        rating:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+
+    ClaimServerRequest:
+      type: object
+      required: [serverIp, serverPort, reason]
+      properties:
+        serverIp:
+          type: string
+        serverPort:
+          type: integer
+        reason:
+          type: string
+          enum: [UNAVAILABLE, MALFUNCTIONED, WRONGCERT]
 
     ApiError:
       type: object

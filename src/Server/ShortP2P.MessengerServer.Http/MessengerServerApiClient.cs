@@ -1,5 +1,6 @@
 using ShortP2P.MessengerServer.Contracts;
 using ShortP2P.MessengerServer.Contracts.Dtos;
+using ShortP2P.TrustSystem;
 
 namespace ShortP2P.MessengerServer.Http;
 
@@ -211,6 +212,50 @@ public sealed class MessengerServerApiClient(
             .ConfigureAwait(false);
 
         response.EnsureSuccessStatusCode();
+    }
+
+    public async Task<IReadOnlyList<ServerRatingDto>> AskRatingAsync(
+        string serverIp,
+        int serverPort,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverIp);
+        var url =
+            $"{ApiRoutes.TrustAskRating}?serverIp={Uri.EscapeDataString(serverIp.Trim())}&serverPort={serverPort}";
+        using var response = await httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        var list = await MessengerServerJson
+            .ReadJsonAsync<ServerRatingDto[]>(response, cancellationToken)
+            .ConfigureAwait(false);
+        return list;
+    }
+
+    public async Task<IReadOnlyList<ServerRatingDto>> AskServersAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await httpClient.GetAsync(ApiRoutes.TrustAskServers, cancellationToken)
+            .ConfigureAwait(false);
+        var list = await MessengerServerJson
+            .ReadJsonAsync<ServerRatingDto[]>(response, cancellationToken)
+            .ConfigureAwait(false);
+        return list;
+    }
+
+    public async Task ClaimServerAsync(
+        string serverIp,
+        int serverPort,
+        ServerClaimReason reason,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverIp);
+        var body = new ClaimServerRequest
+        {
+            ServerIp = serverIp,
+            ServerPort = serverPort,
+            Reason = reason
+        };
+        using var response = await httpClient
+            .PostAsync(ApiRoutes.TrustClaim, MessengerServerJson.ToJsonContent(body), cancellationToken)
+            .ConfigureAwait(false);
+        await MessengerServerJson.EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Clears the stored JWT (logout / switch account).</summary>

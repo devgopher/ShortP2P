@@ -38,6 +38,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     private CancellationTokenSource? _cts;
     private Task? _longPollLoop;
     private Task? _pingLoop;
+    private Task? _ratingLoop;
     private bool _started;
 
     public MessengerServerSyncService(
@@ -68,6 +69,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             _manager.FailoverCompleted += OnFailoverCompleted;
             _longPollLoop = Task.Run(() => LongPollSupervisorAsync(token), token);
             _pingLoop = Task.Run(() => PingLoopAsync(token), token);
+            _ratingLoop = Task.Run(() => TrustRatingLoopAsync(token), token);
             _started = true;
         }
     }
@@ -77,6 +79,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         CancellationTokenSource? cts;
         Task? longPoll;
         Task? pingLoop;
+        Task? ratingLoop;
         lock (_startGate)
         {
             if (!_started)
@@ -85,9 +88,11 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             cts = _cts;
             longPoll = _longPollLoop;
             pingLoop = _pingLoop;
+            ratingLoop = _ratingLoop;
             _cts = null;
             _longPollLoop = null;
             _pingLoop = null;
+            _ratingLoop = null;
             _manager.FailoverCompleted -= OnFailoverCompleted;
         }
 
@@ -105,6 +110,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
         await WaitIgnoreCancelAsync(longPoll).ConfigureAwait(false);
         await WaitIgnoreCancelAsync(pingLoop).ConfigureAwait(false);
+        await WaitIgnoreCancelAsync(ratingLoop).ConfigureAwait(false);
         cts?.Dispose();
     }
 
@@ -132,6 +138,35 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             try
             {
                 await Task.Delay(MessengerServerManager.PingPeriod, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    private async Task TrustRatingLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await _manager.RefreshPeerTrustRatingsAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Messenger server trust-rating round failed");
+            }
+
+            try
+            {
+                await Task.Delay(MessengerServerManager.RatingRefreshPeriod, cancellationToken)
+                    .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

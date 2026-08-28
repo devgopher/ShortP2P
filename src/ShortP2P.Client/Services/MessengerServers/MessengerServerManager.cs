@@ -8,6 +8,7 @@ using ShortP2P.Client.Data;
 using ShortP2P.Client.Qr;
 using ShortP2P.MessengerServer.Contracts.Dtos;
 using ShortP2P.MessengerServer.Http;
+using ShortP2P.TrustSystem;
 
 namespace ShortP2P.Client.Services.MessengerServers;
 
@@ -19,6 +20,8 @@ public sealed class MessengerServerManager : IAsyncDisposable
     public static readonly TimeSpan DefaultHttpTimeout = TimeSpan.FromSeconds(90);
     public static readonly TimeSpan BlobHttpTimeout = TimeSpan.FromMinutes(10);
     public static readonly TimeSpan PingPeriod = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan RatingRefreshPeriod = TimeSpan.FromMinutes(5);
+    public const int MaxAskServersWorkers = 3;
     public static readonly TimeSpan PingTimeout = TimeSpan.FromSeconds(5);
 
     private readonly AuthService _auth;
@@ -115,6 +118,8 @@ public sealed class MessengerServerManager : IAsyncDisposable
         }
 
         await PersistUntrustedAsync(target, cancellationToken).ConfigureAwait(false);
+        await ReportClaimToPeersAsync(target, ServerClaimReason.MALFUNCTIONED, cancellationToken)
+            .ConfigureAwait(false);
         return await FailoverAfterUntrustAsync(target, cancellationToken).ConfigureAwait(false);
     }
 
@@ -254,6 +259,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
                 AccountPassword = password,
                 NetworkId = user.NetworkIdShort.Trim(),
                 Nick = user.Nickname.Trim(),
+                TrustRating = TrustRatings.Default,
                 CreatedUtcTicks = now,
                 UpdatedUtcTicks = now
             };
@@ -352,6 +358,8 @@ public sealed class MessengerServerManager : IAsyncDisposable
             }
 
             await PersistUntrustedAsync(entity, cancellationToken).ConfigureAwait(false);
+            await ReportClaimToPeersAsync(entity, ServerClaimReason.WRONGCERT, cancellationToken)
+                .ConfigureAwait(false);
 
             _logger.LogError(
                 "Messenger server recheck mismatch for {BaseUrl}. Expected {Expected}, got {Actual}. Marked untrusted.",
@@ -496,11 +504,15 @@ public sealed class MessengerServerManager : IAsyncDisposable
             return null;
 
         if (connection.HasValidToken)
+        {
+            await GossipAskRatingAsync(connection, entity, cancellationToken).ConfigureAwait(false);
             return connection;
+        }
 
         await RegisterOrLoginAsync(connection, entity, user, cancellationToken).ConfigureAwait(false);
         await _repository.UpdateAsync(entity, cancellationToken).ConfigureAwait(false);
         connection.UpdateEntity(entity);
+        await GossipAskRatingAsync(connection, entity, cancellationToken).ConfigureAwait(false);
         return connection;
     }
 
@@ -528,6 +540,112 @@ public sealed class MessengerServerManager : IAsyncDisposable
         }
 
         return SortConnectionsByRank(ready);
+    }
+
+    /// <summary>
+    /// Asks <c>AskServers</c> on local peers with trust rating ≥ 0.3 (1–3 parallel calls),
+    /// then upserts local rows: new servers above the floor, existing rows get the arithmetic mean.
+    /// </summary>
+    public async Task RefreshPeerTrustRatingsAsync(CancellationToken cancellationToken = default)
+    {
+        var user = _auth.CurrentUser;
+        if (user == null)
+            return;
+
+        var all = await _repository.ListByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
+        var sources = all.Where(s => s.TrustRating >= TrustRatings.Floor && AllowsTraffic(s)).ToList();
+        if (sources.Count == 0)
+            return;
+
+        var samples = new ConcurrentBag<RatedServer>();
+        var workers = Math.Clamp(sources.Count, 1, MaxAskServersWorkers);
+        await Parallel.ForEachAsync(
+            sources,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = workers,
+                CancellationToken = cancellationToken
+            },
+            async (server, ct) =>
+            {
+                try
+                {
+                    var conn = await EnsureReadyAsync(server, ct).ConfigureAwait(false);
+                    if (conn == null || !conn.HasValidToken)
+                        return;
+                    var list = await conn.Api.AskServersAsync(ct).ConfigureAwait(false);
+                    foreach (var row in list)
+                        samples.Add(new RatedServer(row.ServerIp, row.ServerPort, row.Rating));
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "AskServers failed on {BaseUrl}", server.BaseUrl);
+                }
+            }).ConfigureAwait(false);
+
+        var means = TrustRatings.AverageByEndpoint(samples);
+        if (means.Count == 0)
+            return;
+
+        var latest = await _repository.ListByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
+        foreach (var (endpoint, mean) in means)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var existing = latest.FirstOrDefault(s => MatchesEndpoint(s.BaseUrl, endpoint));
+            if (existing != null)
+            {
+                existing.TrustRating = mean;
+                await _repository.UpdateAsync(existing, cancellationToken).ConfigureAwait(false);
+                if (_connections.TryGetValue(existing.Id, out var live))
+                    live.UpdateEntity(existing);
+                continue;
+            }
+
+            if (mean < TrustRatings.Floor)
+                continue;
+
+            var count = await _repository.CountByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            if (count >= MessengerServerLimits.MaxServersPerUser)
+            {
+                _logger.LogDebug(
+                    "Skip auto-add {Host}:{Port}: already {Count} servers",
+                    endpoint.Host, endpoint.Port, count);
+                continue;
+            }
+
+            try
+            {
+                var added = await AddServerAsync(ToHttpsBaseUrl(endpoint), cancellationToken)
+                    .ConfigureAwait(false);
+                added.TrustRating = mean;
+                await _repository.UpdateAsync(added, cancellationToken).ConfigureAwait(false);
+                latest = await _repository.ListByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "Auto-add messenger server {Host}:{Port} failed", endpoint.Host, endpoint.Port);
+            }
+        }
+
+        _logger.LogInformation("Trust ratings refreshed from {Sources} peers, {Targets} endpoints",
+            sources.Count, means.Count);
+    }
+
+    private static bool MatchesEndpoint(string baseUrl, ServerEndpoint endpoint)
+    {
+        if (!TryParseEndpoint(baseUrl, out var host, out var port))
+            return false;
+        return ServerEndpoint.TryParse(host, port, out var local, out _) && local.EqualsEndpoint(endpoint);
+    }
+
+    private static string ToHttpsBaseUrl(ServerEndpoint endpoint)
+    {
+        var builder = new UriBuilder("https", endpoint.Host, endpoint.Port);
+        return SqliteMessengerServerRepository.NormalizeBaseUrl(builder.Uri.GetLeftPart(UriPartial.Authority));
     }
 
     /// <summary>True when the client may connect, send, receive, or take presence from this server.</summary>
@@ -642,6 +760,8 @@ public sealed class MessengerServerManager : IAsyncDisposable
             return true;
 
         await PersistUntrustedAsync(entity, cancellationToken).ConfigureAwait(false);
+        await ReportClaimToPeersAsync(entity, ServerClaimReason.WRONGCERT, cancellationToken)
+            .ConfigureAwait(false);
 
         _logger.LogError(
             "Messenger server certificate mismatch for {BaseUrl}. Expected {Expected}, got {Actual}. Marked untrusted.",
@@ -693,6 +813,8 @@ public sealed class MessengerServerManager : IAsyncDisposable
             if (!MessengerServerConnection.FingerprintsEqual(expected, actual))
             {
                 await PersistUntrustedAsync(entity, cancellationToken).ConfigureAwait(false);
+                await ReportClaimToPeersAsync(entity, ServerClaimReason.WRONGCERT, cancellationToken)
+                    .ConfigureAwait(false);
                 _logger.LogError(
                     "Messenger server ping mismatch for {BaseUrl}. Expected {Expected}, got {Actual}. Marked untrusted.",
                     entity.BaseUrl,
@@ -743,6 +865,9 @@ public sealed class MessengerServerManager : IAsyncDisposable
             conn.UpdateEntity(entity);
             conn.ClearSession();
         }
+
+        await ReportClaimToPeersAsync(entity, ServerClaimReason.UNAVAILABLE, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Fingerprint mismatch: untrusted and inactive. Drops the live HTTP session.</summary>
@@ -899,6 +1024,95 @@ public sealed class MessengerServerManager : IAsyncDisposable
         if (entity == null || entity.UserId != userId)
             throw new InvalidOperationException("Messenger server not found.");
         return entity;
+    }
+
+    private async Task GossipAskRatingAsync(
+        MessengerServerConnection connection,
+        MessengerServerEntity self,
+        CancellationToken cancellationToken)
+    {
+        if (!connection.HasValidToken || !AllowsTraffic(connection))
+            return;
+
+        IReadOnlyList<MessengerServerEntity> others;
+        try
+        {
+            var user = RequireUser();
+            var all = await _repository.ListByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            others = all.Where(s => s.Id != self.Id).ToList();
+        }
+        catch
+        {
+            return;
+        }
+
+        foreach (var other in others)
+        {
+            if (!TryParseEndpoint(other.BaseUrl, out var ip, out var port))
+                continue;
+            try
+            {
+                await connection.Api.AskRatingAsync(ip, port, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "AskRating failed on {BaseUrl} for {Peer}", self.BaseUrl, other.BaseUrl);
+            }
+        }
+    }
+
+    private async Task ReportClaimToPeersAsync(
+        MessengerServerEntity target,
+        ServerClaimReason reason,
+        CancellationToken cancellationToken)
+    {
+        if (!TryParseEndpoint(target.BaseUrl, out var ip, out var port))
+            return;
+
+        IReadOnlyList<MessengerServerEntity> peers;
+        try
+        {
+            var user = RequireUser();
+            var all = await _repository.ListByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            peers = all.Where(s => s.Id != target.Id && s.Trusted && s.Active).ToList();
+        }
+        catch
+        {
+            return;
+        }
+
+        foreach (var peer in peers)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                if (!_connections.TryGetValue(peer.Id, out var conn) || !conn.HasValidToken || !AllowsTraffic(conn))
+                    continue;
+                await conn.Api.ClaimServerAsync(ip, port, reason, cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation(
+                    "ClaimServer {Reason} for {Target} sent to {Peer}",
+                    reason, target.BaseUrl, peer.BaseUrl);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "ClaimServer {Reason} to {Peer} failed", reason, peer.BaseUrl);
+            }
+        }
+    }
+
+    internal static bool TryParseEndpoint(string? baseUrl, out string host, out int port)
+    {
+        host = "";
+        port = 0;
+        if (!Uri.TryCreate((baseUrl ?? "").Trim(), UriKind.Absolute, out var uri))
+            return false;
+        host = uri.IdnHost;
+        if (string.IsNullOrWhiteSpace(host))
+            host = uri.Host;
+        port = uri.IsDefaultPort
+            ? uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ? 443 : 80
+            : uri.Port;
+        return host.Length > 0 && port is >= 1 and <= 65535;
     }
 
     private UserEntity RequireUser() =>

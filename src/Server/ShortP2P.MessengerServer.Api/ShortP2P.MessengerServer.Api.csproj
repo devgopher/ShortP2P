@@ -23,6 +23,7 @@
     <ProjectReference Include="..\ShortP2P.MessengerServer.UseCases\ShortP2P.MessengerServer.UseCases.csproj" />
     <ProjectReference Include="..\ShortP2P.MessengerServer.Infrastructure\ShortP2P.MessengerServer.Infrastructure.csproj" />
     <ProjectReference Include="..\ShortP2P.MessengerServer.Persistence.Psql\ShortP2P.MessengerServer.Persistence.Psql.csproj" />
+    <ProjectReference Include="..\..\ShortP2P.TrustSystem\ShortP2P.TrustSystem.csproj" />
   </ItemGroup>
 
 </Project>

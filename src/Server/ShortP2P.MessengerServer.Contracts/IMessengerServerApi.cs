@@ -1,4 +1,5 @@
 using ShortP2P.MessengerServer.Contracts.Dtos;
+using ShortP2P.TrustSystem;
 
 namespace ShortP2P.MessengerServer.Contracts;
 
@@ -67,4 +68,27 @@ public interface IMessengerServerApi
 
     /// <summary>GET <see cref="ApiRoutes.ServerTechPing"/> — liveness (anonymous, 200 OK).</summary>
     Task PingAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// GET <see cref="ApiRoutes.TrustAskRating"/> — report a known server (added at 0.8 if new)
+    /// and receive this host's ratings of all known peers.
+    /// </summary>
+    Task<IReadOnlyList<ServerRatingDto>> AskRatingAsync(
+        string serverIp,
+        int serverPort,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// GET <see cref="ApiRoutes.TrustAskServers"/> — peers with rating ≥ 0.3.
+    /// </summary>
+    Task<IReadOnlyList<ServerRatingDto>> AskServersAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// POST <see cref="ApiRoutes.TrustClaim"/> — complain about another server (not this host).
+    /// </summary>
+    Task ClaimServerAsync(
+        string serverIp,
+        int serverPort,
+        ServerClaimReason reason,
+        CancellationToken cancellationToken = default);
 }

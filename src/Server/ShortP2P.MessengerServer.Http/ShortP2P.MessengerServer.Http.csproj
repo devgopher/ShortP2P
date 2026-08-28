@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ShortP2P.MessengerServer.Contracts\ShortP2P.MessengerServer.Contracts.csproj" />
+    <ProjectReference Include="..\..\ShortP2P.TrustSystem\ShortP2P.TrustSystem.csproj" />
   </ItemGroup>
 
 </Project>

@@ -23,7 +23,7 @@
                 <Label Text="P2P chats (UDP). Swipe left on a row and tap Delete to remove the chat on this device only."
                        FontSize="12" TextColor="Gray" />
             </VerticalStackLayout>
-            <Label x:Name="SafetyNumberLabel" Grid.Column="1" FontSize="13" HorizontalTextAlignment="End"
+            <Label x:Name="SafetyNumberLabel" Grid.Column="1" FontSize="22" HorizontalTextAlignment="End"
                    VerticalOptions="Start" LineBreakMode="WordWrap" MaxWidthRequest="260" />
             <Button x:Name="EmergencyUntrustButton" Grid.Column="2" Text="🚨" Clicked="OnEmergencyUntrustClicked"
                     Padding="6,2" VerticalOptions="Start" />

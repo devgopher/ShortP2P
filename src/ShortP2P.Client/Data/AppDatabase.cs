@@ -26,6 +26,16 @@ public sealed class AppDatabase(string databasePath)
         await _connection.CreateTableAsync<MessengerServerEntity>();
         try
         {
+            await _connection.ExecuteAsync(
+                "ALTER TABLE messenger_servers ADD COLUMN TrustRating REAL NOT NULL DEFAULT 0.8");
+        }
+        catch
+        {
+            // column already exists
+        }
+
+        try
+        {
             await _connection.ExecuteAsync("ALTER TABLE chats ADD COLUMN RelayRouteBlob TEXT NULL");
         }
         catch

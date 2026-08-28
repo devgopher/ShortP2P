@@ -37,9 +37,11 @@ src/Server/
 ├── ShortP2P.MessengerServer.Http/                # HTTPS-клиент для ShortP2P.Client
 ├── ShortP2P.MessengerServer.Domain/              # Доменные сущности
 ├── ShortP2P.MessengerServer.UseCases/            # Application-слой
-├── ShortP2P.MessengerServer.Infrastructure/      # In-memory кеш, SystemClock
+├── ShortP2P.MessengerServer.Infrastructure/      # In-memory кеш, SystemClock, Trust LiteDB
 └── ShortP2P.MessengerServer.Persistence.Psql/    # Messenger Postgres (без аккаунтов)
 ```
+
+Рейтинг чужих серверов: проект `src/ShortP2P.TrustSystem` (`AskRating` / `ClaimServer`).
 
 Все проекты входят в `ShortP2P.sln`.
 

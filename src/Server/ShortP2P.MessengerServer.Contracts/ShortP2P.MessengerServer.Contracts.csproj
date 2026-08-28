@@ -8,8 +8,12 @@
     <Description>HTTPS API contract (DTOs, routes, OpenAPI) for the ShortP2P messenger server.</Description>
   </PropertyGroup>
 
-  <ItemGroup>
+    <ItemGroup>
     <None Include="openapi.yaml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\ShortP2P.TrustSystem\ShortP2P.TrustSystem.csproj" />
   </ItemGroup>
 
 </Project>

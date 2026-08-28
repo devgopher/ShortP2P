@@ -9,6 +9,7 @@ using ShortP2P.MessengerServer.UseCases.Messages;
 using ShortP2P.MessengerServer.UseCases.Presence;
 using ShortP2P.MessengerServer.UseCases.Server;
 using ShortP2P.MessengerServer.UseCases.ServerTech;
+using ShortP2P.MessengerServer.UseCases.Trust;
 
 namespace ShortP2P.MessengerServer.Api.DependencyInjection;
 
@@ -36,7 +37,11 @@ public static class UseCasesServiceCollectionExtensions
         services.AddScoped<PollInboxEventsUseCase>();
         services.AddScoped<GetClientPresencesUseCase>();
         services.AddScoped<GetServerCertificateUseCase>();
+        services.AddScoped<AskRatingUseCase>();
+        services.AddScoped<AskServersUseCase>();
+        services.AddScoped<ClaimServerUseCase>();
         services.AddHostedService<MessageRetentionHostedService>();
+        services.AddHostedService<TrustRecoveryHostedService>();
         services.AddHostedService<HostPowersMeasurementHostedService>();
         return services;
     }

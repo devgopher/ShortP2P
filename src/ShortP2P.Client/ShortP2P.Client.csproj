@@ -26,6 +26,7 @@
         <ProjectReference Include="..\ShortP2P.Messenger\ShortP2P.Messenger.csproj" />
         <ProjectReference Include="..\ShortP2P.Discovery\ShortP2P.Discovery.csproj" />
         <ProjectReference Include="..\Server\ShortP2P.MessengerServer.Http\ShortP2P.MessengerServer.Http.csproj" />
+        <ProjectReference Include="..\ShortP2P.TrustSystem\ShortP2P.TrustSystem.csproj" />
     </ItemGroup>
 
     <ItemGroup>

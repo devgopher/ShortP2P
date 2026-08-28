@@ -32,6 +32,9 @@
 | `GET` | `/api/v1/server-tech/power` | TotalPower (anonymous) |
 | `GET` | `/api/v1/server-tech/free-powers` | FreePowers % (anonymous) |
 | `GET` | `/api/v1/server-tech/ping` | Liveness 200 OK (anonymous) |
+| `GET` | `/api/v1/trust/ask-rating` | Сообщить о сервере (создаётся с рейтингом 0.8) и получить список рейтингов |
+| `GET` | `/api/v1/trust/ask-servers` | Список серверов с рейтингом ≥ **0.3** |
+| `POST` | `/api/v1/trust/claim` | Жалоба на другой сервер (`UNAVAILABLE` / `MALFUNCTIONED` / `WRONGCERT`) |
 
 `deviceId` — 64 lowercase hex (SHA-256 от install GUID). Даты — UTC. `encryptedDataBase64` — opaque.
 
