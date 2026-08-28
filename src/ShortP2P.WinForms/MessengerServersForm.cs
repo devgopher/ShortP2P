@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Services.MessengerServers;
+using ShortP2P.TrustSystem;
 
 namespace ShortP2P.WinForms;
 
@@ -17,6 +18,7 @@ public sealed class MessengerServersForm : Form
     private readonly Button _importButton = new() { Text = "Импортировать сервер", AutoSize = true };
     private readonly Button _shareButton = new() { Text = "Поделиться сервером", AutoSize = true };
     private readonly Button _recheckButton = new() { Text = "Проверить", AutoSize = true };
+    private readonly Button _askServersButton = new() { Text = "Запросить серверы", AutoSize = true };
     private readonly Button _toggleActiveButton = new() { Text = "Вкл/выкл", AutoSize = true };
     private readonly Button _deleteButton = new() { Text = "Удалить", AutoSize = true };
     private readonly Button _refreshButton = new() { Text = "Обновить", AutoSize = true };
@@ -45,15 +47,17 @@ public sealed class MessengerServersForm : Form
         _logger = logger;
         Text = "Messenger servers";
         StartPosition = FormStartPosition.CenterParent;
-        Width = 860;
+        Width = 1100;
         Height = 480;
         MinimizeBox = false;
 
-        _list.Columns.Add("URL", 280);
+        _list.Columns.Add("URL", 260);
+        _list.Columns.Add("Rating", 70);
+        _list.Columns.Add("Запросить серверы", 140);
         _list.Columns.Add("Active", 60);
         _list.Columns.Add("Trusted", 70);
         _list.Columns.Add("Registered", 80);
-        _list.Columns.Add("Fingerprint", 260);
+        _list.Columns.Add("Fingerprint", 240);
 
         var root = new TableLayoutPanel
         {
@@ -95,6 +99,7 @@ public sealed class MessengerServersForm : Form
         };
         actions.Controls.Add(_shareButton);
         actions.Controls.Add(_recheckButton);
+        actions.Controls.Add(_askServersButton);
         actions.Controls.Add(_toggleActiveButton);
         actions.Controls.Add(_deleteButton);
         actions.Controls.Add(_refreshButton);
@@ -111,10 +116,13 @@ public sealed class MessengerServersForm : Form
         _importButton.Click += async (_, _) => await ImportServerAsync().ConfigureAwait(true);
         _shareButton.Click += (_, _) => ShareSelected();
         _recheckButton.Click += async (_, _) => await RecheckSelectedAsync().ConfigureAwait(true);
+        _askServersButton.Click += async (_, _) => await AskServersSelectedAsync().ConfigureAwait(true);
         _toggleActiveButton.Click += async (_, _) => await ToggleActiveAsync().ConfigureAwait(true);
         _deleteButton.Click += async (_, _) => await DeleteSelectedAsync().ConfigureAwait(true);
         _refreshButton.Click += async (_, _) => await ReloadAsync().ConfigureAwait(true);
         _closeButton.Click += (_, _) => Close();
+        _list.MouseClick += async (_, e) => await OnListMouseClickAsync(e).ConfigureAwait(true);
+        _list.SelectedIndexChanged += (_, _) => UpdateAskServersButton();
 
         Shown += async (_, _) =>
         {
@@ -143,8 +151,12 @@ public sealed class MessengerServersForm : Form
                 var item = new ListViewItem(s.BaseUrl)
                 {
                     Tag = s,
-                    ForeColor = s.Trusted ? SystemColors.WindowText : Color.DarkRed
+                    ForeColor = !s.Trusted || s.TrustRating < TrustRatings.Floor
+                        ? Color.DarkRed
+                        : SystemColors.WindowText
                 };
+                item.SubItems.Add(FormatRating(s.TrustRating));
+                item.SubItems.Add(s.TrustRating >= TrustRatings.Floor ? "Запросить" : "");
                 item.SubItems.Add(s.Active ? "yes" : "no");
                 item.SubItems.Add(s.Trusted ? "yes" : "NO");
                 item.SubItems.Add(s.IsRegistered ? "yes" : "no");
@@ -154,12 +166,93 @@ public sealed class MessengerServersForm : Form
 
             _list.EndUpdate();
             _status.Text = $"Серверов: {_list.Items.Count} / {MessengerServerLimits.MaxServersPerUser}";
+            UpdateAskServersButton();
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Reload messenger servers");
             _status.Text = ex.Message;
             MessageBox.Show(this, ex.Message, "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private static string FormatRating(float rating) =>
+        rating.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+
+    private const int AskServersColumnIndex = 2;
+
+    private async Task OnListMouseClickAsync(MouseEventArgs e)
+    {
+        var hit = _list.HitTest(e.Location);
+        if (hit.Item == null || hit.SubItem == null)
+            return;
+        if (hit.Item.SubItems.IndexOf(hit.SubItem) != AskServersColumnIndex)
+            return;
+        if (hit.Item.Tag is not MessengerServerEntity entity)
+            return;
+        if (entity.TrustRating < TrustRatings.Floor)
+            return;
+
+        await AskServersFromAsync(entity).ConfigureAwait(true);
+    }
+
+    private void UpdateAskServersButton()
+    {
+        _askServersButton.Enabled = TryGetSelectedServer(out var entity) &&
+                                    entity.TrustRating >= TrustRatings.Floor;
+    }
+
+    private bool TryGetSelectedServer(out MessengerServerEntity entity)
+    {
+        if (_list.SelectedItems.Count > 0 && _list.SelectedItems[0].Tag is MessengerServerEntity selected)
+        {
+            entity = selected;
+            return true;
+        }
+
+        entity = null!;
+        return false;
+    }
+
+    private async Task AskServersSelectedAsync()
+    {
+        if (!TryGetSelectedServer(out var entity))
+        {
+            MessageBox.Show(this, "Выберите сервер в списке.", "Запросить серверы", MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        if (entity.TrustRating < TrustRatings.Floor)
+        {
+            MessageBox.Show(this, "Рейтинг сервера ниже 0.3 — запрос списка недоступен.", "Запросить серверы",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        await AskServersFromAsync(entity).ConfigureAwait(true);
+    }
+
+    private async Task AskServersFromAsync(MessengerServerEntity entity)
+    {
+        _askServersButton.Enabled = false;
+        _status.Text = $"Запрос серверов у {entity.BaseUrl}…";
+        try
+        {
+            var result = await _manager.AskServersFromAsync(entity.Id).ConfigureAwait(true);
+            await ReloadAsync().ConfigureAwait(true);
+            _status.Text =
+                $"Получено {result.ReceivedCount}, обновлено {result.UpdatedCount}, добавлено {result.AddedCount}: {entity.BaseUrl}";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AskServers from messenger server {Id}", entity.Id);
+            _status.Text = ex.Message;
+            MessageBox.Show(this, ex.Message, "Запросить серверы", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            UpdateAskServersButton();
         }
     }
 

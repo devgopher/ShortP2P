@@ -587,11 +587,46 @@ public sealed class MessengerServerManager : IAsyncDisposable
                 }
             }).ConfigureAwait(false);
 
+        var applied = await ApplyAskServersSamplesAsync(user.Id, samples, cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation(
+            "Trust ratings refreshed from {Sources} peers, {Targets} endpoints ({Updated} updated, {Added} added)",
+            sources.Count, applied.ReceivedCount, applied.UpdatedCount, applied.AddedCount);
+    }
+
+    /// <summary>
+    /// Asks <c>AskServers</c> on one local peer (rating ≥ 0.3) and merges the returned ratings.
+    /// </summary>
+    public async Task<MessengerServerAskServersResult> AskServersFromAsync(
+        int serverId,
+        CancellationToken cancellationToken = default)
+    {
+        var user = RequireUser();
+        var server = await RequireOwnedServerAsync(user.Id, serverId, cancellationToken).ConfigureAwait(false);
+        if (server.TrustRating < TrustRatings.Floor)
+            throw new InvalidOperationException("Рейтинг сервера ниже 0.3 — запрос списка недоступен.");
+
+        var conn = await EnsureReadyAsync(server, cancellationToken).ConfigureAwait(false);
+        if (conn == null || !conn.HasValidToken)
+            throw new InvalidOperationException("Не удалось подключиться к серверу.");
+
+        var list = await conn.Api.AskServersAsync(cancellationToken).ConfigureAwait(false);
+        var samples = list.Select(row => new RatedServer(row.ServerIp, row.ServerPort, row.Rating)).ToList();
+        var applied = await ApplyAskServersSamplesAsync(user.Id, samples, cancellationToken).ConfigureAwait(false);
+        return applied with { ReceivedCount = list.Count };
+    }
+
+    private async Task<MessengerServerAskServersResult> ApplyAskServersSamplesAsync(
+        int userId,
+        IEnumerable<RatedServer> samples,
+        CancellationToken cancellationToken)
+    {
         var means = TrustRatings.AverageByEndpoint(samples);
         if (means.Count == 0)
-            return;
+            return new MessengerServerAskServersResult(0, 0, 0);
 
-        var latest = await _repository.ListByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
+        var updated = 0;
+        var added = 0;
+        var latest = await _repository.ListByUserAsync(userId, cancellationToken).ConfigureAwait(false);
         foreach (var (endpoint, mean) in means)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -602,13 +637,14 @@ public sealed class MessengerServerManager : IAsyncDisposable
                 await _repository.UpdateAsync(existing, cancellationToken).ConfigureAwait(false);
                 if (_connections.TryGetValue(existing.Id, out var live))
                     live.UpdateEntity(existing);
+                updated++;
                 continue;
             }
 
             if (mean < TrustRatings.Floor)
                 continue;
 
-            var count = await _repository.CountByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
+            var count = await _repository.CountByUserAsync(userId, cancellationToken).ConfigureAwait(false);
             if (count >= MessengerServerLimits.MaxServersPerUser)
             {
                 _logger.LogDebug(
@@ -619,11 +655,12 @@ public sealed class MessengerServerManager : IAsyncDisposable
 
             try
             {
-                var added = await AddServerAsync(ToHttpsBaseUrl(endpoint), cancellationToken)
+                var created = await AddServerAsync(ToHttpsBaseUrl(endpoint), cancellationToken)
                     .ConfigureAwait(false);
-                added.TrustRating = mean;
-                await _repository.UpdateAsync(added, cancellationToken).ConfigureAwait(false);
-                latest = await _repository.ListByUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
+                created.TrustRating = mean;
+                await _repository.UpdateAsync(created, cancellationToken).ConfigureAwait(false);
+                latest = await _repository.ListByUserAsync(userId, cancellationToken).ConfigureAwait(false);
+                added++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -631,8 +668,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
             }
         }
 
-        _logger.LogInformation("Trust ratings refreshed from {Sources} peers, {Targets} endpoints",
-            sources.Count, means.Count);
+        return new MessengerServerAskServersResult(means.Count, updated, added);
     }
 
     private static bool MatchesEndpoint(string baseUrl, ServerEndpoint endpoint)
