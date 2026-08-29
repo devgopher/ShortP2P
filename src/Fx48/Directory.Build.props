@@ -6,8 +6,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <NoWarn>$(NoWarn);CS0436</NoWarn>
     <MicrosoftExtensionsVersion>8.0.2</MicrosoftExtensionsVersion>
-    <BaseOutputPath>$(MSBuildThisFileDirectory)bin\$(MSBuildProjectName)\</BaseOutputPath>
-    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <!-- AnyCPU | x86 | x64 — separate bin/obj so parallel arch builds do not collide -->
+    <Platforms>AnyCPU;x86;x64</Platforms>
+    <Platform Condition="'$(Platform)' == '' or '$(Platform)' == 'Any CPU'">AnyCPU</Platform>
+    <PlatformTarget Condition="'$(Platform)' == 'x86'">x86</PlatformTarget>
+    <PlatformTarget Condition="'$(Platform)' == 'x64'">x64</PlatformTarget>
+    <PlatformTarget Condition="'$(Platform)' == 'AnyCPU'">AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)bin\$(MSBuildProjectName)\$(Platform)\</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj\$(MSBuildProjectName)\$(Platform)\</BaseIntermediateOutputPath>
   </PropertyGroup>
 
   <ItemGroup>

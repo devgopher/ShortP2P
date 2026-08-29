@@ -14,8 +14,10 @@ They are for the Iskra Win7/WinForms client: **HTTPS messenger servers, local SQ
 | `ShortP2P.Transport.Fx48` | `ShortP2P.Transport` | UDP/MAC codecs only |
 | `ShortP2P.Client.Fx48` | `ShortP2P.Client` | Server sync, chats, QR encode/decode from files |
 
-Build:
+Build (AnyCPU by default; also `x86` / `x64`):
 
 ```
 dotnet build src/Fx48/ShortP2P.Client.Fx48.csproj
+dotnet build src/Fx48/ShortP2P.Client.Fx48.csproj -p:Platform=x86
+dotnet build src/Fx48/ShortP2P.Client.Fx48.csproj -p:Platform=x64
 ```
