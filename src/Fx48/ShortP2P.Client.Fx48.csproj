@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>ShortP2P.Client</RootNamespace>
+    <AssemblyName>ShortP2P.Client</AssemblyName>
+    <Description>.NET Framework 4.8 server-path client (no BLE, no UDP runtime, QR decode from image).</Description>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\ShortP2P.Client\FileSessionStorage.cs" />
+    <Compile Include="..\ShortP2P.Client\PeerHostList.cs" />
+    <Compile Include="..\ShortP2P.Client\PeerTransportEndpoints.cs" />
+    <Compile Include="..\ShortP2P.Client\Data\AppDatabase.cs" />
+    <Compile Include="..\ShortP2P.Client\Data\BleDiscoveredPeerEntity.cs" />
+    <Compile Include="..\ShortP2P.Client\Data\ChatEntity.cs" />
+    <Compile Include="..\ShortP2P.Client\Data\ChatMessageEntity.cs" />
+    <Compile Include="..\ShortP2P.Client\Data\ChatPayloadKind.cs" />
+    <Compile Include="..\ShortP2P.Client\Data\ChatTransferState.cs" />
+    <Compile Include="..\ShortP2P.Client\Data\MessageDeliveryStatus.cs" />
+    <Compile Include="..\ShortP2P.Client\Data\MessengerServerEntity.cs" />
+    <Compile Include="..\ShortP2P.Client\Data\SqliteUserAuthRepository.cs" />
+    <Compile Include="..\ShortP2P.Client\ChatMedia\ChatWireCodec.cs" />
+    <Compile Include="..\ShortP2P.Client\Qr\QrImageCodec.cs" />
+    <Compile Include="..\ShortP2P.Client\Qr\MessengerServerQrCodec.cs" />
+    <Compile Include="..\ShortP2P.Client\Qr\MessengerServerQrPayload.cs" />
+    <Compile Include="..\ShortP2P.Client\Qr\MessengerServerQrService.cs" />
+    <Compile Include="..\ShortP2P.Client\Qr\PeerQrCodec.cs" />
+    <Compile Include="..\ShortP2P.Client\Qr\PeerQrPayload.cs" />
+    <Compile Include="..\ShortP2P.Client\Qr\PeerQrService.cs" />
+    <Compile Include="..\ShortP2P.Client\Services\ChatRepository.cs" />
+    <Compile Include="..\ShortP2P.Client\Services\ChatSessionCache.cs" />
+    <Compile Include="..\ShortP2P.Client\Services\PeerKeySource.cs" />
+    <Compile Include="..\ShortP2P.Client\Services\MessengerServers\*.cs" />
+    <Compile Include="Stubs\ChatP2PSession.cs" />
+    <Compile Include="Compat\AesGcm.cs" />
+    <Compile Include="Compat\CryptographicOperations.cs" />
+    <Compile Include="Compat\CancellationTokenSourceExtensions.cs" />
+    <Compile Include="Compat\ParallelFx.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="$(MicrosoftExtensionsVersion)" />
+    <PackageReference Include="sqlite-net-pcl" Version="1.9.172" />
+    <PackageReference Include="SQLitePCLRaw.bundle_green" Version="2.1.11" />
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.13" />
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="2.1.11" />
+    <PackageReference Include="ZXing.Net" Version="0.16.11" />
+    <PackageReference Include="ZXing.Net.Bindings.ImageSharp" Version="0.16.16" />
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.5.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="ShortP2P.Crypto.Fx48.csproj" />
+    <ProjectReference Include="ShortP2P.Auth.Fx48.csproj" />
+    <ProjectReference Include="ShortP2P.MessengerServer.Http.Fx48.csproj" />
+    <ProjectReference Include="ShortP2P.MessengerServer.Contracts.Fx48.csproj" />
+    <ProjectReference Include="ShortP2P.TrustSystem.Fx48.csproj" />
+    <ProjectReference Include="ShortP2P.Transport.Fx48.csproj" />
+    <ProjectReference Include="ShortP2P.Transport.Abstractions.Fx48.csproj" />
+  </ItemGroup>
+</Project>

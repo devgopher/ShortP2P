@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>ShortP2P.Crypto</RootNamespace>
+    <AssemblyName>ShortP2P.Crypto</AssemblyName>
+    <Description>.NET Framework 4.8 build of ShortP2P.Crypto (shared sources).</Description>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\ShortP2P.Crypto\*.cs" />
+    <Compile Include="Compat\CryptographicOperations.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="$(MicrosoftExtensionsVersion)" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>ShortP2P.MessengerServer.Contracts</RootNamespace>
+    <AssemblyName>ShortP2P.MessengerServer.Contracts</AssemblyName>
+    <Description>.NET Framework 4.8 build of messenger-server contracts (shared sources).</Description>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Server\ShortP2P.MessengerServer.Contracts\**\*.cs" Exclude="..\Server\ShortP2P.MessengerServer.Contracts\obj\**\*.cs;..\Server\ShortP2P.MessengerServer.Contracts\bin\**\*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="ShortP2P.TrustSystem.Fx48.csproj" />
+  </ItemGroup>
+</Project>

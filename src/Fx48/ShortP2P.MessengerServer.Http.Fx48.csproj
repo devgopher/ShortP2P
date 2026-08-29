@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>ShortP2P.MessengerServer.Http</RootNamespace>
+    <AssemblyName>ShortP2P.MessengerServer.Http</AssemblyName>
+    <Description>.NET Framework 4.8 HTTPS client SDK (shared sources, no IHttpClientFactory extensions).</Description>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Server\ShortP2P.MessengerServer.Http\*.cs" />
+    <Compile Include="Compat\HttpContentExtensions.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Net.Http.Json" Version="8.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="ShortP2P.MessengerServer.Contracts.Fx48.csproj" />
+    <ProjectReference Include="ShortP2P.TrustSystem.Fx48.csproj" />
+  </ItemGroup>
+</Project>

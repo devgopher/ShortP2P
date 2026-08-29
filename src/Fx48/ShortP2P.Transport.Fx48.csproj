@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>ShortP2P.Transport</RootNamespace>
+    <AssemblyName>ShortP2P.Transport</AssemblyName>
+    <Description>.NET Framework 4.8 UDP/Bluetooth address codecs only (no sockets / BLE runtime).</Description>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\ShortP2P.Transport\UdpTransportAddress.cs" />
+    <Compile Include="..\ShortP2P.Transport\BluetoothTransportAddress.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="ShortP2P.Transport.Abstractions.Fx48.csproj" />
+  </ItemGroup>
+</Project>

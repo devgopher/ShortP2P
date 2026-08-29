@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>ShortP2P.Transport.Abstractions</RootNamespace>
+    <AssemblyName>ShortP2P.Transport.Abstractions</AssemblyName>
+    <Description>.NET Framework 4.8 address types only (no ITransport / Channels).</Description>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\ShortP2P.Transport.Abstractions\TransportKind.cs" />
+    <Compile Include="..\ShortP2P.Transport.Abstractions\TransportAddress.cs" />
+  </ItemGroup>
+</Project>

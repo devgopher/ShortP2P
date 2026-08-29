@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>ShortP2P.TrustSystem</RootNamespace>
+    <AssemblyName>ShortP2P.TrustSystem</AssemblyName>
+    <Description>.NET Framework 4.8 build of ShortP2P.TrustSystem (shared sources).</Description>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\ShortP2P.TrustSystem\*.cs" />
+  </ItemGroup>
+</Project>
