@@ -1,4 +1,7 @@
 using System.Collections.Concurrent;
+#if NETFRAMEWORK
+using ShortP2P.Client.Compat;
+#endif
 using System.Diagnostics;
 using System.Net;
 using ShortP2P.Auth.Data;
@@ -446,12 +449,20 @@ public sealed class LocalNetworkScanner(
     /// </summary>
     public async Task ScanAsync(TimeSpan listenDuration, CancellationToken cancellationToken = default)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(listenDuration, TimeSpan.Zero);
+        if (listenDuration < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(listenDuration));
 
         _scanSessionActive = true;
         try
         {
-            _entries.Clear();
+            // Drop LAN/BT rows for a fresh listen; keep messenger-server directory until GetClients refreshes it.
+            foreach (var kv in _entries.ToArray())
+            {
+                if (kv.Value.TransportKind == TransportKind.MessengerServer)
+                    continue;
+                _entries.TryRemove(kv.Key, out _);
+            }
+
             RebuildSnapshot();
             ClientsChanged?.Invoke(this, EventArgs.Empty);
 
@@ -459,7 +470,11 @@ public sealed class LocalNetworkScanner(
             if (ShouldRunBleDiscoveryScan())
             {
                 var blePart = TimeSpan.FromSeconds(
+#if NETFRAMEWORK
+                    Math.Min(20, Math.Max(4, listenDuration.TotalSeconds * 0.35)));
+#else
                     Math.Clamp(listenDuration.TotalSeconds * 0.35, 4, 20));
+#endif
                 if (blePart > listenDuration)
                     blePart = listenDuration;
                 try
@@ -481,6 +496,7 @@ public sealed class LocalNetworkScanner(
                 }
             }
 
+            // GetClients (PrioritizedExternalDiscoveryRound) must run before the LAN listen window.
             await SendDiscoveryBroadcastRoundAsync(cancellationToken).ConfigureAwait(false);
             var remaining = listenDuration - sw.Elapsed;
             if (remaining > TimeSpan.Zero)
@@ -951,7 +967,13 @@ public sealed class LocalNetworkScanner(
         long nonce;
         do
         {
+#if NETFRAMEWORK
+            var bytes = new byte[8];
+            new Random().NextBytes(bytes);
+            nonce = BitConverter.ToInt64(bytes, 0);
+#else
             nonce = Random.Shared.NextInt64();
+#endif
         } while (nonce == 0);
 
         RegisterGossipBroadcastNonce(nonce);

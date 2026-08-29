@@ -32,5 +32,6 @@
     <Using Include="ShortP2P" />
     <Using Include="System.Net.Http" />
     <Compile Include="$(MSBuildThisFileDirectory)..\Shared\Require.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\Shared\Utf8Span.cs" />
   </ItemGroup>
 </Project>

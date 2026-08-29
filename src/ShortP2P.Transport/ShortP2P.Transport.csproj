@@ -2,6 +2,8 @@
 
     <ItemGroup>
         <ProjectReference Include="..\ShortP2P.Transport.Abstractions\ShortP2P.Transport.Abstractions.csproj" />
+        <Compile Include="..\Shared\Require.cs" Link="Require.cs" />
+        <Using Include="ShortP2P" />
     </ItemGroup>
 
     <ItemGroup>

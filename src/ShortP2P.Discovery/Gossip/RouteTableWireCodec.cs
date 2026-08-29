@@ -172,7 +172,7 @@ public static class RouteTableWireCodec
         off += 2;
         if (off + routeIdLen > datagram.Length)
             return false;
-        var routeId = Encoding.UTF8.GetString(datagram.Slice(off, routeIdLen));
+        var routeId = Utf8Span.GetString(datagram.Slice(off, routeIdLen));
         off += routeIdLen;
         if (off + 2 > datagram.Length)
             return false;
@@ -187,7 +187,7 @@ public static class RouteTableWireCodec
             off += 2;
             if (off + prLen > datagram.Length)
                 return false;
-            var prRouteId = Encoding.UTF8.GetString(datagram.Slice(off, prLen));
+            var prRouteId = Utf8Span.GetString(datagram.Slice(off, prLen));
             off += prLen;
             if (off + CompressedNetworkId.WireLength + 2 + 2 > datagram.Length)
                 return false;
@@ -201,7 +201,7 @@ public static class RouteTableWireCodec
             off += 2;
             if (off + nickLen > datagram.Length)
                 return false;
-            var nick = Encoding.UTF8.GetString(datagram.Slice(off, nickLen));
+            var nick = Utf8Span.GetString(datagram.Slice(off, nickLen));
             off += nickLen;
             if (off + 2 > datagram.Length)
                 return false;
@@ -209,7 +209,7 @@ public static class RouteTableWireCodec
             off += 2;
             if (off + addrLen + 8 > datagram.Length)
                 return false;
-            var addr = Encoding.UTF8.GetString(datagram.Slice(off, addrLen));
+            var addr = Utf8Span.GetString(datagram.Slice(off, addrLen));
             off += addrLen;
             var ticks = BinaryPrimitives.ReadInt64LittleEndian(datagram.Slice(off, 8));
             off += 8;

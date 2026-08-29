@@ -1,7 +1,7 @@
 # ShortP2P .NET Framework 4.8 libraries
 
 Separate `net48` assemblies that compile the existing ShortP2P sources (plus a few compat shims).
-They are for the Iskra Win7/WinForms client: **HTTPS messenger servers, local SQLite, QR from image file**. No BLE, no UDP runtime, no camera.
+They are for the Iskra Win7/WinForms client: **HTTPS messenger servers, local SQLite, UDP LAN scan, QR from image file**. No BLE, no camera.
 
 | Project | Assembly name | What it contains |
 |---|---|---|

@@ -158,6 +158,18 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
     public IUdpTransportFactory UdpTransportFactory { get; }
 
+    public LanChatStartContext CreateLanChatStartContext() =>
+        new()
+        {
+            MessengerServers = MessengerServers,
+            UdpTransportFactory = UdpTransportFactory,
+            Settings = Settings,
+            BluetoothTransport = BluetoothTransport,
+            BluetoothAdapterMac = Settings.SelectedBluetoothAdapterMac,
+            StopInviteListenerAsync = StopInviteListenerAsync,
+            EnsureInviteListenerAsync = EnsureInviteListenerRunningAsync
+        };
+
     public async ValueTask DisposeAsync()
     {
         await StopAsync().ConfigureAwait(false);

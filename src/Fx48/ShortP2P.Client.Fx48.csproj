@@ -2,13 +2,14 @@
   <PropertyGroup>
     <RootNamespace>ShortP2P.Client</RootNamespace>
     <AssemblyName>ShortP2P.Client</AssemblyName>
-    <Description>.NET Framework 4.8 server-path client (no BLE, no UDP runtime, QR decode from image).</Description>
+    <Description>.NET Framework 4.8 client: messenger servers, LAN UDP scan, QR from image (no BLE).</Description>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\ShortP2P.Client\FileSessionStorage.cs" />
     <Compile Include="..\ShortP2P.Client\PeerHostList.cs" />
     <Compile Include="..\ShortP2P.Client\PeerTransportEndpoints.cs" />
+    <Compile Include="..\ShortP2P.Client\InviteHostsBuilder.cs" />
     <Compile Include="..\ShortP2P.Client\Data\AppDatabase.cs" />
     <Compile Include="..\ShortP2P.Client\Data\BleDiscoveredPeerEntity.cs" />
     <Compile Include="..\ShortP2P.Client\Data\ChatEntity.cs" />
@@ -20,16 +21,45 @@
     <Compile Include="..\ShortP2P.Client\Data\SqliteUserAuthRepository.cs" />
     <Compile Include="..\ShortP2P.Client\ChatMedia\ChatWireCodec.cs" />
     <Compile Include="..\ShortP2P.Client\Qr\QrImageCodec.cs" />
+    <Compile Include="..\ShortP2P.Client\Qr\LocalIPv4Resolver.cs" />
     <Compile Include="..\ShortP2P.Client\Qr\MessengerServerQrCodec.cs" />
     <Compile Include="..\ShortP2P.Client\Qr\MessengerServerQrPayload.cs" />
     <Compile Include="..\ShortP2P.Client\Qr\MessengerServerQrService.cs" />
     <Compile Include="..\ShortP2P.Client\Qr\PeerQrCodec.cs" />
     <Compile Include="..\ShortP2P.Client\Qr\PeerQrPayload.cs" />
     <Compile Include="..\ShortP2P.Client\Qr\PeerQrService.cs" />
+    <Compile Include="..\ShortP2P.Client\LocalNetwork\LocalNetworkScanner.cs" />
+    <Compile Include="..\ShortP2P.Client\LocalNetwork\LanBroadcastHelper.cs" />
+    <Compile Include="..\ShortP2P.Client\Routing\P2pRoutingSettings.cs" />
+    <Compile Include="..\ShortP2P.Client\Routing\LinkTechnologyPreset.cs" />
+    <Compile Include="..\ShortP2P.Client\Routing\TrafficQualityMode.cs" />
+    <Compile Include="..\ShortP2P.Client\Routing\PresencePeerCapabilities.cs" />
+    <Compile Include="..\ShortP2P.Client\Routing\PresencePingCodec.cs" />
+    <Compile Include="..\ShortP2P.Client\Routing\DiscoveredLocalPeer.cs" />
+    <Compile Include="..\ShortP2P.Client\Routing\LocalEndpointHelper.cs" />
+    <Compile Include="..\ShortP2P.Client\Routing\ChatInviteCodec.cs" />
     <Compile Include="..\ShortP2P.Client\Services\ChatRepository.cs" />
     <Compile Include="..\ShortP2P.Client\Services\ChatSessionCache.cs" />
     <Compile Include="..\ShortP2P.Client\Services\PeerKeySource.cs" />
+    <Compile Include="..\ShortP2P.Client\Services\LanChatStartFromDiscovery.cs" />
     <Compile Include="..\ShortP2P.Client\Services\MessengerServers\*.cs" />
+    <Compile Include="..\ShortP2P.Discovery\PeerIdentity.cs" />
+    <Compile Include="..\ShortP2P.Discovery\UdpPeerDiscoveryOptions.cs" />
+    <Compile Include="..\ShortP2P.Discovery\IBluetoothPresencePingTargetsProvider.cs" />
+    <Compile Include="..\ShortP2P.Discovery\Gossip\GossipWireCodec.cs" />
+    <Compile Include="..\ShortP2P.Discovery\Gossip\RouteTableWireCodec.cs" />
+    <Compile Include="..\ShortP2P.Discovery\Pings\IDiscoveryPingStore.cs" />
+    <Compile Include="..\ShortP2P.Discovery\Pings\DiscoveryPingEntry.cs" />
+    <Compile Include="..\ShortP2P.Discovery\RouteTables\IRouteTableSnapshotSource.cs" />
+    <Compile Include="..\ShortP2P.Discovery\RouteTables\Route.cs" />
+    <Compile Include="..\ShortP2P.Discovery\RouteTables\PeerIdentityAddress.cs" />
+    <Compile Include="..\ShortP2P.Discovery\Ble\IBleDiscoveredPeerStore.cs" />
+    <Compile Include="..\ShortP2P.Discovery\Transceivers\IUnicastTransceiver.cs" />
+    <Compile Include="..\ShortP2P.Discovery\Transceivers\IBroadcastTransceiver.cs" />
+    <Compile Include="..\ShortP2P.Discovery\Transceivers\PingMessage.cs" />
+    <Compile Include="..\ShortP2P.Discovery\Transceivers\DiscoveryWireMessage.cs" />
+    <Compile Include="..\ShortP2P.Discovery\Transceivers\DiscoveryWireTransceiver.cs" />
+    <Compile Include="Compat\ChannelReaderFx.cs" />
     <Compile Include="Stubs\ChatP2PSession.cs" />
     <Compile Include="Compat\AesGcm.cs" />
     <Compile Include="Compat\CryptographicOperations.cs" />
@@ -46,6 +76,8 @@
     <PackageReference Include="ZXing.Net" Version="0.16.11" />
     <PackageReference Include="ZXing.Net.Bindings.ImageSharp" Version="0.16.16" />
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.5.1" />
+    <PackageReference Include="System.Threading.Channels" Version="8.0.0" />
+    <Reference Include="System.ComponentModel.DataAnnotations" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="ShortP2P.Crypto.Fx48.csproj" />

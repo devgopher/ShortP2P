@@ -19,20 +19,20 @@ public sealed class DiscoveryWireTransceiver(ITransport transport, int udpPort =
     public ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
         _started = true;
-        return ValueTask.CompletedTask;
+        return default;
     }
 
     public ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
         _started = false;
-        return ValueTask.CompletedTask;
+        return default;
     }
 
     public async ValueTask SendAsync(DiscoveryWireMessage message, TransportAddress destination,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(message);
-        ArgumentNullException.ThrowIfNull(destination);
+        Require.NotNull(message);
+        Require.NotNull(destination);
         EnsureRawNotEmpty(message);
         await _transport.SendAsync(message.RawPayload, destination, cancellationToken).ConfigureAwait(false);
     }
@@ -40,7 +40,7 @@ public sealed class DiscoveryWireTransceiver(ITransport transport, int udpPort =
     public async ValueTask SendBroadcastAsync(DiscoveryWireMessage message,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(message);
+        Require.NotNull(message);
         if (_transport.Kind != TransportKind.Udp)
             return;
         EnsureRawNotEmpty(message);

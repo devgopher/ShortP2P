@@ -89,7 +89,7 @@ public static class PresencePingCodec
 
         try
         {
-            nickname = Encoding.UTF8.GetString(datagram.Slice(15, nickLen));
+            nickname = Utf8Span.GetString(datagram.Slice(15, nickLen));
         }
         catch
         {
@@ -113,7 +113,7 @@ public static class PresencePingCodec
         if (dataUdpPort is < 1 or > 65535)
             return false;
         var lt = (LinkTechnologyPreset)datagram[afterNick + 2];
-        if (!Enum.IsDefined(lt))
+        if (!Enum.IsDefined(typeof(LinkTechnologyPreset), lt))
             return false;
         advertisedLink = lt;
 
@@ -144,13 +144,13 @@ public static class PresencePingCodec
         public ValueTask StartAsync(CancellationToken cancellationToken = default)
         {
             _started = true;
-            return ValueTask.CompletedTask;
+            return default;
         }
 
         public ValueTask StopAsync(CancellationToken cancellationToken = default)
         {
             _started = false;
-            return ValueTask.CompletedTask;
+            return default;
         }
 
         public async ValueTask SendAsync(PingMessage message, TransportAddress destination,

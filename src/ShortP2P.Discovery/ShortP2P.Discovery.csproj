@@ -28,6 +28,7 @@
         <Compile Include="..\ShortP2P.Client\Routing\DiscoveredLocalPeer.cs" Link="Routing\DiscoveredLocalPeer.cs" />
         <Compile Include="..\ShortP2P.Client\Routing\LocalEndpointHelper.cs" Link="Routing\LocalEndpointHelper.cs" />
         <Compile Include="..\Shared\Require.cs" Link="Require.cs" />
+        <Compile Include="..\Shared\Utf8Span.cs" Link="Utf8Span.cs" />
         <Using Include="ShortP2P" />
     </ItemGroup>
 

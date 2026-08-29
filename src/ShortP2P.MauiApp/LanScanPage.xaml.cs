@@ -117,7 +117,7 @@ public partial class LanScanPage : ContentPage
         try
         {
             var result = await LanChatStartFromDiscovery
-                .TryStartAsync(row.Peer, _auth, _chats, _p2p, CancellationToken.None).ConfigureAwait(true);
+                .TryStartAsync(row.Peer, _auth, _chats, _p2p.CreateLanChatStartContext(), CancellationToken.None).ConfigureAwait(true);
             switch (result.Kind)
             {
                 case LanChatStartKind.AlreadyExists:

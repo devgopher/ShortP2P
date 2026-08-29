@@ -25,9 +25,9 @@ public sealed class UdpTransportFactory(ILoggerFactory? loggerFactory = null) : 
 
     public UdpTransport Acquire(IPAddress ip, int port, bool enableBroadcast = false)
     {
-        ArgumentNullException.ThrowIfNull(ip);
-        ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
+        Require.NotNull(ip);
+        if (port is < 1 or > 65535)
+            throw new ArgumentOutOfRangeException(nameof(port));
 
         var key = new UdpTransportCacheKey(ip, port, enableBroadcast);
         var entry = _entries.GetOrAdd(key, k =>

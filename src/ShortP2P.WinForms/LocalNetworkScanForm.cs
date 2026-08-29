@@ -168,7 +168,7 @@ public sealed class LocalNetworkScanForm : Form
         try
         {
             var result = await LanChatStartFromDiscovery
-                .TryStartAsync(peer, _auth, _chats, _p2P, CancellationToken.None).ConfigureAwait(true);
+                .TryStartAsync(peer, _auth, _chats, _p2P.CreateLanChatStartContext(), CancellationToken.None).ConfigureAwait(true);
 
             switch (result.Kind)
             {

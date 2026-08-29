@@ -2,12 +2,20 @@
   <PropertyGroup>
     <RootNamespace>ShortP2P.Transport</RootNamespace>
     <AssemblyName>ShortP2P.Transport</AssemblyName>
-    <Description>.NET Framework 4.8 UDP/Bluetooth address codecs only (no sockets / BLE runtime).</Description>
+    <Description>.NET Framework 4.8 UDP transport + address codecs (no BLE runtime).</Description>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\ShortP2P.Transport\UdpTransportAddress.cs" />
     <Compile Include="..\ShortP2P.Transport\BluetoothTransportAddress.cs" />
+    <Compile Include="..\ShortP2P.Transport\UdpTransport.cs" />
+    <Compile Include="..\ShortP2P.Transport\UdpTransportFactory.cs" />
+    <Compile Include="..\ShortP2P.Transport\TransportTrafficLog.cs" />
+    <Compile Include="Compat\CancellationTokenSourceExtensions.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Threading.Channels" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="$(MicrosoftExtensionsVersion)" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="ShortP2P.Transport.Abstractions.Fx48.csproj" />

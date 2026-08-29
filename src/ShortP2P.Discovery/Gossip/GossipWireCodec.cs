@@ -92,7 +92,7 @@ public static class GossipWireCodec
             return false;
         try
         {
-            nickname = Encoding.UTF8.GetString(datagram.Slice(29, nickLen));
+            nickname = Utf8Span.GetString(datagram.Slice(29, nickLen));
         }
         catch
         {

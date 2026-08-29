@@ -2,11 +2,21 @@
   <PropertyGroup>
     <RootNamespace>ShortP2P.Transport.Abstractions</RootNamespace>
     <AssemblyName>ShortP2P.Transport.Abstractions</AssemblyName>
-    <Description>.NET Framework 4.8 address types only (no ITransport / Channels).</Description>
+    <Description>.NET Framework 4.8 transport abstractions (ITransport + address types; BLE interfaces only).</Description>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\ShortP2P.Transport.Abstractions\TransportKind.cs" />
     <Compile Include="..\ShortP2P.Transport.Abstractions\TransportAddress.cs" />
+    <Compile Include="..\ShortP2P.Transport.Abstractions\ITransport.cs" />
+    <Compile Include="..\ShortP2P.Transport.Abstractions\TransportReceiveMessage.cs" />
+    <Compile Include="..\ShortP2P.Transport.Abstractions\IBleShortP2PPeripheralScanner.cs" />
+    <Compile Include="..\ShortP2P.Transport.Abstractions\BleAdScanResult.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Threading.Channels" Version="8.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="ShortP2P.Auth.Fx48.csproj" />
   </ItemGroup>
 </Project>

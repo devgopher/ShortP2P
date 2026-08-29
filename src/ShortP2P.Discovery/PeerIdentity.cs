@@ -17,7 +17,7 @@ public sealed class PeerIdentity
     public PeerIdentity(string nickname, CompressedNetworkId networkId, int dataUdpPort = 17500,
         int maxNicknameUtf8Bytes = 64)
     {
-        ArgumentNullException.ThrowIfNull(nickname);
+        Require.NotNull(nickname);
         var trimmed = nickname.Trim();
         if (trimmed.Length == 0) throw new ArgumentException("Nickname cannot be empty.", nameof(nickname));
         var utf8 = Encoding.UTF8.GetByteCount(trimmed);

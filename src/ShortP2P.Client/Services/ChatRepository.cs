@@ -47,9 +47,46 @@ public sealed class ChatRepository(AppDatabase db)
     /// <summary>Сохранённый публичный ключ пира заменён другим (возможный MITM).</summary>
     public event EventHandler<PeerPublicKeyChangedEventArgs>? PeerPublicKeyChanged;
 
-    public void NotifyChatListChanged()
+    public void NotifyChatListChanged() =>
+        RaiseEvent(ChatListChanged, EventArgs.Empty);
+
+    /// <summary>
+    /// Invoke multicast handlers one-by-one so a disposed UI subscriber cannot abort chat create
+    /// or block other listeners (common after WinForms logout/login).
+    /// </summary>
+    private void RaiseEvent<TEventArgs>(EventHandler<TEventArgs>? handlers, TEventArgs args)
+        where TEventArgs : EventArgs
     {
-        ChatListChanged?.Invoke(this, EventArgs.Empty);
+        if (handlers == null)
+            return;
+        foreach (EventHandler<TEventArgs> handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(this, args);
+            }
+            catch
+            {
+                // UI / listener failures must not roll back DB writes.
+            }
+        }
+    }
+
+    private void RaiseEvent(EventHandler? handlers, EventArgs args)
+    {
+        if (handlers == null)
+            return;
+        foreach (EventHandler handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(this, args);
+            }
+            catch
+            {
+                // UI / listener failures must not roll back DB writes.
+            }
+        }
     }
 
     public async Task<IReadOnlyList<ChatEntity>> ListChatsAsync(int userId)
@@ -160,7 +197,7 @@ public sealed class ChatRepository(AppDatabase db)
             };
             await conn.InsertAsync(chat);
             NotifyChatListChanged();
-            ChatCreated?.Invoke(this, new ChatCreatedEventArgs(chat.Id, remote));
+            RaiseEvent(ChatCreated, new ChatCreatedEventArgs(chat.Id, remote));
             return chat;
         }
         finally
@@ -420,7 +457,7 @@ public sealed class ChatRepository(AppDatabase db)
 
     private void RaisePeerPublicKeyChanged(ChatEntity chat, string previousJson, string newJson)
     {
-        PeerPublicKeyChanged?.Invoke(this, new PeerPublicKeyChangedEventArgs
+        RaiseEvent(PeerPublicKeyChanged, new PeerPublicKeyChangedEventArgs
         {
             ChatId = chat.Id,
             PeerNickname = chat.PeerNickname,
@@ -567,7 +604,7 @@ public sealed class ChatRepository(AppDatabase db)
             await conn.UpdateAsync(chat);
         }
 
-        ChatMessageAppended?.Invoke(this, new ChatMessageAppendedEventArgs(chatId, outgoing));
+        RaiseEvent(ChatMessageAppended, new ChatMessageAppendedEventArgs(chatId, outgoing));
         return msg.Id;
     }
 
@@ -608,7 +645,7 @@ public sealed class ChatRepository(AppDatabase db)
             await conn.UpdateAsync(chat);
         }
 
-        ChatMessageAppended?.Invoke(this, new ChatMessageAppendedEventArgs(chatId, outgoing));
+        RaiseEvent(ChatMessageAppended, new ChatMessageAppendedEventArgs(chatId, outgoing));
         return msg.Id;
     }
 
@@ -649,7 +686,7 @@ public sealed class ChatRepository(AppDatabase db)
             await conn.UpdateAsync(chat);
         }
 
-        ChatMessageAppended?.Invoke(this, new ChatMessageAppendedEventArgs(chatId, outgoing));
+        RaiseEvent(ChatMessageAppended, new ChatMessageAppendedEventArgs(chatId, outgoing));
         return msg.Id;
     }
 

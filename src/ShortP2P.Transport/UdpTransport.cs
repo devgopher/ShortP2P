@@ -47,11 +47,11 @@ public sealed class UdpTransport : ITransport
 
     public ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
-        if (_cts != null) return ValueTask.CompletedTask;
+        if (_cts != null) return default;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _cts.Token;
         _receiveTask = Task.Run(() => ReceiveLoopAsync(token), token);
-        return ValueTask.CompletedTask;
+        return default;
     }
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
@@ -98,12 +98,22 @@ public sealed class UdpTransport : ITransport
 
             try
             {
+#if NETFRAMEWORK
+                cancellationToken.ThrowIfCancellationRequested();
+                await _udp.SendAsync(payload.ToArray(), payload.Length, ep).ConfigureAwait(false);
+#else
                 await _udp.SendAsync(payload.ToArray(), ep, cancellationToken).ConfigureAwait(false);
+#endif
             }
             catch (ObjectDisposedException)
             {
                 _udp = CreateClient(_bindAddress, _listenPort, _enableBroadcast);
+#if NETFRAMEWORK
+                cancellationToken.ThrowIfCancellationRequested();
+                await _udp.SendAsync(payload.ToArray(), payload.Length, ep).ConfigureAwait(false);
+#else
                 await _udp.SendAsync(payload.ToArray(), ep, cancellationToken).ConfigureAwait(false);
+#endif
             }
         }
         finally
@@ -124,9 +134,9 @@ public sealed class UdpTransport : ITransport
     public static UdpTransport CreateUdpTransport(IPAddress ip, int port, bool enableBroadcast = false,
         ILogger? logger = null)
     {
-        ArgumentNullException.ThrowIfNull(ip);
-        ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
+        Require.NotNull(ip);
+        if (port is < 1 or > 65535)
+            throw new ArgumentOutOfRangeException(nameof(port));
         return new UdpTransport(ip, port, enableBroadcast, logger);
     }
 
@@ -149,7 +159,7 @@ public sealed class UdpTransport : ITransport
                 await _receiveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
-                    var result = await _udp.ReceiveAsync(cancellationToken).ConfigureAwait(false);
+                    var result = await ReceiveUdpAsync(_udp, cancellationToken).ConfigureAwait(false);
                     var addr = UdpTransportAddress.FromIPEndPoint(result.RemoteEndPoint);
                     TransportTrafficLog.LogReceive(_logger, addr, _localEndpoint, result.Buffer);
                     await _channel.Writer
@@ -176,4 +186,21 @@ public sealed class UdpTransport : ITransport
 
         _channel.Writer.TryComplete();
     }
+
+#if NETFRAMEWORK
+    private static async Task<UdpReceiveResult> ReceiveUdpAsync(UdpClient udp, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using (cancellationToken.Register(() =>
+               {
+                   try { udp.Close(); } catch { /* ignore */ }
+               }))
+        {
+            return await udp.ReceiveAsync().ConfigureAwait(false);
+        }
+    }
+#else
+    private static ValueTask<UdpReceiveResult> ReceiveUdpAsync(UdpClient udp, CancellationToken cancellationToken) =>
+        udp.ReceiveAsync(cancellationToken);
+#endif
 }

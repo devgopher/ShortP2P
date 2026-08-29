@@ -78,7 +78,7 @@ public static class TrafficQualityModeExtensions
 
     public static bool TryParse(string? raw, out TrafficQualityMode mode)
     {
-        if (Enum.TryParse(raw, ignoreCase: true, out mode) && Enum.IsDefined(mode))
+        if (Enum.TryParse(raw, ignoreCase: true, out mode) && Enum.IsDefined(typeof(TrafficQualityMode), mode))
             return true;
         mode = TrafficQualityMode.Normal;
         return false;
