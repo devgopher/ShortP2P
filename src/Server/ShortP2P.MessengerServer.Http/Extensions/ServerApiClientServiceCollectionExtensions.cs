@@ -16,8 +16,8 @@ public static class ServerApiClientServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(configuration);
+        Require.NotNull(services);
+        Require.NotNull(configuration);
 
         services.Configure<ServerApiClientSettings>(
             configuration.GetSection(ServerApiClientSettings.Section));
@@ -32,7 +32,7 @@ public static class ServerApiClientServiceCollectionExtensions
         this IServiceCollection services,
         Action<ServerApiClientSettings>? configure = null)
     {
-        ArgumentNullException.ThrowIfNull(services);
+        Require.NotNull(services);
 
         if (configure is not null)
             services.Configure(configure);

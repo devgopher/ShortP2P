@@ -12,7 +12,7 @@ public static class QrImageCodec
 {
     public static byte[] EncodePng(string payload, int pixelsPerModule = 8)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(payload);
+        Require.NotNullOrWhiteSpace(payload);
         using var gen = new QRCodeGenerator();
         using var data = gen.CreateQrCode(payload, QRCodeGenerator.ECCLevel.M);
         var png = new PngByteQRCode(data);

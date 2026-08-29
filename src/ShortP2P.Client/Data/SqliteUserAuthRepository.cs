@@ -5,7 +5,7 @@ namespace ShortP2P.Client.Data;
 
 public sealed class SqliteUserAuthRepository(AppDatabase db) : IUserAuthRepository
 {
-    private readonly AppDatabase _db = db ?? throw new ArgumentNullException(nameof(db));
+    private readonly AppDatabase _db = db ?? throw new global::System.ArgumentNullException(nameof(db));
 
     public async Task<UserEntity?> FindByNicknameAsync(string nickname, CancellationToken cancellationToken = default)
     {

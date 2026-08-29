@@ -4,12 +4,12 @@ internal static class CryptoPrimitives
 {
     public static byte[] Concat(params byte[][] arrays)
     {
-        ArgumentNullException.ThrowIfNull(arrays);
+        Require.NotNull(arrays);
 
         var total = 0;
         for (var i = 0; i < arrays.Length; i++)
         {
-            if (arrays[i] == null) throw new ArgumentNullException(nameof(arrays), "Null array is not allowed.");
+            if (arrays[i] == null) throw new global::System.ArgumentNullException(nameof(arrays), "Null array is not allowed.");
             total += arrays[i].Length;
         }
 
@@ -26,8 +26,8 @@ internal static class CryptoPrimitives
 
     public static bool ConstantTimeEquals(byte[] a, byte[] b)
     {
-        ArgumentNullException.ThrowIfNull(a);
-        ArgumentNullException.ThrowIfNull(b);
+        Require.NotNull(a);
+        Require.NotNull(b);
         if (a.Length != b.Length) return false;
 
         var diff = 0;

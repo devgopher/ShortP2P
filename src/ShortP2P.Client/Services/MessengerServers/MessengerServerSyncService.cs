@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.Logging;
@@ -48,10 +48,10 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         MessengerServerManager manager,
         ILogger<MessengerServerSyncService>? logger = null)
     {
-        _auth = auth ?? throw new ArgumentNullException(nameof(auth));
-        _chats = chats ?? throw new ArgumentNullException(nameof(chats));
-        _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
-        _manager = manager ?? throw new ArgumentNullException(nameof(manager));
+        _auth = auth ?? throw new global::System.ArgumentNullException(nameof(auth));
+        _chats = chats ?? throw new global::System.ArgumentNullException(nameof(chats));
+        _sessions = sessions ?? throw new global::System.ArgumentNullException(nameof(sessions));
+        _manager = manager ?? throw new global::System.ArgumentNullException(nameof(manager));
         _logger = logger ?? NullLogger<MessengerServerSyncService>.Instance;
     }
 
@@ -241,9 +241,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         byte[] wire,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(chat);
-        ArgumentNullException.ThrowIfNull(user);
-        ArgumentNullException.ThrowIfNull(wire);
+        Require.NotNull(chat);
+        Require.NotNull(user);
+        Require.NotNull(wire);
 
         if (string.IsNullOrWhiteSpace(chat.PeerRsaPublicJson))
             return false;
@@ -288,10 +288,15 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             EncryptedDataBase64 = encrypted
         };
 
-        var degree = Math.Clamp(targets.Count, 1, MaxSendWorkers);
+        var degree = Clamp(targets.Count, 1, MaxSendWorkers);
         var successCount = 0;
 
+#if NETFRAMEWORK
+        await ParallelFx.ForEachAsync(
+#else
         await Parallel.ForEachAsync(
+#endif
+
             targets,
             new ParallelOptions
             {
@@ -328,10 +333,10 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         byte[] innerWire,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(chat);
-        ArgumentNullException.ThrowIfNull(user);
-        ArgumentException.ThrowIfNullOrWhiteSpace(blobId);
-        ArgumentNullException.ThrowIfNull(innerWire);
+        Require.NotNull(chat);
+        Require.NotNull(user);
+        Require.NotNullOrWhiteSpace(blobId);
+        Require.NotNull(innerWire);
 
         if (string.IsNullOrWhiteSpace(chat.PeerRsaPublicJson))
             return false;
@@ -365,10 +370,15 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         if (targets.Count == 0)
             return false;
 
-        var degree = Math.Clamp(targets.Count, 1, MaxSendWorkers);
+        var degree = Clamp(targets.Count, 1, MaxSendWorkers);
         var successCount = 0;
 
+#if NETFRAMEWORK
+        await ParallelFx.ForEachAsync(
+#else
         await Parallel.ForEachAsync(
+#endif
+
             targets,
             new ParallelOptions
             {
@@ -404,7 +414,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         string? preferredBaseUrl,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(blobId);
+        Require.NotNullOrWhiteSpace(blobId);
 
         var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
         var ordered = OrderConnectionsForBlobDownload(ready, preferredBaseUrl);
@@ -443,15 +453,20 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     /// </summary>
     public async Task TryDeleteBlobAsync(string blobId, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(blobId);
+        Require.NotNullOrWhiteSpace(blobId);
 
         var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
         var targets = ready.Where(c => _manager.AllowsTraffic(c)).ToArray();
         if (targets.Length == 0)
             return;
 
-        var degree = Math.Clamp(targets.Length, 1, MaxSendWorkers);
+        var degree = Clamp(targets.Length, 1, MaxSendWorkers);
+#if NETFRAMEWORK
+        await ParallelFx.ForEachAsync(
+#else
         await Parallel.ForEachAsync(
+#endif
+
             targets,
             new ParallelOptions
             {
@@ -622,7 +637,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                     continue;
                 }
 
-                var degree = Math.Clamp(available.Count, 1, MaxLongPollWorkers);
+                var degree = Clamp(available.Count, 1, MaxLongPollWorkers);
                 var selected = available.Take(degree).ToArray();
                 var workers = selected
                     .Select(conn => LongPollServerLoopAsync(conn, user, cancellationToken))
@@ -1012,6 +1027,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             "ChatRequest {Action} server {Host}:{Port} ({BaseUrl}) peer={PeerNetworkId}",
             action, host, port, connection.Entity.BaseUrl, peerNetworkId);
     }
+
+    private static int Clamp(int value, int min, int max) =>
+        value < min ? min : value > max ? max : value;
 
     internal static (string Host, int Port) SplitServerHostPort(string? baseUrl)
     {

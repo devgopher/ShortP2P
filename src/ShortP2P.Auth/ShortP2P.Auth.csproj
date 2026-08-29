@@ -6,6 +6,10 @@
         <Nullable>enable</Nullable>
         <RootNamespace>ShortP2P.Auth</RootNamespace>
     </PropertyGroup>
+    <ItemGroup>
+        <Compile Include="..\Shared\Require.cs" Link="Require.cs" />
+        <Using Include="ShortP2P" />
+    </ItemGroup>
 
     <ItemGroup>
         <PackageReference Include="sqlite-net-pcl" Version="1.9.172" />

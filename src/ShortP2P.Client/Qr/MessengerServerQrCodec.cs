@@ -60,7 +60,7 @@ public static class MessengerServerQrCodec
 
     public static string ToBaseUrl(MessengerServerQrPayload payload)
     {
-        ArgumentNullException.ThrowIfNull(payload);
+        Require.NotNull(payload);
         var scheme = NormalizeScheme(payload.S);
         var hostPart = FormatHostForUrl(payload.H);
         return $"{scheme}://{hostPart}:{payload.P}";

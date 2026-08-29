@@ -594,7 +594,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
         CancellationToken cancellationToken = default,
         string? blobServerBaseUrl = null)
     {
-        ArgumentNullException.ThrowIfNull(payload);
+        Require.NotNull(payload);
         if (await ProcessIncomingPayloadAsync(payload, cancellationToken, blobServerBaseUrl).ConfigureAwait(false))
             RaiseMessagesChanged();
     }
@@ -714,7 +714,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
     public async Task ApplyPeerEndpointAsync(string peerHost, int peerPort,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(peerHost);
+        Require.NotNullOrWhiteSpace(peerHost);
         peerHost = peerHost.Trim();
         _ = IPAddress.Parse(peerHost);
         if (peerPort is < 1 or > 65535)

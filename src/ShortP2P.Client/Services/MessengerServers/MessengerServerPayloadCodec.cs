@@ -19,10 +19,10 @@ public static class MessengerServerPayloadCodec
 
     public static byte[] Encrypt(ReadOnlySpan<byte> plaintext, RsaPublicKey recipientPublicKey)
     {
-        ArgumentNullException.ThrowIfNull(recipientPublicKey);
+        Require.NotNull(recipientPublicKey);
 
-        var aesKey = RandomNumberGenerator.GetBytes(AesKeyBytes);
-        var nonce = RandomNumberGenerator.GetBytes(NonceBytes);
+        var aesKey = GetRandomBytes(AesKeyBytes);
+        var nonce = GetRandomBytes(NonceBytes);
         var ciphertext = new byte[plaintext.Length];
         var tag = new byte[TagBytes];
         using (var aes = new AesGcm(aesKey, TagBytes))
@@ -59,13 +59,13 @@ public static class MessengerServerPayloadCodec
 
     public static byte[] DecryptFromBase64(string encryptedDataBase64, RsaPrivateKey privateKey)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(encryptedDataBase64);
+        Require.NotNullOrWhiteSpace(encryptedDataBase64);
         return Decrypt(Convert.FromBase64String(encryptedDataBase64.Trim()), privateKey);
     }
 
     public static byte[] Decrypt(ReadOnlySpan<byte> blob, RsaPrivateKey privateKey)
     {
-        ArgumentNullException.ThrowIfNull(privateKey);
+        Require.NotNull(privateKey);
 
         if (blob.Length < 1 + 2 + 1 + TagBytes)
             throw new CryptographicException("Server payload is too short.");
@@ -113,5 +113,17 @@ public static class MessengerServerPayloadCodec
 
         CryptographicOperations.ZeroMemory(keyMaterial);
         return plaintext;
+    }
+
+    private static byte[] GetRandomBytes(int count)
+    {
+#if NET6_0_OR_GREATER
+        return RandomNumberGenerator.GetBytes(count);
+#else
+        var bytes = new byte[count];
+        using var rng = RandomNumberGenerator.Create();
+        rng.GetBytes(bytes);
+        return bytes;
+#endif
     }
 }

@@ -10,7 +10,7 @@ public static class BlobLimits
 
     public static string BlobById(string blobId)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(blobId);
+        Require.NotNullOrWhiteSpace(blobId);
         return $"{ApiRoutes.Blobs}/{Uri.EscapeDataString(blobId.Trim())}";
     }
 }

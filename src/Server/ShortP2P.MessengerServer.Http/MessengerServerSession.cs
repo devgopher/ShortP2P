@@ -40,7 +40,7 @@ public sealed class MessengerServerSession : IMessengerServerSession
 
     public void SetToken(string accessToken, DateTime expiresAtUtc)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(accessToken);
+        Require.NotNullOrWhiteSpace(accessToken);
 
         lock (_gate)
         {

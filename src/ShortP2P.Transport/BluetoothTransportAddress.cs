@@ -13,7 +13,7 @@ public static class BluetoothTransportAddress
     public static TransportAddress FromMac(ReadOnlySpan<byte> mac6)
     {
         return mac6.Length != MacLength
-            ? throw new ArgumentException($"MAC must be {MacLength} bytes.", nameof(mac6))
+            ? throw new global::System.ArgumentException($"MAC must be {MacLength} bytes.", nameof(mac6))
             : new TransportAddress(TransportKind.Bluetooth, mac6.ToArray());
     }
 
@@ -23,14 +23,16 @@ public static class BluetoothTransportAddress
         if (string.IsNullOrWhiteSpace(text))
             return false;
 
-        var clean = text.Trim().Replace("-", "", StringComparison.Ordinal).Replace(":", "", StringComparison.Ordinal);
+        var clean = text.Trim().Replace("-", "").Replace(":", "");
         if (clean.Length != MacLength * 2)
             return false;
         var bytes = new byte[MacLength];
         for (var i = 0; i < MacLength; i++)
-            if (!byte.TryParse(clean.AsSpan(i * 2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture,
-                    out bytes[i]))
+        {
+            var hex = clean.Substring(i * 2, 2);
+            if (!byte.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out bytes[i]))
                 return false;
+        }
 
         mac6 = bytes;
         return true;
@@ -38,33 +40,30 @@ public static class BluetoothTransportAddress
 
     public static string ToMacString(ReadOnlySpan<byte> mac6)
     {
-        if (mac6.Length != MacLength) throw new ArgumentException($"MAC must be {MacLength} bytes.", nameof(mac6));
-        return string.Create(MacLength * 3 - 1, mac6.ToArray(), static (span, bytes) =>
+        if (mac6.Length != MacLength) throw new global::System.ArgumentException($"MAC must be {MacLength} bytes.", nameof(mac6));
+        var chars = new char[MacLength * 3 - 1];
+        var pos = 0;
+        for (var i = 0; i < mac6.Length; i++)
         {
-            var pos = 0;
-            for (var i = 0; i < bytes.Length; i++)
-            {
-                if (i > 0)
-                    span[pos++] = ':';
-                var b = bytes[i];
-                span[pos++] = GetHex((byte)(b >> 4));
-                span[pos++] = GetHex((byte)(b & 0x0F));
-            }
+            if (i > 0)
+                chars[pos++] = ':';
+            var b = mac6[i];
+            chars[pos++] = GetHex((byte)(b >> 4));
+            chars[pos++] = GetHex((byte)(b & 0x0F));
+        }
 
-            static char GetHex(byte v)
-            {
-                return (char)(v < 10 ? '0' + v : 'A' + (v - 10));
-            }
-        });
+        return new string(chars);
+
+        static char GetHex(byte v) => (char)(v < 10 ? '0' + v : 'A' + (v - 10));
     }
 
     /// <summary>Лексикографическое сравнение MAC (6 байт); для tie-break при выборе инициатора BLE.</summary>
     public static int CompareMac(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
     {
         if (left.Length != MacLength)
-            throw new ArgumentException($"MAC must be {MacLength} bytes.", nameof(left));
+            throw new global::System.ArgumentException($"MAC must be {MacLength} bytes.", nameof(left));
         if (right.Length != MacLength)
-            throw new ArgumentException($"MAC must be {MacLength} bytes.", nameof(right));
+            throw new global::System.ArgumentException($"MAC must be {MacLength} bytes.", nameof(right));
         return left.SequenceCompareTo(right);
     }
 

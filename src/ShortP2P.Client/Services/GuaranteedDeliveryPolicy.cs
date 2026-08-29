@@ -18,7 +18,7 @@ public sealed class GuaranteedDeliveryPolicy
         P2pRoutingSettings? settings,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(sendAttemptAsync);
+        Require.NotNull(sendAttemptAsync);
 
         var retryDelay = enabled && settings != null ? settings.SendFailureRetryDelay : TimeSpan.Zero;
 

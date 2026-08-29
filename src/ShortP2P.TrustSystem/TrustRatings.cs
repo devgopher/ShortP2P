@@ -9,9 +9,9 @@ public static class TrustRatings
 
     public static float ArithmeticMean(IReadOnlyList<float> values)
     {
-        ArgumentNullException.ThrowIfNull(values);
+        Require.NotNull(values);
         if (values.Count == 0)
-            throw new ArgumentException("At least one rating is required.", nameof(values));
+            throw new global::System.ArgumentException("At least one rating is required.", nameof(values));
 
         double sum = 0;
         for (var i = 0; i < values.Count; i++)
@@ -22,7 +22,7 @@ public static class TrustRatings
     public static IReadOnlyDictionary<ServerEndpoint, float> AverageByEndpoint(
         IEnumerable<RatedServer> samples)
     {
-        ArgumentNullException.ThrowIfNull(samples);
+        Require.NotNull(samples);
         var buckets = new Dictionary<ServerEndpoint, List<float>>();
         foreach (var sample in samples)
         {

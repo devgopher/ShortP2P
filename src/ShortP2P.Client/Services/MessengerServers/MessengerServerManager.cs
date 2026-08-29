@@ -40,9 +40,9 @@ public sealed class MessengerServerManager : IAsyncDisposable
         DeviceIdProvider deviceId,
         ILogger<MessengerServerManager>? logger = null)
     {
-        _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-        _auth = auth ?? throw new ArgumentNullException(nameof(auth));
-        _deviceId = deviceId ?? throw new ArgumentNullException(nameof(deviceId));
+        _repository = repository ?? throw new global::System.ArgumentNullException(nameof(repository));
+        _auth = auth ?? throw new global::System.ArgumentNullException(nameof(auth));
+        _deviceId = deviceId ?? throw new global::System.ArgumentNullException(nameof(deviceId));
         _logger = logger ?? NullLogger<MessengerServerManager>.Instance;
     }
 
@@ -132,7 +132,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
     /// <summary>Replaces the known registered-client snapshot for a trusted server (from GetClients).</summary>
     public void ReplaceRegisteredClients(int serverId, IEnumerable<string> networkIds)
     {
-        ArgumentNullException.ThrowIfNull(networkIds);
+        Require.NotNull(networkIds);
         var set = new HashSet<string>(StringComparer.Ordinal);
         foreach (var id in networkIds)
         {
@@ -399,11 +399,16 @@ public sealed class MessengerServerManager : IAsyncDisposable
         if (servers.Count == 0)
             return;
 
+#if NETFRAMEWORK
+        await ParallelFx.ForEachAsync(
+#else
         await Parallel.ForEachAsync(
+#endif
+
             servers,
             new ParallelOptions
             {
-                MaxDegreeOfParallelism = Math.Clamp(servers.Count, 1, 8),
+                MaxDegreeOfParallelism = Clamp(servers.Count, 1, 8),
                 CancellationToken = cancellationToken
             },
             async (server, ct) =>
@@ -479,7 +484,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
         MessengerServerEntity entity,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(entity);
+        Require.NotNull(entity);
         if (!AllowsTraffic(entity))
             return null;
 
@@ -558,8 +563,13 @@ public sealed class MessengerServerManager : IAsyncDisposable
             return;
 
         var samples = new ConcurrentBag<RatedServer>();
-        var workers = Math.Clamp(sources.Count, 1, MaxAskServersWorkers);
+        var workers = Clamp(sources.Count, 1, MaxAskServersWorkers);
+#if NETFRAMEWORK
+        await ParallelFx.ForEachAsync(
+#else
         await Parallel.ForEachAsync(
+#endif
+
             sources,
             new ParallelOptions
             {
@@ -627,8 +637,10 @@ public sealed class MessengerServerManager : IAsyncDisposable
         var updated = 0;
         var added = 0;
         var latest = await _repository.ListByUserAsync(userId, cancellationToken).ConfigureAwait(false);
-        foreach (var (endpoint, mean) in means)
+        foreach (var pair in means)
         {
+            var endpoint = pair.Key;
+            var mean = pair.Value;
             cancellationToken.ThrowIfCancellationRequested();
             var existing = latest.FirstOrDefault(s => MatchesEndpoint(s.BaseUrl, endpoint));
             if (existing != null)
@@ -1142,9 +1154,13 @@ public sealed class MessengerServerManager : IAsyncDisposable
         port = 0;
         if (!Uri.TryCreate((baseUrl ?? "").Trim(), UriKind.Absolute, out var uri))
             return false;
+#if NETCOREAPP
         host = uri.IdnHost;
         if (string.IsNullOrWhiteSpace(host))
             host = uri.Host;
+#else
+        host = uri.Host;
+#endif
         port = uri.IsDefaultPort
             ? uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ? 443 : 80
             : uri.Port;
@@ -1165,4 +1181,7 @@ public sealed class MessengerServerManager : IAsyncDisposable
         _registeredClients.Clear();
         _gate.Dispose();
     }
+
+    private static int Clamp(int value, int min, int max) =>
+        value < min ? min : value > max ? max : value;
 }

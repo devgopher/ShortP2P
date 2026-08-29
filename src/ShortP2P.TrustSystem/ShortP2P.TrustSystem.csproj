@@ -7,5 +7,9 @@
     <RootNamespace>ShortP2P.TrustSystem</RootNamespace>
     <Description>Server reputation: ratings, subscriber claims, recovery.</Description>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\Require.cs" Link="Require.cs" />
+    <Using Include="ShortP2P" />
+  </ItemGroup>
 
 </Project>

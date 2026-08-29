@@ -7,6 +7,10 @@
     <RootNamespace>ShortP2P.MessengerServer.Contracts</RootNamespace>
     <Description>HTTPS API contract (DTOs, routes, OpenAPI) for the ShortP2P messenger server.</Description>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\Shared\Require.cs" Link="Require.cs" />
+    <Using Include="ShortP2P" />
+  </ItemGroup>
 
     <ItemGroup>
     <None Include="openapi.yaml" CopyToOutputDirectory="PreserveNewest" />

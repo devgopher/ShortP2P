@@ -12,7 +12,7 @@ public sealed class TransportAddress(TransportKind kind, byte[] data)
 
     public TransportKind Kind { get; } = kind;
 
-    public byte[] Data { get; } = data ?? throw new ArgumentNullException(nameof(data));
+    public byte[] Data { get; } = data ?? throw new global::System.ArgumentNullException(nameof(data));
 
     public string ToIpAddress()
     {
@@ -24,8 +24,8 @@ public sealed class TransportAddress(TransportKind kind, byte[] data)
 
         return Data[0] switch
         {
-            UdpFamilyIPv4 when Data.Length == 7 => new IPAddress(Data.AsSpan(1, 4)).ToString(),
-            UdpFamilyIPv6 when Data.Length == 19 => new IPAddress(Data.AsSpan(1, 16)).ToString(),
+            UdpFamilyIPv4 when Data.Length == 7 => new IPAddress(Data.AsSpan(1, 4).ToArray()).ToString(),
+            UdpFamilyIPv6 when Data.Length == 19 => new IPAddress(Data.AsSpan(1, 16).ToArray()).ToString(),
             UdpFamilyIPv4 => throw new InvalidOperationException("Invalid UDP IPv4 transport address length."),
             UdpFamilyIPv6 => throw new InvalidOperationException("Invalid UDP IPv6 transport address length."),
             _ => throw new InvalidOperationException("Unknown UDP address family.")

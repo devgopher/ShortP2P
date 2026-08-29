@@ -7,8 +7,8 @@ public sealed class RsaKeyPair
 {
     internal RsaKeyPair(RsaPublicKey publicKey, RsaPrivateKey privateKey)
     {
-        PublicKey = publicKey ?? throw new ArgumentNullException(nameof(publicKey));
-        PrivateKey = privateKey ?? throw new ArgumentNullException(nameof(privateKey));
+        PublicKey = publicKey ?? throw new global::System.ArgumentNullException(nameof(publicKey));
+        PrivateKey = privateKey ?? throw new global::System.ArgumentNullException(nameof(privateKey));
     }
 
     public RsaPublicKey PublicKey { get; }

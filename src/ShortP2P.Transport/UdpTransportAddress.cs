@@ -18,7 +18,7 @@ public static class UdpTransportAddress
         if (ep.AddressFamily == AddressFamily.InterNetwork)
         {
             var ip = ep.Address.GetAddressBytes();
-            if (ip.Length != 4) throw new ArgumentException("Invalid IPv4 address.", nameof(ep));
+            if (ip.Length != 4) throw new global::System.ArgumentException("Invalid IPv4 address.", nameof(ep));
             var data = new byte[1 + 4 + 2];
             data[0] = FamilyIPv4;
             Buffer.BlockCopy(ip, 0, data, 1, 4);
@@ -29,7 +29,7 @@ public static class UdpTransportAddress
         if (ep.AddressFamily == AddressFamily.InterNetworkV6)
         {
             var ip = ep.Address.GetAddressBytes();
-            if (ip.Length != 16) throw new ArgumentException("Invalid IPv6 address.", nameof(ep));
+            if (ip.Length != 16) throw new global::System.ArgumentException("Invalid IPv6 address.", nameof(ep));
             var data = new byte[1 + 16 + 2];
             data[0] = FamilyIPv6;
             Buffer.BlockCopy(ip, 0, data, 1, 16);
@@ -44,7 +44,7 @@ public static class UdpTransportAddress
     public static TransportAddress WithUdpPort(TransportAddress address, int port)
     {
         if (address.Kind != TransportKind.Udp)
-            throw new ArgumentException("Address is not UDP.", nameof(address));
+            throw new global::System.ArgumentException("Address is not UDP.", nameof(address));
         var ep = ToIPEndPoint(address);
         return FromIPEndPoint(new IPEndPoint(ep.Address, port));
     }
@@ -52,17 +52,17 @@ public static class UdpTransportAddress
     public static IPEndPoint ToIPEndPoint(TransportAddress address)
     {
         if (address.Kind != TransportKind.Udp)
-            throw new ArgumentException("Address is not UDP.", nameof(address));
+            throw new global::System.ArgumentException("Address is not UDP.", nameof(address));
 
         var data = address.Data;
-        if (data.Length < 1 + 2) throw new ArgumentException("UDP address data is too short.", nameof(address));
+        if (data.Length < 1 + 2) throw new global::System.ArgumentException("UDP address data is too short.", nameof(address));
 
         var family = data[0];
         if (family == FamilyIPv4)
         {
             if (data.Length != 1 + 4 + 2)
-                throw new ArgumentException("Invalid IPv4 UDP address length.", nameof(address));
-            var ip = new IPAddress(data.AsSpan(1, 4));
+                throw new global::System.ArgumentException("Invalid IPv4 UDP address length.", nameof(address));
+            var ip = new IPAddress(data.AsSpan(1, 4).ToArray());
             var port = ReadUInt16Be(data, 5);
             return new IPEndPoint(ip, port);
         }
@@ -70,13 +70,13 @@ public static class UdpTransportAddress
         if (family == FamilyIPv6)
         {
             if (data.Length != 1 + 16 + 2)
-                throw new ArgumentException("Invalid IPv6 UDP address length.", nameof(address));
-            var ip = new IPAddress(data.AsSpan(1, 16));
+                throw new global::System.ArgumentException("Invalid IPv6 UDP address length.", nameof(address));
+            var ip = new IPAddress(data.AsSpan(1, 16).ToArray());
             var port = ReadUInt16Be(data, 17);
             return new IPEndPoint(ip, port);
         }
 
-        throw new ArgumentException($"Unknown address family byte {family}.", nameof(address));
+        throw new global::System.ArgumentException($"Unknown address family byte {family}.", nameof(address));
     }
 
     private static void WriteUInt16Be(byte[] buffer, int offset, ushort value)

@@ -37,7 +37,7 @@ public sealed class MessengerServerConnection : IAsyncDisposable
 
     public static MessengerServerConnection Create(MessengerServerEntity entity, TimeSpan timeout)
     {
-        ArgumentNullException.ThrowIfNull(entity);
+        Require.NotNull(entity);
 
         var session = new MessengerServerSession();
         var pinHolder = new ConnectionPinHolder
@@ -46,6 +46,14 @@ public sealed class MessengerServerConnection : IAsyncDisposable
             RequirePin = entity.Trusted && !string.IsNullOrWhiteSpace(entity.FingerprintSha256)
         };
 
+#if NETFRAMEWORK
+        System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+        HttpMessageHandler sockets = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (_, cert, _, _) =>
+                ValidateCertificate(cert, pinHolder.PinnedFingerprintSha256, pinHolder.RequirePin)
+        };
+#else
         var sockets = new SocketsHttpHandler
         {
             SslOptions = new SslClientAuthenticationOptions
@@ -54,6 +62,7 @@ public sealed class MessengerServerConnection : IAsyncDisposable
                     ValidateCertificate(cert, pinHolder.PinnedFingerprintSha256, pinHolder.RequirePin)
             }
         };
+#endif
 
         var http = new HttpClient(new MessengerServerBearerHandler(session) { InnerHandler = sockets })
         {
@@ -81,7 +90,7 @@ public sealed class MessengerServerConnection : IAsyncDisposable
 
     public void UpdateEntity(MessengerServerEntity entity)
     {
-        ArgumentNullException.ThrowIfNull(entity);
+        Require.NotNull(entity);
         Entity = entity;
         _pinHolder.PinnedFingerprintSha256 = NormalizeFingerprint(entity.FingerprintSha256);
         _pinHolder.RequirePin = entity.Trusted && !string.IsNullOrWhiteSpace(entity.FingerprintSha256);
@@ -112,8 +121,37 @@ public sealed class MessengerServerConnection : IAsyncDisposable
         if (certificate == null)
             return "";
         var raw = certificate is X509Certificate2 c2 ? c2.RawData : certificate.GetRawCertData();
-        return Convert.ToHexString(SHA256.HashData(raw)).ToLowerInvariant();
+        return ToHexLower(Sha256(raw));
     }
+
+    private static byte[] Sha256(byte[] data)
+    {
+#if NET5_0_OR_GREATER
+        return SHA256.HashData(data);
+#else
+        using var sha = SHA256.Create();
+        return sha.ComputeHash(data);
+#endif
+    }
+
+    private static string ToHexLower(byte[] bytes)
+    {
+#if NET5_0_OR_GREATER
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+#else
+        var c = new char[bytes.Length * 2];
+        for (var i = 0; i < bytes.Length; i++)
+        {
+            var b = bytes[i];
+            c[i * 2] = HexNibble((byte)(b >> 4));
+            c[i * 2 + 1] = HexNibble((byte)(b & 0xF));
+        }
+
+        return new string(c);
+#endif
+    }
+
+    private static char HexNibble(byte v) => (char)(v < 10 ? '0' + v : 'a' + (v - 10));
 
     private static bool ValidateCertificate(
         X509Certificate? cert,
@@ -136,11 +174,11 @@ public sealed class MessengerServerConnection : IAsyncDisposable
     public ValueTask DisposeAsync()
     {
         if (_disposed)
-            return ValueTask.CompletedTask;
+            return default;
         _disposed = true;
         _session.Clear();
         _httpClient.Dispose();
-        return ValueTask.CompletedTask;
+        return default;
     }
 
     private sealed class ConnectionPinHolder

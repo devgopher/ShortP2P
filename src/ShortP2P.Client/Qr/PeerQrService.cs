@@ -15,7 +15,11 @@ public static class PeerQrService
         var single = hostOverride?.Trim();
         hosts = !string.IsNullOrEmpty(single)
             ? [single]
+#if NETFRAMEWORK
+            : [string.IsNullOrWhiteSpace(user.NetworkIdShort) ? "127.0.0.1" : user.NetworkIdShort.Trim()];
+#else
             : InviteHostsBuilder.GetCandidatesOrdered(networkIdShort: user.NetworkIdShort).ToList();
+#endif
 
         return new PeerQrPayload
         {

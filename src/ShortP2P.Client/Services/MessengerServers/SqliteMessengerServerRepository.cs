@@ -97,12 +97,12 @@ public sealed class SqliteMessengerServerRepository(AppDatabase db) : IMessenger
 
     public static string NormalizeBaseUrl(string baseUrl)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+        Require.NotNullOrWhiteSpace(baseUrl);
         var trimmed = baseUrl.Trim().TrimEnd('/');
         if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) ||
             (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
         {
-            throw new ArgumentException("BaseUrl must be an absolute http(s) URL.", nameof(baseUrl));
+            throw new global::System.ArgumentException("BaseUrl must be an absolute http(s) URL.", nameof(baseUrl));
         }
 
         return uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');

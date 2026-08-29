@@ -10,13 +10,8 @@ public static class PasswordHasher
 
     public static (string SaltBase64, string HashBase64) Hash(string password)
     {
-        var salt = RandomNumberGenerator.GetBytes(SaltSize);
-        var hash = Rfc2898DeriveBytes.Pbkdf2(
-            password,
-            salt,
-            Iterations,
-            HashAlgorithmName.SHA256,
-            KeySize);
+        var salt = GetRandomBytes(SaltSize);
+        var hash = Pbkdf2(password, salt, KeySize);
         return (Convert.ToBase64String(salt), Convert.ToBase64String(hash));
     }
 
@@ -24,12 +19,29 @@ public static class PasswordHasher
     {
         var salt = Convert.FromBase64String(saltBase64);
         var expected = Convert.FromBase64String(hashBase64);
-        var actual = Rfc2898DeriveBytes.Pbkdf2(
-            password,
-            salt,
-            Iterations,
-            HashAlgorithmName.SHA256,
-            expected.Length);
+        var actual = Pbkdf2(password, salt, expected.Length);
         return CryptographicOperations.FixedTimeEquals(expected, actual);
+    }
+
+    private static byte[] GetRandomBytes(int count)
+    {
+#if NET6_0_OR_GREATER
+        return RandomNumberGenerator.GetBytes(count);
+#else
+        var bytes = new byte[count];
+        using var rng = RandomNumberGenerator.Create();
+        rng.GetBytes(bytes);
+        return bytes;
+#endif
+    }
+
+    private static byte[] Pbkdf2(string password, byte[] salt, int keySize)
+    {
+#if NET6_0_OR_GREATER
+        return Rfc2898DeriveBytes.Pbkdf2(password, salt, Iterations, HashAlgorithmName.SHA256, keySize);
+#else
+        using var kdf = new Rfc2898DeriveBytes(password, salt, Iterations, HashAlgorithmName.SHA256);
+        return kdf.GetBytes(keySize);
+#endif
     }
 }

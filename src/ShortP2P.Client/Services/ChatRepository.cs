@@ -33,7 +33,7 @@ public sealed class PeerPublicKeyChangedEventArgs : EventArgs
 public sealed class ChatRepository(AppDatabase db)
 {
     private readonly SemaphoreSlim _addChatGate = new(1, 1);
-    private readonly AppDatabase _db = db ?? throw new ArgumentNullException(nameof(db));
+    private readonly AppDatabase _db = db ?? throw new global::System.ArgumentNullException(nameof(db));
 
     /// <summary>Список чатов на главном экране: обновить после входящего приглашения и т.п.</summary>
     public event EventHandler? ChatListChanged;
@@ -85,7 +85,7 @@ public sealed class ChatRepository(AppDatabase db)
         {
             var idShort = CanonicalPeerNetworkId(peerNetworkIdShort);
             if (idShort.Length == 0)
-                throw new ArgumentException("Peer network id is required.", nameof(peerNetworkIdShort));
+                throw new global::System.ArgumentException("Peer network id is required.", nameof(peerNetworkIdShort));
 
             var existing = await FindChatByPeerNetworkIdAsync(userId, idShort).ConfigureAwait(false);
             var preferredNick = PreferPeerNickname(peerNickname, idShort);
@@ -489,7 +489,11 @@ public sealed class ChatRepository(AppDatabase db)
         if (existing != null)
             merged.AddRange(PeerTransportEndpoints.Parse(existing));
         foreach (var host in (peerHost ?? string.Empty).Split([',', ';', '|', ' ', '\n', '\r', '\t'],
+#if NET5_0_OR_GREATER
                      StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+#else
+                     StringSplitOptions.RemoveEmptyEntries))
+#endif
             if (IPAddress.TryParse(host, out var ip) && peerPort is >= 1 and <= 65535)
                 merged.Add(UdpTransportAddress.FromIPEndPoint(new IPEndPoint(ip, peerPort)));
             else if (BluetoothTransportAddress.TryParseMac(host, out var mac))
@@ -512,8 +516,10 @@ public sealed class ChatRepository(AppDatabase db)
 
     public async Task<IReadOnlyList<ChatMessageEntity>> ListMessagesPageDescAsync(int chatId, int offset, int limit)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(offset);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(limit, 0);
+        if (offset < 0)
+            throw new ArgumentOutOfRangeException(nameof(offset));
+        if (limit <= 0)
+            throw new ArgumentOutOfRangeException(nameof(limit));
 
         var conn = await _db.GetConnectionAsync();
         return await conn.Table<ChatMessageEntity>()
@@ -568,7 +574,7 @@ public sealed class ChatRepository(AppDatabase db)
     public async Task<int> AddImageMessageAsync(int chatId, bool outgoing, string mimeType, byte[] imageBytes,
         MessageDeliveryStatus deliveryStatus = MessageDeliveryStatus.Delivered)
     {
-        ArgumentNullException.ThrowIfNull(imageBytes);
+        Require.NotNull(imageBytes);
         var conn = await _db.GetConnectionAsync();
         var status = outgoing
             ? deliveryStatus
@@ -609,7 +615,7 @@ public sealed class ChatRepository(AppDatabase db)
     public async Task<int> AddFileMessageAsync(int chatId, bool outgoing, string fileName, string mimeType,
         byte[] fileBytes, MessageDeliveryStatus deliveryStatus = MessageDeliveryStatus.Delivered)
     {
-        ArgumentNullException.ThrowIfNull(fileBytes);
+        Require.NotNull(fileBytes);
         var conn = await _db.GetConnectionAsync();
         var status = outgoing
             ? deliveryStatus

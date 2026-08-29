@@ -11,7 +11,7 @@ public sealed class MessengerServerApiClient(
 {
     public async Task RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
+        Require.NotNull(request);
 
         using var response = await httpClient
             .PostAsync(ApiRoutes.Register, MessengerServerJson.ToJsonContent(request), cancellationToken)
@@ -22,7 +22,7 @@ public sealed class MessengerServerApiClient(
 
     public async Task<LoginResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
+        Require.NotNull(request);
 
         using var response = await httpClient
             .PostAsync(ApiRoutes.Login, MessengerServerJson.ToJsonContent(request), cancellationToken)
@@ -52,8 +52,8 @@ public sealed class MessengerServerApiClient(
         GetChatsRequest request,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.NetworkId);
+        Require.NotNull(request);
+        Require.NotNullOrWhiteSpace(request.NetworkId);
 
         var url = $"{ApiRoutes.Chats}?networkId={Uri.EscapeDataString(request.NetworkId.Trim())}";
         using var response = await httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
@@ -69,7 +69,7 @@ public sealed class MessengerServerApiClient(
         ChatRequestCreateRequest request,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
+        Require.NotNull(request);
 
         using var response = await httpClient
             .PostAsync(ApiRoutes.ChatRequests, MessengerServerJson.ToJsonContent(request), cancellationToken)
@@ -80,7 +80,7 @@ public sealed class MessengerServerApiClient(
 
     public async Task SendMessageAsync(MessageDto message, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(message);
+        Require.NotNull(message);
 
         using var response = await httpClient
             .PostAsync(ApiRoutes.Messages, MessengerServerJson.ToJsonContent(message), cancellationToken)
@@ -95,8 +95,8 @@ public sealed class MessengerServerApiClient(
         ReadOnlyMemory<byte> ciphertext,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(blobId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(targetNetworkId);
+        Require.NotNullOrWhiteSpace(blobId);
+        Require.NotNullOrWhiteSpace(targetNetworkId);
 
         var url =
             $"{BlobLimits.BlobById(blobId)}?targetNetworkId={Uri.EscapeDataString(targetNetworkId.Trim())}";
@@ -111,7 +111,7 @@ public sealed class MessengerServerApiClient(
 
     public async Task<byte[]> GetBlobAsync(string blobId, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(blobId);
+        Require.NotNullOrWhiteSpace(blobId);
 
         using var request = new HttpRequestMessage(HttpMethod.Get, BlobLimits.BlobById(blobId));
         request.Headers.Accept.ParseAdd("application/octet-stream");
@@ -124,7 +124,7 @@ public sealed class MessengerServerApiClient(
 
     public async Task DeleteBlobAsync(string blobId, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(blobId);
+        Require.NotNullOrWhiteSpace(blobId);
 
         using var response = await httpClient
             .DeleteAsync(BlobLimits.BlobById(blobId), cancellationToken)
@@ -136,7 +136,7 @@ public sealed class MessengerServerApiClient(
         DeliveryReceiptRequest request,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
+        Require.NotNull(request);
 
         using var response = await httpClient
             .PostAsync(ApiRoutes.MessageReceipts, MessengerServerJson.ToJsonContent(request), cancellationToken)
@@ -219,7 +219,7 @@ public sealed class MessengerServerApiClient(
         int serverPort,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(serverIp);
+        Require.NotNullOrWhiteSpace(serverIp);
         var url =
             $"{ApiRoutes.TrustAskRating}?serverIp={Uri.EscapeDataString(serverIp.Trim())}&serverPort={serverPort}";
         using var response = await httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
@@ -245,7 +245,7 @@ public sealed class MessengerServerApiClient(
         ServerClaimReason reason,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(serverIp);
+        Require.NotNullOrWhiteSpace(serverIp);
         var body = new ClaimServerRequest
         {
             ServerIp = serverIp,

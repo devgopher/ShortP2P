@@ -11,12 +11,17 @@ namespace ShortP2P.Client;
 public static class PeerHostList
 {
     private static readonly char[] Separators = [',', ';', '|', ' ', '\n', '\r', '\t'];
+#if NET5_0_OR_GREATER
+    private const StringSplitOptions SplitOpts = StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries;
+#else
+    private const StringSplitOptions SplitOpts = StringSplitOptions.RemoveEmptyEntries;
+#endif
 
     /// <summary>Уникальные корректные IP в порядке появления.</summary>
     public static IReadOnlyList<string> ParseIpCandidates(string? peerHost)
     {
         return !string.IsNullOrWhiteSpace(peerHost)
-            ? peerHost.Split(Separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            ? peerHost.Split(Separators, SplitOpts)
                 .Where(part => IPAddress.TryParse(part, out _)).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
             : [];
     }
@@ -29,8 +34,7 @@ public static class PeerHostList
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var list = new List<string>();
-        foreach (var part in peerHost.Split(Separators,
-                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var part in peerHost.Split(Separators, SplitOpts))
             if (TryNormalizeEndpointToken(part, out var norm) && seen.Add(norm))
                 list.Add(norm);
 
@@ -39,7 +43,8 @@ public static class PeerHostList
 
     private static bool TryNormalizeEndpointToken(string part, out string normalized)
     {
-        normalized = part;
+        normalized = part.Trim();
+        part = normalized;
         if (IPAddress.TryParse(part, out _))
             return true;
 
@@ -72,8 +77,7 @@ public static class PeerHostList
         {
             if (string.IsNullOrWhiteSpace(raw))
                 continue;
-            foreach (var part in raw.Split(Separators,
-                         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            foreach (var part in raw.Split(Separators, SplitOpts))
                 if (TryNormalizeEndpointToken(part, out var token) && seen.Add(token))
                     list.Add(token);
         }

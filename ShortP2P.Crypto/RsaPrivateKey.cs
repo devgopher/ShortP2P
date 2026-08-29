@@ -10,21 +10,21 @@ public sealed class RsaPrivateKey
     public RsaPrivateKey(RSAParameters parameters)
     {
         if (parameters.Modulus == null || parameters.Modulus.Length == 0)
-            throw new ArgumentException("Invalid Modulus.", nameof(parameters));
+            throw new global::System.ArgumentException("Invalid Modulus.", nameof(parameters));
         if (parameters.Exponent == null || parameters.Exponent.Length == 0)
-            throw new ArgumentException("Invalid Exponent.", nameof(parameters));
+            throw new global::System.ArgumentException("Invalid Exponent.", nameof(parameters));
         if (parameters.D == null || parameters.D.Length == 0)
-            throw new ArgumentException("Invalid D.", nameof(parameters));
+            throw new global::System.ArgumentException("Invalid D.", nameof(parameters));
         if (parameters.P == null || parameters.P.Length == 0)
-            throw new ArgumentException("Invalid P.", nameof(parameters));
+            throw new global::System.ArgumentException("Invalid P.", nameof(parameters));
         if (parameters.Q == null || parameters.Q.Length == 0)
-            throw new ArgumentException("Invalid Q.", nameof(parameters));
+            throw new global::System.ArgumentException("Invalid Q.", nameof(parameters));
         if (parameters.DP == null || parameters.DP.Length == 0)
-            throw new ArgumentException("Invalid DP.", nameof(parameters));
+            throw new global::System.ArgumentException("Invalid DP.", nameof(parameters));
         if (parameters.DQ == null || parameters.DQ.Length == 0)
-            throw new ArgumentException("Invalid DQ.", nameof(parameters));
+            throw new global::System.ArgumentException("Invalid DQ.", nameof(parameters));
         if (parameters.InverseQ == null || parameters.InverseQ.Length == 0)
-            throw new ArgumentException("Invalid InverseQ.", nameof(parameters));
+            throw new global::System.ArgumentException("Invalid InverseQ.", nameof(parameters));
 
         Modulus = (byte[])parameters.Modulus.Clone();
         Exponent = (byte[])parameters.Exponent.Clone();

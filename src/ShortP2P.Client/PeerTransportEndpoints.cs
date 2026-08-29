@@ -34,7 +34,11 @@ public static class PeerTransportEndpoints
 
         var legacy = new List<TransportAddress>();
         foreach (var host in (chat.PeerHost ?? string.Empty).Split([',', ';', '|', ' ', '\n', '\r', '\t'],
+#if NET5_0_OR_GREATER
                      StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+#else
+                     StringSplitOptions.RemoveEmptyEntries))
+#endif
             if (IPAddress.TryParse(host, out var ip))
                 legacy.Add(UdpTransportAddress.FromIPEndPoint(new IPEndPoint(ip, chat.PeerPort)));
             else if (BluetoothTransportAddress.TryParseMac(host, out var mac))

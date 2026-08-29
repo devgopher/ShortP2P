@@ -18,14 +18,21 @@ public readonly struct CompressedNetworkId : IEquatable<CompressedNetworkId>, IC
     public static CompressedNetworkId New()
     {
         Span<byte> buf = stackalloc byte[WireLength];
+#if NETCOREAPP
         RandomNumberGenerator.Fill(buf);
+#else
+        var tmp = new byte[WireLength];
+        using (var rng = RandomNumberGenerator.Create())
+            rng.GetBytes(tmp);
+        tmp.CopyTo(buf);
+#endif
         return FromWireBytes(buf);
     }
 
     public static CompressedNetworkId FromWireBytes(ReadOnlySpan<byte> bytes)
     {
         if (bytes.Length != WireLength)
-            throw new ArgumentException($"Wire form must be exactly {WireLength} bytes.", nameof(bytes));
+            throw new global::System.ArgumentException($"Wire form must be exactly {WireLength} bytes.", nameof(bytes));
         return new CompressedNetworkId(
             BinaryPrimitives.ReadUInt64LittleEndian(bytes),
             BinaryPrimitives.ReadUInt32LittleEndian(bytes[8..]));
@@ -56,7 +63,7 @@ public readonly struct CompressedNetworkId : IEquatable<CompressedNetworkId>, IC
 
     public static CompressedNetworkId FromShortString(string text)
     {
-        ArgumentNullException.ThrowIfNull(text);
+        Require.NotNull(text);
         var bytes = FromBase64Url(text);
         return FromWireBytes(bytes);
     }
@@ -123,13 +130,13 @@ public readonly struct CompressedNetworkId : IEquatable<CompressedNetworkId>, IC
 
     private static string ToBase64Url(ReadOnlySpan<byte> data)
     {
-        var s = Convert.ToBase64String(data);
+        var s = Convert.ToBase64String(data.ToArray());
         return s.TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
     private static ReadOnlySpan<byte> FromBase64Url(string text)
     {
-        var t = text.Replace("-", "+", StringComparison.Ordinal).Replace("_", "/", StringComparison.Ordinal);
+        var t = text.Replace("-", "+").Replace("_", "/");
         switch (t.Length % 4)
         {
             case 2:

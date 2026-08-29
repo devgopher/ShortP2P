@@ -17,7 +17,7 @@ public sealed class DeviceIdProvider
 
     public DeviceIdProvider(ISessionStorage storage)
     {
-        _storage = storage ?? throw new ArgumentNullException(nameof(storage));
+        _storage = storage ?? throw new global::System.ArgumentNullException(nameof(storage));
     }
 
     public async Task<string> GetDeviceIdAsync(CancellationToken cancellationToken = default)
@@ -56,7 +56,21 @@ public sealed class DeviceIdProvider
     public static string ComputeDeviceId(string installIdUuidD)
     {
         var bytes = Encoding.UTF8.GetBytes(installIdUuidD.Trim().ToLowerInvariant());
+#if NET5_0_OR_GREATER
         var hash = SHA256.HashData(bytes);
         return Convert.ToHexString(hash).ToLowerInvariant();
+#else
+        using var sha = SHA256.Create();
+        var hash = sha.ComputeHash(bytes);
+        var c = new char[hash.Length * 2];
+        for (var i = 0; i < hash.Length; i++)
+        {
+            var b = hash[i];
+            c[i * 2] = (char)(b >> 4 < 10 ? '0' + (b >> 4) : 'a' + ((b >> 4) - 10));
+            c[i * 2 + 1] = (char)((b & 0xF) < 10 ? '0' + (b & 0xF) : 'a' + ((b & 0xF) - 10));
+        }
+
+        return new string(c);
+#endif
     }
 }

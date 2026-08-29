@@ -14,8 +14,8 @@ public static class SafetyNumber
 
     public static string FromPublicKey(RsaPublicKey key)
     {
-        ArgumentNullException.ThrowIfNull(key);
-        var hash = SHA256.HashData(Concat(key.Modulus, key.Exponent));
+        Require.NotNull(key);
+        var hash = Sha256(Concat(key.Modulus, key.Exponent));
         return $"{Glyphs[hash[0]]}{Glyphs[hash[1]]}{Glyphs[hash[2]]}{Glyphs[hash[3]]}";
     }
 
@@ -60,6 +60,16 @@ public static class SafetyNumber
         {
             return false;
         }
+    }
+
+    private static byte[] Sha256(byte[] data)
+    {
+#if NET5_0_OR_GREATER
+        return SHA256.HashData(data);
+#else
+        using var sha = SHA256.Create();
+        return sha.ComputeHash(data);
+#endif
     }
 
     private static byte[] Concat(byte[] a, byte[] b)

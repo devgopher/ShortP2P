@@ -156,15 +156,15 @@ public static class PresencePingCodec
         public async ValueTask SendAsync(PingMessage message, TransportAddress destination,
             CancellationToken cancellationToken = default)
         {
-            ArgumentNullException.ThrowIfNull(message);
-            ArgumentNullException.ThrowIfNull(destination);
+            Require.NotNull(message);
+            Require.NotNull(destination);
             var packet = BuildPacket(message);
             await _transport.SendAsync(packet, destination, cancellationToken).ConfigureAwait(false);
         }
 
         public async ValueTask SendBroadcastAsync(PingMessage message, CancellationToken cancellationToken = default)
         {
-            ArgumentNullException.ThrowIfNull(message);
+            Require.NotNull(message);
             if (_transport.Kind != TransportKind.Udp)
                 return;
             var packet = BuildPacket(message);

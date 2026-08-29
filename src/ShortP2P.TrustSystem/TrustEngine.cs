@@ -6,9 +6,9 @@ namespace ShortP2P.TrustSystem;
 /// </summary>
 public sealed class TrustEngine(ITrustStore store, ITrustClock clock, TrustOptions options)
 {
-    private readonly ITrustStore _store = store ?? throw new ArgumentNullException(nameof(store));
-    private readonly ITrustClock _clock = clock ?? throw new ArgumentNullException(nameof(clock));
-    private readonly TrustOptions _options = options ?? throw new ArgumentNullException(nameof(options));
+    private readonly ITrustStore _store = store ?? throw new global::System.ArgumentNullException(nameof(store));
+    private readonly ITrustClock _clock = clock ?? throw new global::System.ArgumentNullException(nameof(clock));
+    private readonly TrustOptions _options = options ?? throw new global::System.ArgumentNullException(nameof(options));
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public async Task<IReadOnlyList<RatedServer>> AskRatingAsync(
@@ -258,7 +258,11 @@ public sealed class TrustEngine(ITrustStore store, ITrustClock clock, TrustOptio
             return;
 
         var durationTicks = Math.Max(1, _options.RecoveryDuration.Ticks);
-        var t = Math.Clamp(elapsed.Ticks / (double)durationTicks, 0d, 1d);
+        var t = elapsed.Ticks / (double)durationTicks;
+        if (t < 0d)
+            t = 0d;
+        else if (t > 1d)
+            t = 1d;
         var start = state.RatingAtRecoveryStart ?? state.Rating;
         state.Rating = Clamp01((float)(start + (_options.RecoveryTarget - start) * t));
         if (t >= 1d)
@@ -283,5 +287,5 @@ public sealed class TrustEngine(ITrustStore store, ITrustClock clock, TrustOptio
         return buckets;
     }
 
-    private static float Clamp01(float value) => Math.Clamp(value, 0f, 1f);
+    private static float Clamp01(float value) => value < 0f ? 0f : value > 1f ? 1f : value;
 }

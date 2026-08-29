@@ -19,7 +19,7 @@ public static class P2PHandshake
     /// </summary>
     public static P2PHandshakeResult CreateHandshakeInitiation(RsaPublicKey remotePublicKey)
     {
-        ArgumentNullException.ThrowIfNull(remotePublicKey);
+        Require.NotNull(remotePublicKey);
 
         using var rsa = RSA.Create();
         rsa.ImportParameters(remotePublicKey.ToParameters());
@@ -57,10 +57,10 @@ public static class P2PHandshake
     /// </summary>
     public static byte[] DecryptHandshakePacket(RsaPrivateKey localPrivateKey, byte[] handshakePacket)
     {
-        ArgumentNullException.ThrowIfNull(localPrivateKey);
-        ArgumentNullException.ThrowIfNull(handshakePacket);
+        Require.NotNull(localPrivateKey);
+        Require.NotNull(handshakePacket);
         if (handshakePacket.Length != HandshakePacketBytes)
-            throw new ArgumentException($"Handshake packet must be exactly {HandshakePacketBytes} bytes.",
+            throw new global::System.ArgumentException($"Handshake packet must be exactly {HandshakePacketBytes} bytes.",
                 nameof(handshakePacket));
 
         using var rsa = RSA.Create();

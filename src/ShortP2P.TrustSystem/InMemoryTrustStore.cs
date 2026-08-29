@@ -14,7 +14,7 @@ public sealed class InMemoryTrustStore : ITrustStore
 
     public Task UpsertAsync(ServerTrustState state, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(state);
+        Require.NotNull(state);
         cancellationToken.ThrowIfCancellationRequested();
         var endpoint = ServerEndpoint.Parse(state.Host, state.Port);
         state.Host = endpoint.Host;

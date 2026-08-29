@@ -38,7 +38,7 @@ public static class ChatWireCodec
     {
         var mime = Encoding.UTF8.GetBytes(mimeType.Trim());
         if (mime.Length > ushort.MaxValue)
-            throw new ArgumentException("MIME type is too long.", nameof(mimeType));
+            throw new global::System.ArgumentException("MIME type is too long.", nameof(mimeType));
 
         var buf = new byte[Magic.Length + 1 + 2 + mime.Length + 4 + imageBytes.Length];
         Magic.CopyTo(buf);
@@ -55,11 +55,11 @@ public static class ChatWireCodec
     {
         var mime = Encoding.UTF8.GetBytes(mimeType.Trim());
         if (mime.Length > ushort.MaxValue)
-            throw new ArgumentException("MIME type is too long.", nameof(mimeType));
+            throw new global::System.ArgumentException("MIME type is too long.", nameof(mimeType));
 
         var name = Encoding.UTF8.GetBytes(NormalizeWireFileName(fileName));
         if (name.Length > ushort.MaxValue)
-            throw new ArgumentException("File name is too long.", nameof(fileName));
+            throw new global::System.ArgumentException("File name is too long.", nameof(fileName));
 
         var buf = new byte[Magic.Length + 1 + 2 + mime.Length + 2 + name.Length + 4 + fileBytes.Length];
         Magic.CopyTo(buf);
@@ -124,7 +124,7 @@ public static class ChatWireCodec
             rest = rest.Slice(4);
             if (rest.Length < len)
                 return false;
-            var text = Encoding.UTF8.GetString(rest.Slice(0, (int)len));
+            var text = Utf8(rest.Slice(0, (int)len));
             message = new ChatWireText(text);
             return true;
         }
@@ -137,7 +137,7 @@ public static class ChatWireCodec
             rest = rest.Slice(2);
             if (rest.Length < mimeLen + 4)
                 return false;
-            var mime = Encoding.UTF8.GetString(rest.Slice(0, mimeLen));
+            var mime = Utf8(rest.Slice(0, mimeLen));
             rest = rest.Slice(mimeLen);
             var imgLen = BinaryPrimitives.ReadUInt32LittleEndian(rest);
             rest = rest.Slice(4);
@@ -155,13 +155,13 @@ public static class ChatWireCodec
             rest = rest.Slice(2);
             if (rest.Length < mimeLen + 2)
                 return false;
-            var mime = Encoding.UTF8.GetString(rest.Slice(0, mimeLen));
+            var mime = Utf8(rest.Slice(0, mimeLen));
             rest = rest.Slice(mimeLen);
             var nameLen = BinaryPrimitives.ReadUInt16LittleEndian(rest);
             rest = rest.Slice(2);
             if (rest.Length < nameLen + 4)
                 return false;
-            var wireName = Encoding.UTF8.GetString(rest.Slice(0, nameLen));
+            var wireName = Utf8(rest.Slice(0, nameLen));
             rest = rest.Slice(nameLen);
             var fileLen = BinaryPrimitives.ReadUInt32LittleEndian(rest);
             rest = rest.Slice(4);
@@ -204,6 +204,15 @@ public static class ChatWireCodec
         }
 
         return false;
+    }
+
+    private static string Utf8(ReadOnlySpan<byte> span)
+    {
+#if NETCOREAPP
+        return Encoding.UTF8.GetString(span);
+#else
+        return Encoding.UTF8.GetString(span.ToArray());
+#endif
     }
 }
 

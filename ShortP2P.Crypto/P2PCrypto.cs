@@ -45,8 +45,8 @@ public static class P2PCrypto
     /// </summary>
     public static P2PSession CreateSession(RsaPrivateKey localPrivateKey, byte[] remoteHandshakePacket)
     {
-        ArgumentNullException.ThrowIfNull(localPrivateKey);
-        ArgumentNullException.ThrowIfNull(remoteHandshakePacket);
+        Require.NotNull(localPrivateKey);
+        Require.NotNull(remoteHandshakePacket);
 
         var sessionKeys = P2PHandshake.DecryptHandshakePacket(localPrivateKey, remoteHandshakePacket);
 
@@ -63,7 +63,7 @@ public static class P2PCrypto
     /// </summary>
     public static byte[] Encrypt(P2PSession session, byte[] plaintext)
     {
-        ArgumentNullException.ThrowIfNull(session);
+        Require.NotNull(session);
         return session.Encrypt(plaintext);
     }
 
@@ -72,7 +72,7 @@ public static class P2PCrypto
     /// </summary>
     public static byte[] Decrypt(P2PSession session, byte[] packet)
     {
-        ArgumentNullException.ThrowIfNull(session);
+        Require.NotNull(session);
         return session.Decrypt(packet);
     }
 }

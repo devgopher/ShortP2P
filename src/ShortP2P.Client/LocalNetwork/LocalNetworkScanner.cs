@@ -132,7 +132,7 @@ public sealed class LocalNetworkScanner(
     /// </summary>
     public void ApplyMessengerServerDirectory(IReadOnlyList<MessengerServerDirectoryEntry> clients)
     {
-        ArgumentNullException.ThrowIfNull(clients);
+        Require.NotNull(clients);
         var localPeer = _localPeer;
         var keepIds = new HashSet<CompressedNetworkId>();
 

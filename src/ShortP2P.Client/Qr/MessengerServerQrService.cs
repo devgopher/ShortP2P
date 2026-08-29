@@ -10,7 +10,7 @@ public static class MessengerServerQrService
 
     public static byte[] EncodeQrPng(MessengerServerQrPayload payload, int pixelsPerModule = 8)
     {
-        ArgumentNullException.ThrowIfNull(payload);
+        Require.NotNull(payload);
         return QrImageCodec.EncodePng(MessengerServerQrCodec.Serialize(payload), pixelsPerModule);
     }
 

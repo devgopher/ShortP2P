@@ -5,7 +5,7 @@ namespace ShortP2P.Client.Data;
 
 public sealed class AppDatabase(string databasePath)
 {
-    private readonly string _databasePath = databasePath ?? throw new ArgumentNullException(nameof(databasePath));
+    private readonly string _databasePath = databasePath ?? throw new global::System.ArgumentNullException(nameof(databasePath));
     private SQLiteAsyncConnection? _connection;
 
     public async Task<SQLiteAsyncConnection> GetConnectionAsync()

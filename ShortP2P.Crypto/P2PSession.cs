@@ -23,10 +23,10 @@ public sealed class P2PSession
 
     internal P2PSession(byte[] aesKey, byte[] macKey)
     {
-        ArgumentNullException.ThrowIfNull(aesKey);
-        ArgumentNullException.ThrowIfNull(macKey);
-        if (aesKey.Length != 16) throw new ArgumentException("aesKey must be 16 bytes (AES-128).", nameof(aesKey));
-        if (macKey.Length != 32) throw new ArgumentException("macKey must be 32 bytes.", nameof(macKey));
+        Require.NotNull(aesKey);
+        Require.NotNull(macKey);
+        if (aesKey.Length != 16) throw new global::System.ArgumentException("aesKey must be 16 bytes (AES-128).", nameof(aesKey));
+        if (macKey.Length != 32) throw new global::System.ArgumentException("macKey must be 32 bytes.", nameof(macKey));
 
         _aesKey = (byte[])aesKey.Clone();
         _macKey = (byte[])macKey.Clone();
@@ -42,9 +42,9 @@ public sealed class P2PSession
 
     public byte[] Encrypt(byte[] plaintext)
     {
-        ArgumentNullException.ThrowIfNull(plaintext);
+        Require.NotNull(plaintext);
         if (plaintext.Length > MaxPlaintextBytes)
-            throw new ArgumentException(
+            throw new global::System.ArgumentException(
                 $"Plaintext is too large. Max is {MaxPlaintextBytes} bytes for <= {MaxEncryptedPacketBytes}-byte packets.",
                 nameof(plaintext));
 
@@ -88,18 +88,18 @@ public sealed class P2PSession
 
     public byte[] Decrypt(byte[] packet)
     {
-        ArgumentNullException.ThrowIfNull(packet);
+        Require.NotNull(packet);
         if (packet.Length > MaxEncryptedPacketBytes)
-            throw new ArgumentException($"Packet length exceeds limit {MaxEncryptedPacketBytes} bytes.",
+            throw new global::System.ArgumentException($"Packet length exceeds limit {MaxEncryptedPacketBytes} bytes.",
                 nameof(packet));
         if (packet.Length < IvBytes + TagBytes)
-            throw new ArgumentException("Packet is too short.", nameof(packet));
+            throw new global::System.ArgumentException("Packet is too short.", nameof(packet));
 
         var ciphertextLen = packet.Length - IvBytes - TagBytes;
         if (ciphertextLen <= 0)
-            throw new ArgumentException("Packet ciphertext length is invalid.", nameof(packet));
+            throw new global::System.ArgumentException("Packet ciphertext length is invalid.", nameof(packet));
         if (ciphertextLen % AesBlockBytes != 0)
-            throw new ArgumentException(
+            throw new global::System.ArgumentException(
                 $"Invalid ciphertext length: {ciphertextLen} (must be multiple of {AesBlockBytes}).",
                 nameof(packet));
 

@@ -23,20 +23,34 @@ public static class MessengerServerPasswordGenerator
             throw new ArgumentOutOfRangeException(nameof(length), "Password length must be 64..256.");
 
         var chars = new char[length];
-        chars[0] = Lower[RandomNumberGenerator.GetInt32(Lower.Length)];
-        chars[1] = Upper[RandomNumberGenerator.GetInt32(Upper.Length)];
-        chars[2] = Digits[RandomNumberGenerator.GetInt32(Digits.Length)];
+        chars[0] = Lower[NextInt(Lower.Length)];
+        chars[1] = Upper[NextInt(Upper.Length)];
+        chars[2] = Digits[NextInt(Digits.Length)];
         for (var i = 3; i < length; i++)
-            chars[i] = All[RandomNumberGenerator.GetInt32(All.Length)];
+            chars[i] = All[NextInt(All.Length)];
 
         // Shuffle
         for (var i = length - 1; i > 0; i--)
         {
-            var j = RandomNumberGenerator.GetInt32(i + 1);
+            var j = NextInt(i + 1);
             (chars[i], chars[j]) = (chars[j], chars[i]);
         }
 
         return new string(chars);
+    }
+
+    private static int NextInt(int exclusiveMax)
+    {
+#if NETCOREAPP
+        return RandomNumberGenerator.GetInt32(exclusiveMax);
+#else
+        if (exclusiveMax <= 0)
+            throw new ArgumentOutOfRangeException(nameof(exclusiveMax));
+        var bytes = new byte[4];
+        using var rng = RandomNumberGenerator.Create();
+        rng.GetBytes(bytes);
+        return (int)(BitConverter.ToUInt32(bytes, 0) % (uint)exclusiveMax);
+#endif
     }
 
     public static bool IsValid(string? password)

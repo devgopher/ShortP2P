@@ -9,10 +9,10 @@ public sealed class RsaPublicKey
 {
     public RsaPublicKey(byte[] modulus, byte[] exponent)
     {
-        ArgumentNullException.ThrowIfNull(modulus);
-        ArgumentNullException.ThrowIfNull(exponent);
-        if (modulus.Length == 0) throw new ArgumentException("Modulus is empty.", nameof(modulus));
-        if (exponent.Length == 0) throw new ArgumentException("Exponent is empty.", nameof(exponent));
+        Require.NotNull(modulus);
+        Require.NotNull(exponent);
+        if (modulus.Length == 0) throw new global::System.ArgumentException("Modulus is empty.", nameof(modulus));
+        if (exponent.Length == 0) throw new global::System.ArgumentException("Exponent is empty.", nameof(exponent));
 
         Modulus = (byte[])modulus.Clone();
         Exponent = (byte[])exponent.Clone();
