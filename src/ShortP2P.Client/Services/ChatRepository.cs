@@ -44,11 +44,17 @@ public sealed class ChatRepository(AppDatabase db)
     /// <summary>В БД вставлен новый чат (не обновление существующего).</summary>
     public event EventHandler<ChatCreatedEventArgs>? ChatCreated;
 
+    /// <summary>Входящее приглашение (ChatRequest / LAN): открыть чат, даже если строка уже была.</summary>
+    public event EventHandler<ChatCreatedEventArgs>? IncomingChatInvite;
+
     /// <summary>Сохранённый публичный ключ пира заменён другим (возможный MITM).</summary>
     public event EventHandler<PeerPublicKeyChangedEventArgs>? PeerPublicKeyChanged;
 
     public void NotifyChatListChanged() =>
         RaiseEvent(ChatListChanged, EventArgs.Empty);
+
+    public void NotifyIncomingChatInvite(int chatId) =>
+        RaiseEvent(IncomingChatInvite, new ChatCreatedEventArgs(chatId, remote: true));
 
     /// <summary>
     /// Invoke multicast handlers one-by-one so a disposed UI subscriber cannot abort chat create

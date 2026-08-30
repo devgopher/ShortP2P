@@ -6,6 +6,7 @@ using ShortP2P.Auth;
 using ShortP2P.Auth.Data;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Qr;
+using ShortP2P.Client.Services;
 using ShortP2P.MessengerServer.Contracts.Dtos;
 using ShortP2P.MessengerServer.Http;
 using ShortP2P.TrustSystem;
@@ -148,8 +149,18 @@ public sealed class MessengerServerManager : IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(networkId))
             return false;
-        return _registeredClients.TryGetValue(serverId, out var set) &&
-               set.Contains(networkId.Trim());
+        if (!_registeredClients.TryGetValue(serverId, out var set))
+            return false;
+        var trimmed = networkId.Trim();
+        if (set.Contains(trimmed))
+            return true;
+        foreach (var id in set)
+        {
+            if (ChatRepository.PeerNetworkIdsEqual(id, trimmed))
+                return true;
+        }
+
+        return false;
     }
 
     public void ClearRegisteredClients(int serverId) =>

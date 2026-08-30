@@ -232,6 +232,41 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     }
 
     /// <summary>
+    /// One-shot inbox poll (timeout 1s) so ChatRequest replies / keys are applied before send.
+    /// </summary>
+    public async Task DrainInboxOnceAsync(CancellationToken cancellationToken = default)
+    {
+        var user = _auth.CurrentUser;
+        if (user == null)
+            return;
+
+        var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var conn in ready)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_manager.AllowsTraffic(conn))
+                continue;
+            try
+            {
+                var inbox = await TrackAsync(
+                        conn,
+                        () => conn.Api.PollEventsAsync(1, cancellationToken))
+                    .ConfigureAwait(false);
+                if (inbox.ChatRequests.Count > 0)
+                    await ProcessChatRequestsAsync(conn, user, inbox.ChatRequests, cancellationToken)
+                        .ConfigureAwait(false);
+                if (inbox.Messages.Count > 0)
+                    await ProcessIncomingMessagesAsync(conn, user, inbox.Messages, cancellationToken)
+                        .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "DrainInbox failed on {BaseUrl}", conn.Entity.BaseUrl);
+            }
+        }
+    }
+
+    /// <summary>
     /// Delivers an already-built chat wire through trusted messenger servers where the peer is registered.
     /// Returns true if at least one such server accepted the message.
     /// </summary>
@@ -245,13 +280,23 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         Require.NotNull(user);
         Require.NotNull(wire);
 
-        if (string.IsNullOrWhiteSpace(chat.PeerRsaPublicJson))
+        var latest = await _chats.GetChatAsync(chat.Id).ConfigureAwait(false) ?? chat;
+        if (string.IsNullOrWhiteSpace(latest.PeerRsaPublicJson))
+        {
+            await DrainInboxOnceAsync(cancellationToken).ConfigureAwait(false);
+            latest = await _chats.GetChatAsync(chat.Id).ConfigureAwait(false) ?? latest;
+        }
+
+        if (string.IsNullOrWhiteSpace(latest.PeerRsaPublicJson))
+        {
+            _logger.LogInformation("Send skipped: no peer public key for chat {ChatId}", latest.Id);
             return false;
+        }
 
         RsaPublicKey peerKey;
         try
         {
-            peerKey = RsaKeySerializer.DeserializePublic(chat.PeerRsaPublicJson);
+            peerKey = RsaKeySerializer.DeserializePublic(latest.PeerRsaPublicJson);
         }
         catch
         {
@@ -265,17 +310,22 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to encrypt server payload for chat {ChatId}", chat.Id);
+            _logger.LogWarning(ex, "Failed to encrypt server payload for chat {ChatId}", latest.Id);
             return false;
         }
 
-        var peerId = chat.PeerNetworkIdShort.Trim();
+        var peerId = ChatRepository.CanonicalPeerNetworkId(latest.PeerNetworkIdShort);
         if (peerId.Length == 0)
             return false;
 
         var targets = await CollectPeerServerTargetsAsync(peerId, cancellationToken).ConfigureAwait(false);
         if (targets.Count == 0)
+        {
+            _logger.LogInformation(
+                "Send skipped: no ready trusted messenger server for peer {PeerId}",
+                peerId);
             return false;
+        }
 
         var now = DateTime.UtcNow;
         var dto = new MessageDto
@@ -305,8 +355,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             },
             async (conn, ct) =>
             {
-                if (!_manager.AllowsTraffic(conn) ||
-                    !_manager.IsClientRegisteredOnServer(conn.Entity.Id, peerId))
+                if (!_manager.AllowsTraffic(conn))
                     return;
                 try
                 {
@@ -315,7 +364,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogDebug(ex, "SendMessage failed on {BaseUrl}", conn.Entity.BaseUrl);
+                    _logger.LogWarning(ex, "SendMessage failed on {BaseUrl}", conn.Entity.BaseUrl);
                 }
             }).ConfigureAwait(false);
 
@@ -387,8 +436,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             },
             async (conn, ct) =>
             {
-                if (!_manager.AllowsTraffic(conn) ||
-                    !_manager.IsClientRegisteredOnServer(conn.Entity.Id, peerId))
+                if (!_manager.AllowsTraffic(conn))
                     return;
                 try
                 {
@@ -493,17 +541,25 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
-        var targets = new List<MessengerServerConnection>(ready.Count);
+        var allowed = new List<MessengerServerConnection>(ready.Count);
         foreach (var conn in ready)
         {
-            if (!_manager.AllowsTraffic(conn))
-                continue;
-            if (!await PeerRegisteredOnTrustedServerAsync(conn, peerId, cancellationToken).ConfigureAwait(false))
-                continue;
-            targets.Add(conn);
+            if (_manager.AllowsTraffic(conn))
+                allowed.Add(conn);
         }
 
-        return targets;
+        if (allowed.Count == 0)
+            return allowed;
+
+        var registered = new List<MessengerServerConnection>(allowed.Count);
+        foreach (var conn in allowed)
+        {
+            if (await PeerRegisteredOnTrustedServerAsync(conn, peerId, cancellationToken).ConfigureAwait(false))
+                registered.Add(conn);
+        }
+
+        // GetClients can fail or use a different id spelling; SendMessage still stores for the target id.
+        return registered.Count > 0 ? registered : allowed;
     }
 
     private List<MessengerServerConnection> OrderConnectionsForBlobDownload(
@@ -741,7 +797,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             var peerId = request.NetworkId.Trim();
             if (string.IsNullOrEmpty(peerId) ||
-                string.Equals(peerId, user.NetworkIdShort.Trim(), StringComparison.Ordinal))
+                ChatRepository.PeerNetworkIdsEqual(peerId, user.NetworkIdShort))
                 continue;
 
             var existing = await _chats.FindChatByPeerNetworkIdAsync(user.Id, peerId).ConfigureAwait(false);
@@ -793,6 +849,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                     peerId,
                     chat.Id);
             }
+
+            _chats.NotifyIncomingChatInvite(chat.Id);
         }
     }
 

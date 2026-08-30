@@ -180,9 +180,6 @@ public static class LanChatStartFromDiscovery
 
         var idShort = peer.NetworkId.ToShortString();
         var existing = await chats.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);
-        if (existing != null)
-            return LanChatStartResult.AlreadyExists(existing);
-
         if (servers == null)
             return LanChatStartResult.Failed("Messenger-серверы не подключены.");
 
@@ -195,7 +192,22 @@ public static class LanChatStartFromDiscovery
             return LanChatStartResult.Failed(ex.Message);
         }
 
-        return LanChatStartResult.WaitingForPeer();
+        if (existing != null)
+            return LanChatStartResult.AlreadyExists(existing);
+
+        var nick = string.IsNullOrWhiteSpace(peer.Nickname) ? idShort : peer.Nickname.Trim();
+        var chat = await chats.AddChatAsync(
+                user.Id,
+                nick,
+                idShort,
+                "",
+                idShort,
+                user.DataUdpPort,
+                remote: false,
+                keySource: PeerKeySource.Server("invite"))
+            .ConfigureAwait(false);
+
+        return LanChatStartResult.Created(chat);
     }
 }
 

@@ -31,6 +31,7 @@
     <Compile Include="..\ShortP2P.Client\LocalNetwork\LocalNetworkScanner.cs" />
     <Compile Include="..\ShortP2P.Client\LocalNetwork\LanBroadcastHelper.cs" />
     <Compile Include="..\ShortP2P.Client\Routing\P2pRoutingSettings.cs" />
+    <Compile Include="..\ShortP2P.Client\Routing\P2pRoutingSettingsStore.cs" />
     <Compile Include="..\ShortP2P.Client\Routing\LinkTechnologyPreset.cs" />
     <Compile Include="..\ShortP2P.Client\Routing\TrafficQualityMode.cs" />
     <Compile Include="..\ShortP2P.Client\Routing\PresencePeerCapabilities.cs" />
