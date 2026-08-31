@@ -345,6 +345,13 @@ public sealed class ChatP2PSession : IAsyncDisposable
             MessagesChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    private async Task RaiseMessagesChangedIfVisibleAsync()
+    {
+        if (await _repo.IsChatFromBlockedPeerAsync(_chat.Id).ConfigureAwait(false))
+            return;
+        RaiseMessagesChanged();
+    }
+
     private void RebuildRouteFromChat()
     {
         _peerPublicKey = RsaKeySerializer.DeserializePublic(_chat.PeerRsaPublicJson);
@@ -596,7 +603,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
     {
         Require.NotNull(payload);
         if (await ProcessIncomingPayloadAsync(payload, cancellationToken, blobServerBaseUrl).ConfigureAwait(false))
-            RaiseMessagesChanged();
+            await RaiseMessagesChangedIfVisibleAsync().ConfigureAwait(false);
     }
 
     private async void OnMessengerGotData(object? sender, IncomingBinaryMessage incoming)
@@ -606,7 +613,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
             var payload = incoming.Payload.ToArray();
             var cancellationToken = _cts?.Token ?? CancellationToken.None;
             if (await ProcessIncomingPayloadAsync(payload, cancellationToken).ConfigureAwait(false))
-                RaiseMessagesChanged();
+                await RaiseMessagesChangedIfVisibleAsync().ConfigureAwait(false);
         }
         catch
         {

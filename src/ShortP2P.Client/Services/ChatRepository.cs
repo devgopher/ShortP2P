@@ -30,9 +30,10 @@ public sealed class PeerPublicKeyChangedEventArgs : EventArgs
     public string NewSafetyNumber { get; init; } = "";
 }
 
-public sealed class ChatRepository(AppDatabase db)
+public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = null)
 {
     private readonly SemaphoreSlim _addChatGate = new(1, 1);
+    private readonly PeerBlacklist? _blacklist = blacklist;
     private readonly AppDatabase _db = db ?? throw new global::System.ArgumentNullException(nameof(db));
 
     /// <summary>Список чатов на главном экране: обновить после входящего приглашения и т.п.</summary>
@@ -53,8 +54,46 @@ public sealed class ChatRepository(AppDatabase db)
     public void NotifyChatListChanged() =>
         RaiseEvent(ChatListChanged, EventArgs.Empty);
 
-    public void NotifyIncomingChatInvite(int chatId) =>
+    public async Task NotifyIncomingChatInviteAsync(int chatId, CancellationToken cancellationToken = default)
+    {
+        var chat = await GetChatAsync(chatId).ConfigureAwait(false);
+        if (chat != null &&
+            await IsPeerBlockedAsync(chat.UserId, chat.PeerNetworkIdShort, cancellationToken).ConfigureAwait(false))
+            return;
         RaiseEvent(IncomingChatInvite, new ChatCreatedEventArgs(chatId, remote: true));
+    }
+
+    public async Task<bool> IsPeerBlockedAsync(int userId, string? peerNetworkId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_blacklist == null)
+            return false;
+        await _blacklist.EnsureLoadedAsync(userId, cancellationToken).ConfigureAwait(false);
+        return _blacklist.IsBlocked(userId, peerNetworkId);
+    }
+
+    public async Task<bool> IsChatFromBlockedPeerAsync(int chatId, CancellationToken cancellationToken = default)
+    {
+        var chat = await GetChatAsync(chatId).ConfigureAwait(false);
+        if (chat == null)
+            return false;
+        return await IsPeerBlockedAsync(chat.UserId, chat.PeerNetworkIdShort, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task NotifyChatListChangedUnlessBlockedAsync(int userId, string? peerNetworkId)
+    {
+        if (await IsPeerBlockedAsync(userId, peerNetworkId).ConfigureAwait(false))
+            return;
+        NotifyChatListChanged();
+    }
+
+    private async Task RaiseChatMessageAppendedAsync(int chatId, bool outgoing, ChatEntity? chat)
+    {
+        if (!outgoing && chat != null &&
+            await IsPeerBlockedAsync(chat.UserId, chat.PeerNetworkIdShort).ConfigureAwait(false))
+            return;
+        RaiseEvent(ChatMessageAppended, new ChatMessageAppendedEventArgs(chatId, outgoing));
+    }
 
     /// <summary>
     /// Invoke multicast handlers one-by-one so a disposed UI subscriber cannot abort chat create
@@ -183,7 +222,7 @@ public sealed class ChatRepository(AppDatabase db)
                     await connUpdate.UpdateAsync(existing).ConfigureAwait(false);
                 }
 
-                NotifyChatListChanged();
+                await NotifyChatListChangedUnlessBlockedAsync(userId, idShort).ConfigureAwait(false);
                 return existing;
             }
 
@@ -202,8 +241,12 @@ public sealed class ChatRepository(AppDatabase db)
                 UpdatedUtcTicks = DateTime.UtcNow.Ticks
             };
             await conn.InsertAsync(chat);
-            NotifyChatListChanged();
-            RaiseEvent(ChatCreated, new ChatCreatedEventArgs(chat.Id, remote));
+            if (!await IsPeerBlockedAsync(userId, idShort).ConfigureAwait(false))
+            {
+                NotifyChatListChanged();
+                RaiseEvent(ChatCreated, new ChatCreatedEventArgs(chat.Id, remote));
+            }
+
             return chat;
         }
         finally
@@ -491,7 +534,7 @@ public sealed class ChatRepository(AppDatabase db)
         chat.PeerNickname = preferred;
         chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
         await conn.UpdateAsync(chat).ConfigureAwait(false);
-        NotifyChatListChanged();
+        await NotifyChatListChangedUnlessBlockedAsync(chat.UserId, chat.PeerNetworkIdShort).ConfigureAwait(false);
         return true;
     }
 
@@ -610,7 +653,7 @@ public sealed class ChatRepository(AppDatabase db)
             await conn.UpdateAsync(chat);
         }
 
-        RaiseEvent(ChatMessageAppended, new ChatMessageAppendedEventArgs(chatId, outgoing));
+        await RaiseChatMessageAppendedAsync(chatId, outgoing, chat).ConfigureAwait(false);
         return msg.Id;
     }
 
@@ -651,7 +694,7 @@ public sealed class ChatRepository(AppDatabase db)
             await conn.UpdateAsync(chat);
         }
 
-        RaiseEvent(ChatMessageAppended, new ChatMessageAppendedEventArgs(chatId, outgoing));
+        await RaiseChatMessageAppendedAsync(chatId, outgoing, chat).ConfigureAwait(false);
         return msg.Id;
     }
 
@@ -692,7 +735,7 @@ public sealed class ChatRepository(AppDatabase db)
             await conn.UpdateAsync(chat);
         }
 
-        RaiseEvent(ChatMessageAppended, new ChatMessageAppendedEventArgs(chatId, outgoing));
+        await RaiseChatMessageAppendedAsync(chatId, outgoing, chat).ConfigureAwait(false);
         return msg.Id;
     }
 

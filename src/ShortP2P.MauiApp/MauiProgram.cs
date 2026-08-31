@@ -61,6 +61,7 @@ public static class MauiProgram
             Path.Combine(FileSystem.AppDataDirectory, "routes.db"), enableDiscovery: true);
         builder.Services.AddSingleton<ISessionStorage, MauiSecureStorage>();
         builder.Services.AddSingleton<AuthService>();
+        builder.Services.AddSingleton<PeerBlacklist>();
         builder.Services.AddSingleton<ChatRepository>();
         builder.Services.AddSingleton<IBluetoothPresencePingTargetsProvider, BluetoothPresencePingTargetsProvider>();
         builder.Services.AddSingleton<IBleDiscoveredPeerStore, SqliteBleDiscoveredPeerStore>();

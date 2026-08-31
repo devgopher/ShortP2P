@@ -18,6 +18,7 @@
     <Compile Include="..\ShortP2P.Client\Data\ChatTransferState.cs" />
     <Compile Include="..\ShortP2P.Client\Data\MessageDeliveryStatus.cs" />
     <Compile Include="..\ShortP2P.Client\Data\MessengerServerEntity.cs" />
+    <Compile Include="..\ShortP2P.Client\Data\PeerBlacklistEntity.cs" />
     <Compile Include="..\ShortP2P.Client\Data\SqliteUserAuthRepository.cs" />
     <Compile Include="..\ShortP2P.Client\ChatMedia\ChatWireCodec.cs" />
     <Compile Include="..\ShortP2P.Client\Qr\QrImageCodec.cs" />
@@ -40,6 +41,7 @@
     <Compile Include="..\ShortP2P.Client\Routing\LocalEndpointHelper.cs" />
     <Compile Include="..\ShortP2P.Client\Routing\ChatInviteCodec.cs" />
     <Compile Include="..\ShortP2P.Client\Services\ChatRepository.cs" />
+    <Compile Include="..\ShortP2P.Client\Services\PeerBlacklist.cs" />
     <Compile Include="..\ShortP2P.Client\Services\ChatSessionCache.cs" />
     <Compile Include="..\ShortP2P.Client\Services\PeerKeySource.cs" />
     <Compile Include="..\ShortP2P.Client\Services\LanChatStartFromDiscovery.cs" />

@@ -46,6 +46,7 @@ internal static class Program
         services.AddRouteDbContextWithPeerExpiryCleanup(Path.Combine(appRoot, "routes.db"), true);
         services.AddSingleton<ISessionStorage>(_ => new FileSessionStorage(Path.Combine(appRoot, "session")));
         services.AddSingleton<AuthService>();
+        services.AddSingleton<PeerBlacklist>();
         services.AddSingleton<ChatRepository>();
         services.AddSingleton<IBluetoothPresencePingTargetsProvider, BluetoothPresencePingTargetsProvider>();
         services.AddSingleton<IBleDiscoveredPeerStore, SqliteBleDiscoveredPeerStore>();

@@ -54,6 +54,7 @@ public static class IncomingChatInviteHandler
         }
 
         var idShort = peerId.ToShortString();
+        var blocked = await repo.IsPeerBlockedAsync(user.Id, idShort, cancellationToken).ConfigureAwait(false);
         var effectiveHost = ResolvePeerHost(host, sourceAddress);
         cancellationToken.ThrowIfCancellationRequested();
         var existing = await repo.FindChatByPeerNetworkIdAsync(user.Id, idShort).ConfigureAwait(false);
@@ -73,17 +74,25 @@ public static class IncomingChatInviteHandler
             existing.PeerPort = chatPeerPort;
             existing.RelayRouteBlob = null;
             existing.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
-            repo.NotifyChatListChanged();
-            ScheduleInviteReply(auth, user, host, port, sourceAddress, sendInviteReplyAsync, routingSettings,
-                bluetoothAdapterMac);
+            if (!blocked)
+                repo.NotifyChatListChanged();
+            if (!blocked)
+            {
+                ScheduleInviteReply(auth, user, host, port, sourceAddress, sendInviteReplyAsync, routingSettings,
+                    bluetoothAdapterMac);
+            }
+
             return;
         }
 
         await repo.AddChatAsync(user.Id, nick, idShort, pubJson, effectiveHost, PresencePingCodec.DefaultDataUdpPort,
                 remote: true, keySource: keySource).ConfigureAwait(false);
 
-        ScheduleInviteReply(auth, user, host, port, sourceAddress, sendInviteReplyAsync, routingSettings,
-            bluetoothAdapterMac);
+        if (!blocked)
+        {
+            ScheduleInviteReply(auth, user, host, port, sourceAddress, sendInviteReplyAsync, routingSettings,
+                bluetoothAdapterMac);
+        }
     }
 
     private static void ScheduleInviteReply(AuthService auth, UserEntity user, string inviteHostList,

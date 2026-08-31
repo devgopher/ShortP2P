@@ -423,6 +423,9 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             var chat = await _chats.GetChatAsync(chatId).ConfigureAwait(false);
             if (chat == null)
                 return;
+            if (await _chats.IsPeerBlockedAsync(user.Id, chat.PeerNetworkIdShort, cancellationToken)
+                    .ConfigureAwait(false))
+                return;
 
             if (IsChatSessionStarted(chatId))
                 return;
@@ -554,6 +557,8 @@ public sealed class UserP2pRuntime : IAsyncDisposable
             if (user == null)
                 return;
             var peerShort = invite.InitiatorNetworkId.ToShortString();
+            if (await _chats.IsPeerBlockedAsync(user.Id, peerShort, cancellationToken).ConfigureAwait(false))
+                return;
             var chat = await _chats.FindChatByPeerNetworkIdAsync(user.Id, peerShort).ConfigureAwait(false);
             if (chat == null)
                 return;
