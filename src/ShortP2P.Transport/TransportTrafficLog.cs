@@ -4,7 +4,7 @@ using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Transport;
 
-/// <summary>Форматирование и запись wire-трафика транспорта (hex payload, адреса UDP/BLE).</summary>
+/// <summary>Форматирование и запись wire-трафика транспорта (hex payload, адреса UDP/BLE). Hex — только DEBUG.</summary>
 public static class TransportTrafficLog
 {
     public static string FormatPayloadHex(ReadOnlySpan<byte> payload)
@@ -43,20 +43,24 @@ public static class TransportTrafficLog
     public static void LogReceive(ILogger? logger, TransportAddress remote, string localEndpoint,
         ReadOnlySpan<byte> payload)
     {
-        if (logger?.IsEnabled(LogLevel.Information) != true)
+#if DEBUG
+        if (logger?.IsEnabled(LogLevel.Debug) != true)
             return;
 
-        logger.LogInformation("RX {Remote} -> {Local}: {Payload}",
+        logger.LogDebug("RX {Remote} -> {Local}: {Payload}",
             FormatAddress(remote), localEndpoint, FormatPayloadHex(payload));
+#endif
     }
 
     public static void LogSend(ILogger? logger, string localEndpoint, TransportAddress remote,
         ReadOnlySpan<byte> payload)
     {
-        if (logger?.IsEnabled(LogLevel.Information) != true)
+#if DEBUG
+        if (logger?.IsEnabled(LogLevel.Debug) != true)
             return;
 
-        logger.LogInformation("TX {Local} -> {Remote}: {Payload}",
+        logger.LogDebug("TX {Local} -> {Remote}: {Payload}",
             localEndpoint, FormatAddress(remote), FormatPayloadHex(payload));
+#endif
     }
 }

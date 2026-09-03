@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 
 namespace ShortP2P.Crypto;
 
-/// <summary>Форматирование и запись plaintext при шифровании/дешифровании P2P-сессии.</summary>
+/// <summary>Форматирование и запись plaintext при шифровании/дешифровании P2P-сессии. Hex — только DEBUG.</summary>
 public static class CryptoTrafficLog
 {
     public static string FormatPayloadHex(ReadOnlySpan<byte> payload)
@@ -24,17 +24,21 @@ public static class CryptoTrafficLog
 
     public static void LogEncryptPlaintext(ILogger? logger, ReadOnlySpan<byte> plaintext)
     {
-        if (logger?.IsEnabled(LogLevel.Information) != true)
+#if DEBUG
+        if (logger?.IsEnabled(LogLevel.Debug) != true)
             return;
 
-        logger.LogInformation("CRYPT encrypt plaintext: {Payload}", FormatPayloadHex(plaintext));
+        logger.LogDebug("CRYPT encrypt plaintext: {Payload}", FormatPayloadHex(plaintext));
+#endif
     }
 
     public static void LogDecryptPlaintext(ILogger? logger, ReadOnlySpan<byte> plaintext)
     {
-        if (logger?.IsEnabled(LogLevel.Information) != true)
+#if DEBUG
+        if (logger?.IsEnabled(LogLevel.Debug) != true)
             return;
 
-        logger.LogInformation("CRYPT decrypt plaintext: {Payload}", FormatPayloadHex(plaintext));
+        logger.LogDebug("CRYPT decrypt plaintext: {Payload}", FormatPayloadHex(plaintext));
+#endif
     }
 }
