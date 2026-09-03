@@ -104,8 +104,10 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
     {
         if (handlers == null)
             return;
-        foreach (EventHandler<TEventArgs> handler in handlers.GetInvocationList())
+        
+        foreach (var @delegate in handlers.GetInvocationList())
         {
+            var handler = (EventHandler<TEventArgs>)@delegate;
             try
             {
                 handler(this, args);
@@ -121,8 +123,9 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
     {
         if (handlers == null)
             return;
-        foreach (EventHandler handler in handlers.GetInvocationList())
+        foreach (var @delegate in handlers.GetInvocationList())
         {
+            var handler = (EventHandler)@delegate;
             try
             {
                 handler(this, args);
@@ -267,23 +270,27 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
             .ToListAsync()
             .ConfigureAwait(false);
         var matches = list.Where(c => PeerNetworkIdsEqual(c.PeerNetworkIdShort, id)).ToList();
-        if (matches.Count == 0)
-            return null;
-        if (matches.Count == 1)
+        
+        switch (matches.Count)
         {
-            var only = matches[0];
-            if (!string.Equals(only.PeerNetworkIdShort, id, StringComparison.Ordinal))
+            case 0:
+                return null;
+            case 1:
             {
+                var only = matches[0];
+                if (string.Equals(only.PeerNetworkIdShort, id, StringComparison.Ordinal)) return only;
                 only.PeerNetworkIdShort = id;
                 only.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
                 await conn.UpdateAsync(only).ConfigureAwait(false);
+
+                return only;
             }
-
-            return only;
+            default:
+            {
+                var merged = await DeduplicateChatsInDbAsync(conn, matches, notify: true).ConfigureAwait(false);
+                return merged.OrderByDescending(c => c.UpdatedUtcTicks).FirstOrDefault();
+            }
         }
-
-        var merged = await DeduplicateChatsInDbAsync(conn, matches, notify: true).ConfigureAwait(false);
-        return merged.OrderByDescending(c => c.UpdatedUtcTicks).FirstOrDefault();
     }
 
     /// <summary>Canonical base64url network id used as the chat list key.</summary>
@@ -317,18 +324,15 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
     {
         if (rows.Count <= 1)
         {
-            if (rows.Count == 1)
-            {
-                var single = rows[0];
-                var canonical = CanonicalPeerNetworkId(single.PeerNetworkIdShort);
-                if (canonical.Length > 0 &&
-                    !string.Equals(single.PeerNetworkIdShort, canonical, StringComparison.Ordinal))
-                {
-                    single.PeerNetworkIdShort = canonical;
-                    single.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
-                    await conn.UpdateAsync(single).ConfigureAwait(false);
-                }
-            }
+            if (rows.Count != 1) return rows;
+            var single = rows[0];
+            var canonical = CanonicalPeerNetworkId(single.PeerNetworkIdShort);
+            if (canonical.Length <= 0 ||
+                string.Equals(single.PeerNetworkIdShort, canonical, StringComparison.Ordinal)) return rows;
+            
+            single.PeerNetworkIdShort = canonical;
+            single.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
+            await conn.UpdateAsync(single).ConfigureAwait(false);
 
             return rows;
         }
@@ -550,9 +554,8 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
     {
         var nick = peerNickname?.Trim() ?? "";
         var id = networkIdShort.Trim();
-        if (nick.Length == 0)
-            return id;
-        return nick;
+        
+        return nick.Length == 0 ? id : nick;
     }
 
     private static bool ShouldReplacePeerNickname(string? currentNickname, string incomingNickname, string networkIdShort)
@@ -602,10 +605,8 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
 
     public async Task<IReadOnlyList<ChatMessageEntity>> ListMessagesPageDescAsync(int chatId, int offset, int limit)
     {
-        if (offset < 0)
-            throw new ArgumentOutOfRangeException(nameof(offset));
-        if (limit <= 0)
-            throw new ArgumentOutOfRangeException(nameof(limit));
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
 
         var conn = await _db.GetConnectionAsync();
         return await conn.Table<ChatMessageEntity>()

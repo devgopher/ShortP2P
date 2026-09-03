@@ -449,8 +449,7 @@ public sealed class LocalNetworkScanner(
     /// </summary>
     public async Task ScanAsync(TimeSpan listenDuration, CancellationToken cancellationToken = default)
     {
-        if (listenDuration < TimeSpan.Zero)
-            throw new ArgumentOutOfRangeException(nameof(listenDuration));
+        ArgumentOutOfRangeException.ThrowIfLessThan(listenDuration, TimeSpan.Zero);
 
         _scanSessionActive = true;
         try
