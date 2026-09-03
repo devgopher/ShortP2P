@@ -148,6 +148,10 @@ public sealed class UserP2pRuntime : IAsyncDisposable
     public UdpTransport? DataUdp { get; private set; }
 
     public P2pRoutingSettings Settings { get; } = new();
+
+    /// <summary>Shared compress/send queue for images, video and documents (see <see cref="BinarySendScheduler"/>).</summary>
+    public BinarySendScheduler BinarySends { get; } = new();
+
     public ITransport? BluetoothTransport => _bluetooth?.Current;
 
     /// <summary>
