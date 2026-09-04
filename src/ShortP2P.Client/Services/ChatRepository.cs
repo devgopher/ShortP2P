@@ -605,8 +605,10 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
 
     public async Task<IReadOnlyList<ChatMessageEntity>> ListMessagesPageDescAsync(int chatId, int offset, int limit)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(offset);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        if (offset < 0)
+            throw new ArgumentOutOfRangeException(nameof(offset));
+        if (limit <= 0)
+            throw new ArgumentOutOfRangeException(nameof(limit));
 
         var conn = await _db.GetConnectionAsync();
         return await conn.Table<ChatMessageEntity>()
