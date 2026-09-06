@@ -33,8 +33,8 @@ public sealed class PeerPublicKeyChangedEventArgs : EventArgs
 public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = null)
 {
     private readonly SemaphoreSlim _addChatGate = new(1, 1);
-    private readonly PeerBlacklist? _blacklist = blacklist;
     private readonly AppDatabase _db = db ?? throw new global::System.ArgumentNullException(nameof(db));
+    private int _seenPruneCounter;
 
     /// <summary>Список чатов на главном экране: обновить после входящего приглашения и т.п.</summary>
     public event EventHandler? ChatListChanged;
@@ -66,10 +66,10 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
     public async Task<bool> IsPeerBlockedAsync(int userId, string? peerNetworkId,
         CancellationToken cancellationToken = default)
     {
-        if (_blacklist == null)
+        if (blacklist == null)
             return false;
-        await _blacklist.EnsureLoadedAsync(userId, cancellationToken).ConfigureAwait(false);
-        return _blacklist.IsBlocked(userId, peerNetworkId);
+        await blacklist.EnsureLoadedAsync(userId, cancellationToken).ConfigureAwait(false);
+        return blacklist.IsBlocked(userId, peerNetworkId);
     }
 
     public async Task<bool> IsChatFromBlockedPeerAsync(int chatId, CancellationToken cancellationToken = default)
@@ -618,6 +618,54 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
             .Skip(offset)
             .Take(limit)
             .ToListAsync();
+    }
+
+    /// <summary>
+    /// Claims a server MessageId for local ingest. Returns true if this is the first time we see it
+    /// (caller should insert the message). Returns false if already claimed (duplicate from another server).
+    /// </summary>
+    public async Task<bool> TryClaimServerMessageAsync(string? messageId)
+    {
+        var id = messageId?.Trim() ?? "";
+        if (id.Length == 0)
+            return true;
+
+        var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
+        var existing = await conn.FindAsync<SeenServerMessageEntity>(id).ConfigureAwait(false);
+        if (existing != null)
+            return false;
+
+        try
+        {
+            await conn.InsertAsync(new SeenServerMessageEntity
+            {
+                MessageId = id,
+                SeenUtcTicks = DateTime.UtcNow.Ticks
+            }).ConfigureAwait(false);
+        }
+        catch (SQLiteException)
+        {
+            // Concurrent insert of the same primary key.
+            return false;
+        }
+
+        // Keep the table bounded (MessageIds are GUIDs; inbox fan-out only needs recent history).
+        if ((Interlocked.Increment(ref _seenPruneCounter) & 31) == 0)
+        {
+            try
+            {
+                var cutoff = DateTime.UtcNow.AddDays(-30).Ticks;
+                await conn.ExecuteAsync(
+                        "DELETE FROM seen_server_messages WHERE SeenUtcTicks < ?", cutoff)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore prune failures
+            }
+        }
+
+        return true;
     }
 
     public async Task<int> AddMessageAsync(int chatId, bool outgoing, string text,

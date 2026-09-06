@@ -934,22 +934,34 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                     continue;
                 }
 
-                var blocked = await _chats.IsPeerBlockedAsync(user.Id, peerId, cancellationToken)
-                    .ConfigureAwait(false);
-                if (blocked)
+                var isNew = await _chats.TryClaimServerMessageAsync(message.MessageId).ConfigureAwait(false);
+                if (!isNew)
                 {
-                    await IngestWireIntoRepositoryAsync(chat.Id, wire, connection.Entity.BaseUrl)
-                        .ConfigureAwait(false);
-                }
-                else if (_sessions.TryGetSession(chat.Id, out var session) && session != null)
-                {
-                    await session.IngestIncomingWireFromServerAsync(wire, cancellationToken, connection.Entity.BaseUrl)
-                        .ConfigureAwait(false);
+                    _logger.LogDebug(
+                        "Duplicate server message {MessageId} from {BaseUrl} — skip ingest, still ack",
+                        message.MessageId,
+                        connection.Entity.BaseUrl);
                 }
                 else
                 {
-                    await IngestWireIntoRepositoryAsync(chat.Id, wire, connection.Entity.BaseUrl)
+                    var blocked = await _chats.IsPeerBlockedAsync(user.Id, peerId, cancellationToken)
                         .ConfigureAwait(false);
+                    if (blocked)
+                    {
+                        await IngestWireIntoRepositoryAsync(chat.Id, wire, connection.Entity.BaseUrl)
+                            .ConfigureAwait(false);
+                    }
+                    else if (_sessions.TryGetSession(chat.Id, out var session) && session != null)
+                    {
+                        await session.IngestIncomingWireFromServerAsync(wire, cancellationToken,
+                                connection.Entity.BaseUrl)
+                            .ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await IngestWireIntoRepositoryAsync(chat.Id, wire, connection.Entity.BaseUrl)
+                            .ConfigureAwait(false);
+                    }
                 }
             }
             finally
@@ -957,6 +969,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                 _ingestGate.Release();
             }
 
+            // Ack on every server that delivered a copy, even if we already displayed it once.
             try
             {
                 await TrackAsync(connection, () => connection.Api.SubmitDeliveryReceiptAsync(
