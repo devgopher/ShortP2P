@@ -22,6 +22,7 @@ public sealed class AppDatabase(string databasePath)
         await _connection.CreateTableAsync<UserEntity>();
         await _connection.CreateTableAsync<ChatEntity>();
         await _connection.CreateTableAsync<ChatMessageEntity>();
+        await _connection.CreateTableAsync<SeenServerMessageEntity>();
         await _connection.CreateTableAsync<BleDiscoveredPeerEntity>();
         await _connection.CreateTableAsync<MessengerServerEntity>();
         await _connection.CreateTableAsync<PeerBlacklistEntity>();
