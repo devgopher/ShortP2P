@@ -6,6 +6,9 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\ShortP2P.Client\Data\SeenServerMessageEntity.cs">
+      <Link>SeenServerMessageEntity.cs</Link>
+    </Compile>
     <Compile Include="..\ShortP2P.Client\FileSessionStorage.cs" />
     <Compile Include="..\ShortP2P.Client\PeerHostList.cs" />
     <Compile Include="..\ShortP2P.Client\PeerTransportEndpoints.cs" />
