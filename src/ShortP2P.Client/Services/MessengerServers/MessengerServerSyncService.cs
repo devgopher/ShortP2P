@@ -934,6 +934,19 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                     continue;
                 }
 
+                var blocked = await _chats.IsPeerBlockedAsync(user.Id, peerId, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!blocked &&
+                    _sessions.TryGetSession(chat.Id, out var pendingSession) &&
+                    pendingSession != null &&
+                    !pendingSession.IsReadyForServerReceive)
+                {
+                    _logger.LogDebug(
+                        "Deferring server message {MessageId} for chat {ChatId} until handshake",
+                        message.MessageId, chat.Id);
+                    continue;
+                }
+
                 var isNew = await _chats.TryClaimServerMessageAsync(message.MessageId).ConfigureAwait(false);
                 if (!isNew)
                 {
@@ -942,26 +955,21 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                         message.MessageId,
                         connection.Entity.BaseUrl);
                 }
+                else if (blocked)
+                {
+                    await IngestWireIntoRepositoryAsync(chat.Id, wire, connection.Entity.BaseUrl)
+                        .ConfigureAwait(false);
+                }
+                else if (_sessions.TryGetSession(chat.Id, out var session) && session != null)
+                {
+                    await session.IngestIncomingWireFromServerAsync(wire, cancellationToken,
+                            connection.Entity.BaseUrl)
+                        .ConfigureAwait(false);
+                }
                 else
                 {
-                    var blocked = await _chats.IsPeerBlockedAsync(user.Id, peerId, cancellationToken)
+                    await IngestWireIntoRepositoryAsync(chat.Id, wire, connection.Entity.BaseUrl)
                         .ConfigureAwait(false);
-                    if (blocked)
-                    {
-                        await IngestWireIntoRepositoryAsync(chat.Id, wire, connection.Entity.BaseUrl)
-                            .ConfigureAwait(false);
-                    }
-                    else if (_sessions.TryGetSession(chat.Id, out var session) && session != null)
-                    {
-                        await session.IngestIncomingWireFromServerAsync(wire, cancellationToken,
-                                connection.Entity.BaseUrl)
-                            .ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        await IngestWireIntoRepositoryAsync(chat.Id, wire, connection.Entity.BaseUrl)
-                            .ConfigureAwait(false);
-                    }
                 }
             }
             finally

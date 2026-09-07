@@ -5,6 +5,8 @@ namespace ShortP2P.Client.Services;
 /// </summary>
 public sealed class ChatP2PSession
 {
+    public bool IsReadyForServerReceive => true;
+
     public Task IngestIncomingWireFromServerAsync(
         byte[] wire,
         CancellationToken cancellationToken,

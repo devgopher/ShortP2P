@@ -51,6 +51,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
     private readonly Lock _pendingSync = new();
     private readonly UserP2pRuntime _runtime;
     private readonly SemaphoreSlim _sessionSetup = new(1, 1);
+    private readonly SemaphoreSlim _startGate = new(1, 1);
 
     private readonly Lock _sync = new();
     private readonly TcpTransferService _tcpTransfer = new();
@@ -78,7 +79,10 @@ public sealed class ChatP2PSession : IAsyncDisposable
     private List<TransportAddress> _peerEndpoints = [];
     private RsaPublicKey? _peerPublicKey;
     private volatile bool _presenceHooked;
+    private bool _startFinished;
+    private bool _startInProgress;
     private bool _transceiverSubscribed;
+    private ChatHandshakeStatus _handshakeStatus = ChatHandshakeStatus.Idle;
 
     private ChatP2PSession(
         ChatEntity chat,
@@ -336,6 +340,10 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
     public event EventHandler? MessagesChanged;
     public event EventHandler<int>? TransferStateChanged;
+    public event EventHandler? HandshakeStatusChanged;
+
+    /// <summary>Текущий статус handshake для шапки чата.</summary>
+    public ChatHandshakeStatus HandshakeStatus => _handshakeStatus;
 
     private void RaiseMessagesChanged()
     {
@@ -343,6 +351,39 @@ public sealed class ChatP2PSession : IAsyncDisposable
             _uiSynchronizationContext.Post(_ => MessagesChanged?.Invoke(this, EventArgs.Empty), null);
         else
             MessagesChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RaiseHandshakeStatusChanged()
+    {
+        if (_uiSynchronizationContext != null)
+            _uiSynchronizationContext.Post(_ => HandshakeStatusChanged?.Invoke(this, EventArgs.Empty), null);
+        else
+            HandshakeStatusChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void SetHandshakeStatus(ChatHandshakeStatus status)
+    {
+        if (_handshakeStatus == status)
+            return;
+        _handshakeStatus = status;
+        RaiseHandshakeStatusChanged();
+    }
+
+    private void RefreshHandshakeStatus()
+    {
+        if (_cryptoProbeRoundTripOk || (TryGetCryptoSession(out _) && _messenger != null))
+        {
+            SetHandshakeStatus(ChatHandshakeStatus.Established);
+            return;
+        }
+
+        if (_startInProgress || _startFinished || _handshakeWeInitiated)
+        {
+            SetHandshakeStatus(ChatHandshakeStatus.InProgress);
+            return;
+        }
+
+        SetHandshakeStatus(ChatHandshakeStatus.Idle);
     }
 
     private async Task RaiseMessagesChangedIfVisibleAsync()
@@ -456,63 +497,90 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
     public async ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
-        RebuildRouteFromChat();
-        LogSessionRoleContext("P2P session starting");
+        if (_startFinished)
+            return;
 
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        ResetOutboundCts();
-
-        SubscribeToTransceivers();
-
+        await _startGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var servers = _runtime.MessengerServers;
-            if (servers != null)
-                await servers.PublishChatRequestAsync(_chat.PeerNetworkIdShort, cancellationToken)
-                    .ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Chat {ChatId}: server ChatRequest publish failed during session start", _chat.Id);
-        }
+            if (_startFinished)
+                return;
 
-        try
-        {
-            await SendChatInviteWithRetryAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Chat {ChatId}: invite send failed during session start", _chat.Id);
-        }
+            RebuildRouteFromChat();
+            LogSessionRoleContext("P2P session starting");
+            _startInProgress = true;
+            RefreshHandshakeStatus();
 
-        try
-        {
-            await EnsureSessionAsInitiatorAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Chat {ChatId}: session setup failed during session start", _chat.Id);
-        }
+            _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            ResetOutboundCts();
 
-        _ = TryConfirmCryptoSessionAsync(cancellationToken);
+            SubscribeToTransceivers();
 
-        HookPresenceForPendingFlush();
-        LogSessionRoleContext("P2P session start completed");
+            try
+            {
+                var servers = _runtime.MessengerServers;
+                if (servers != null)
+                    await servers.PublishChatRequestAsync(_chat.PeerNetworkIdShort, cancellationToken)
+                        .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Chat {ChatId}: server ChatRequest publish failed during session start", _chat.Id);
+            }
+
+            try
+            {
+                await SendChatInviteWithRetryAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Chat {ChatId}: invite send failed during session start", _chat.Id);
+            }
+
+            try
+            {
+                await EnsureSessionAsInitiatorAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Chat {ChatId}: session setup failed during session start", _chat.Id);
+            }
+
+            _ = TryConfirmCryptoSessionAsync(cancellationToken);
+
+            HookPresenceForPendingFlush();
+            _startFinished = true;
+            _startInProgress = false;
+            RefreshHandshakeStatus();
+            LogSessionRoleContext("P2P session start completed");
+        }
+        finally
+        {
+            _startInProgress = false;
+            RefreshHandshakeStatus();
+            _startGate.Release();
+        }
     }
+
+    /// <summary>Inbox с messenger-сервера принимается только после handshake.</summary>
+    public bool IsReadyForServerReceive => _startFinished;
 
     private void SubscribeToTransceivers()
     {
         if (_transceiverSubscribed)
             return;
         var handshake = _runtime.Handshake;
+        var message = _runtime.Message;
+        var invite = _runtime.Invite;
+        if (handshake == null && message == null && invite == null)
+            return;
+
         if (handshake != null)
             handshake.GotData += OnHandshakeReceived;
 
-        var message = _runtime.Message;
         if (message != null)
             message.GotData += OnCipherReceived;
 
-        var invite = _runtime.Invite;
         if (invite != null)
             invite.GotData += OnInviteReceived;
 
@@ -1176,6 +1244,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
     private async Task DeliverOutgoingWireAsync(int messageId, byte[] wire, CancellationToken cancellationToken)
     {
+        SubscribeToTransceivers();
         using var linkedCts = CreateOutboundLinkedCts(cancellationToken, _outboundCts);
         var deliveryToken = linkedCts?.Token ?? cancellationToken;
         
@@ -1252,21 +1321,8 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
         await _repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Pending).ConfigureAwait(false);
         RaiseMessagesChanged();
-        try
-        {
-            var wire = BuildOutgoingWire(row);
-            await DeliverOutgoingWireAsync(messageId, wire, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            await _repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Failed).ConfigureAwait(false);
-            RaiseMessagesChanged();
-            throw;
-        }
+        var wire = BuildOutgoingWire(row);
+        QueueOutgoingDelivery(messageId, wire, cancellationToken);
     }
 
     public async ValueTask SendTextAsync(string text, CancellationToken cancellationToken = default)
@@ -1281,20 +1337,41 @@ public sealed class ChatP2PSession : IAsyncDisposable
             .ConfigureAwait(false);
         RaiseMessagesChanged();
 
+        var wire = ChatWireCodec.EncodeText(text);
+        QueueOutgoingDelivery(messageId, wire, cancellationToken);
+    }
+
+    private void QueueOutgoingDelivery(int messageId, byte[] wire, CancellationToken cancellationToken)
+    {
+        _ = DeliverOutgoingInBackgroundAsync(messageId, wire, cancellationToken);
+    }
+
+    private async Task DeliverOutgoingInBackgroundAsync(int messageId, byte[] wire, CancellationToken cancellationToken)
+    {
         try
         {
-            var wire = ChatWireCodec.EncodeText(text);
+            await _runtime.EnsureStartedAsync(_user, cancellationToken).ConfigureAwait(false);
             await DeliverOutgoingWireAsync(messageId, wire, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            throw;
+            // Leave Pending so a later retry / presence flush can finish delivery.
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            await _repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Failed).ConfigureAwait(false);
-            RaiseMessagesChanged();
-            throw;
+            _logger.LogWarning(ex, "Chat {ChatId}: background delivery failed for message {MessageId}", _chat.Id,
+                messageId);
+            try
+            {
+                await _repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Failed)
+                    .ConfigureAwait(false);
+                RaiseMessagesChanged();
+            }
+            catch (Exception updateEx)
+            {
+                _logger.LogDebug(updateEx, "Chat {ChatId}: failed to mark message {MessageId} as failed", _chat.Id,
+                    messageId);
+            }
         }
     }
 
@@ -1338,8 +1415,12 @@ public sealed class ChatP2PSession : IAsyncDisposable
         var row = await _repo.GetMessageAsync(messageId).ConfigureAwait(false);
         if (row == null || row.ChatId != _chat.Id || row.Outgoing || string.IsNullOrWhiteSpace(row.TransferId))
             return;
-        // if ((ChatTransferState)row.TransferState is ChatTransferState.Received or ChatTransferState.Transferring)
-        //     return;
+
+        var state = (ChatTransferState)row.TransferState;
+        if (state == ChatTransferState.Received && row.ImageBlob is { Length: > 0 })
+            return;
+        if (state == ChatTransferState.Transferring)
+            return;
 
         await _repo.UpdateTransferStateAsync(messageId, ChatTransferState.Transferring).ConfigureAwait(false);
         TransferStateChanged?.Invoke(this, messageId);
@@ -1347,6 +1428,10 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
         try
         {
+            await _runtime.EnsureStartedAsync(_user, cancellationToken).ConfigureAwait(false);
+            SubscribeToTransceivers();
+            await StartAsync(cancellationToken).ConfigureAwait(false);
+
             if (await TryReceiveBlobFromMessengerServersAsync(row, cancellationToken).ConfigureAwait(false))
                 return;
 
@@ -1496,41 +1581,60 @@ public sealed class ChatP2PSession : IAsyncDisposable
         var innerWire = payloadKind.Equals("image", StringComparison.OrdinalIgnoreCase)
             ? ChatWireCodec.EncodeImage(mimeType, bytes)
             : ChatWireCodec.EncodeFile(fileName, mimeType, bytes);
-        var servers = _runtime.MessengerServers;
-        if (servers != null)
-        {
-            try
-            {
-                await servers.TryUploadBlobAsync(_chat, _user, transferId, innerWire, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch
-            {
-                // TCP remains the fallback when no server accepted the blob.
-            }
-        }
-
         var offer = new ChatWireTransferOffer(transferId, token, payloadKind, fileName, mimeType, bytes.Length, "", 0,
             expires.UtcTicks, transferId);
+        _ = CompleteTransferOfferInBackgroundAsync(messageId, innerWire, offer, cancellationToken);
+    }
+
+    private async Task CompleteTransferOfferInBackgroundAsync(
+        int messageId,
+        byte[] innerWire,
+        ChatWireTransferOffer offer,
+        CancellationToken cancellationToken)
+    {
         try
         {
+            var servers = _runtime.MessengerServers;
+            if (servers != null)
+            {
+                try
+                {
+                    await servers.TryUploadBlobAsync(_chat, _user, offer.TransferId, innerWire, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // TCP remains the fallback when no server accepted the blob.
+                }
+            }
+
             await DeliverOutgoingWireAsync(messageId, ChatWireCodec.EncodeTransferOffer(offer), cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            throw;
+            // Leave Pending so a later retry can finish delivery.
         }
-        catch
+        catch (Exception ex)
         {
-            await _repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Failed).ConfigureAwait(false);
-            await _repo.UpdateTransferStateAsync(messageId, ChatTransferState.Failed).ConfigureAwait(false);
-            RaiseMessagesChanged();
-            throw;
+            _logger.LogWarning(ex, "Chat {ChatId}: background transfer offer failed for message {MessageId}", _chat.Id,
+                messageId);
+            try
+            {
+                await _repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Failed)
+                    .ConfigureAwait(false);
+                await _repo.UpdateTransferStateAsync(messageId, ChatTransferState.Failed).ConfigureAwait(false);
+                RaiseMessagesChanged();
+            }
+            catch (Exception updateEx)
+            {
+                _logger.LogDebug(updateEx, "Chat {ChatId}: failed to mark transfer {MessageId} as failed", _chat.Id,
+                    messageId);
+            }
         }
     }
 
@@ -2313,6 +2417,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
         LogSessionRoleContext("P2P session stopping");
         UnhookPresenceAndClearPending();
         UnsubscribeFromTransceivers();
+        _startFinished = false;
 
         if (_cts != null)
             await _cts.CancelAsync();

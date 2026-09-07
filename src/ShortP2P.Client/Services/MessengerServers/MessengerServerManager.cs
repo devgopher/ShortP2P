@@ -130,6 +130,44 @@ public sealed class MessengerServerManager : IAsyncDisposable
 
     public bool IsServerAvailable(int serverId) => GetRankStats(serverId).IsAvailable;
 
+    /// <summary>
+    /// Статус для шапки: Disabled (серверы выкл.), Waiting, Connected, Disconnected.
+    /// </summary>
+    public async Task<MessengerServerLinkStatus> GetLinkStatusAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var all = await ListAsync(cancellationToken).ConfigureAwait(false);
+        if (all.Count == 0 || !all.Any(s => s.Active))
+            return MessengerServerLinkStatus.Disabled;
+
+        var candidates = all.Where(s => s.Active && s.Trusted).ToList();
+        if (candidates.Count == 0)
+            return MessengerServerLinkStatus.Disconnected;
+
+        var anyConnected = false;
+        var anyPending = false;
+        foreach (var server in candidates)
+        {
+            var stats = GetRankStats(server.Id);
+            if (_connections.TryGetValue(server.Id, out var conn) &&
+                conn.HasValidToken &&
+                stats.IsAvailable)
+            {
+                anyConnected = true;
+                break;
+            }
+
+            if (stats.ConsecutiveFailures == 0)
+                anyPending = true;
+        }
+
+        if (anyConnected)
+            return MessengerServerLinkStatus.Connected;
+        if (anyPending)
+            return MessengerServerLinkStatus.Waiting;
+        return MessengerServerLinkStatus.Disconnected;
+    }
+
     /// <summary>Replaces the known registered-client snapshot for a trusted server (from GetClients).</summary>
     public void ReplaceRegisteredClients(int serverId, IEnumerable<string> networkIds)
     {
