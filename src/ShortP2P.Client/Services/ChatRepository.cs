@@ -157,8 +157,8 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
 
     public async Task<ChatEntity?> GetChatAsync(int chatId)
     {
-        var conn = await _db.GetConnectionAsync();
-        return await conn.FindAsync<ChatEntity>(chatId);
+        var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
+        return await conn.FindAsync<ChatEntity>(chatId).ConfigureAwait(false);
     }
 
     public async Task<ChatEntity> AddChatAsync(int userId, string peerNickname, string peerNetworkIdShort,
@@ -603,21 +603,40 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
             .ToListAsync();
     }
 
-    public async Task<IReadOnlyList<ChatMessageEntity>> ListMessagesPageDescAsync(int chatId, int offset, int limit)
+    public Task<IReadOnlyList<ChatMessageEntity>> ListMessagesPageDescAsync(int chatId, int offset, int limit) =>
+        ListMessagesPageDescAsync(chatId, offset, limit, includePayloadBlob: true);
+
+    /// <param name="includePayloadBlob">
+    ///     False skips <see cref="ChatMessageEntity.ImageBlob"/> so chat lists/history stay off the UI thread.
+    /// </param>
+    public async Task<IReadOnlyList<ChatMessageEntity>> ListMessagesPageDescAsync(
+        int chatId, int offset, int limit, bool includePayloadBlob)
     {
         if (offset < 0)
             throw new ArgumentOutOfRangeException(nameof(offset));
         if (limit <= 0)
             throw new ArgumentOutOfRangeException(nameof(limit));
 
-        var conn = await _db.GetConnectionAsync();
-        return await conn.Table<ChatMessageEntity>()
-            .Where(m => m.ChatId == chatId)
-            .OrderByDescending(m => m.SentUtcTicks)
-            .ThenByDescending(m => m.Id)
-            .Skip(offset)
-            .Take(limit)
-            .ToListAsync();
+        var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
+        if (includePayloadBlob)
+        {
+            return await conn.Table<ChatMessageEntity>()
+                .Where(m => m.ChatId == chatId)
+                .OrderByDescending(m => m.SentUtcTicks)
+                .ThenByDescending(m => m.Id)
+                .Skip(offset)
+                .Take(limit)
+                .ToListAsync()
+                .ConfigureAwait(false);
+        }
+
+        return await conn.QueryAsync<ChatMessageEntity>(
+                "SELECT Id, ChatId, Outgoing, Text, SentUtcTicks, DeliveryStatus, PayloadKind, MimeType, " +
+                "TransferId, TransferToken, TransferPayloadKind, TransferFileName, " +
+                "TransferSizeBytes, TransferHost, TransferPort, TransferExpiresUtcTicks, TransferState " +
+                "FROM messages WHERE ChatId = ? ORDER BY SentUtcTicks DESC, Id DESC LIMIT ? OFFSET ?",
+                chatId, limit, offset)
+            .ConfigureAwait(false);
     }
 
     /// <summary>

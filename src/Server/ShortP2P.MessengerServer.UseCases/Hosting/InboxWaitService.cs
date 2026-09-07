@@ -2,10 +2,10 @@ using System.Collections.Concurrent;
 
 namespace ShortP2P.MessengerServer.UseCases.Hosting;
 
-/// <summary>Single-process inbox wait registry.</summary>
+/// <summary>Single-process inbox wait registry. Multiple polls per device stay registered.</summary>
 public sealed class InboxWaitService : Abstractions.IInboxWaitService
 {
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, TaskCompletionSource>> _waiters =
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, WaitGroup>> _waiters =
         new(StringComparer.Ordinal);
 
     public async Task WaitAsync(
@@ -17,8 +17,10 @@ public sealed class InboxWaitService : Abstractions.IInboxWaitService
         var net = networkId.Trim();
         var dev = deviceId.Trim();
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var byDevice = _waiters.GetOrAdd(net, _ => new ConcurrentDictionary<string, TaskCompletionSource>(StringComparer.Ordinal));
-        byDevice[dev] = tcs;
+        var byDevice = _waiters.GetOrAdd(net, _ => new ConcurrentDictionary<string, WaitGroup>(StringComparer.Ordinal));
+        var group = byDevice.GetOrAdd(dev, _ => new WaitGroup());
+        lock (group.Sync)
+            group.Waiters.Add(tcs);
 
         try
         {
@@ -32,8 +34,8 @@ public sealed class InboxWaitService : Abstractions.IInboxWaitService
         }
         finally
         {
-            if (byDevice.TryGetValue(dev, out var current) && ReferenceEquals(current, tcs))
-                byDevice.TryRemove(dev, out _);
+            lock (group.Sync)
+                group.Waiters.Remove(tcs);
         }
     }
 
@@ -44,6 +46,18 @@ public sealed class InboxWaitService : Abstractions.IInboxWaitService
             return;
 
         foreach (var kv in byDevice)
-            kv.Value.TrySetResult();
+        {
+            List<TaskCompletionSource> snapshot;
+            lock (kv.Value.Sync)
+                snapshot = [.. kv.Value.Waiters];
+            foreach (var tcs in snapshot)
+                tcs.TrySetResult();
+        }
+    }
+
+    private sealed class WaitGroup
+    {
+        public readonly Lock Sync = new();
+        public readonly List<TaskCompletionSource> Waiters = [];
     }
 }

@@ -395,7 +395,18 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
     private void RebuildRouteFromChat()
     {
-        _peerPublicKey = RsaKeySerializer.DeserializePublic(_chat.PeerRsaPublicJson);
+        try
+        {
+            _peerPublicKey = string.IsNullOrWhiteSpace(_chat.PeerRsaPublicJson)
+                ? null
+                : RsaKeySerializer.DeserializePublic(_chat.PeerRsaPublicJson);
+        }
+        catch (Exception ex)
+        {
+            _peerPublicKey = null;
+            _logger.LogWarning(ex, "Chat {ChatId}: peer public key is missing or invalid", _chat.Id);
+        }
+
         _peerEndpoints = PeerTransportEndpoints.Parse(_chat).ToList();
         if (_peerEndpoints.Count == 0)
         {
@@ -404,9 +415,11 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 _peerEndpoints.Add(UdpTransportAddress.FromIPEndPoint(new IPEndPoint(ip, _chat.PeerPort)));
             else if (BluetoothTransportAddress.TryParseMac(primary, out var mac))
                 _peerEndpoints.Add(BluetoothTransportAddress.FromMac(mac));
-            else if (!CompressedNetworkId.TryParseShortString(primary, out _))
-                throw new FormatException(
-                    $"Unsupported peer host format: '{primary}'. Expected IPv4/IPv6, network id, or Bluetooth MAC.");
+            else if (!string.IsNullOrWhiteSpace(primary) &&
+                     !CompressedNetworkId.TryParseShortString(primary, out _))
+                _logger.LogWarning(
+                    "Chat {ChatId}: unsupported peer host format '{PeerHost}' — leaving endpoints empty",
+                    _chat.Id, primary);
         }
 
         _peerAddress = _peerEndpoints.Count > 0 ? _peerEndpoints[0] : null;
@@ -952,16 +965,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
             _logger.LogInformation(
                 "Chat {ChatId}: post-invite session negotiation as leader (crypto peer role={PeerRole}, BLE role={BleRole})",
                 _chat.Id, PeerSessionRoleLabel(), BleSessionRoleLabel() ?? "n/a");
-            await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                await EnsureLeaderCryptoSessionCoreAsync(cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                _sessionSetup.Release();
-            }
-
+            await EnsureLeaderCryptoSessionCoreAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -1139,10 +1143,11 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
     private void StartFlushPendingInBackground()
     {
-        var cts = _cts;
-        if (cts == null || cts.IsCancellationRequested)
+        if (_cts is { IsCancellationRequested: true })
             return;
-        var token = cts.Token;
+
+        // Session StartAsync may not have set _cts yet; still flush using None / linked outbound CTS.
+        var token = _cts?.Token ?? CancellationToken.None;
         _ = Task.Run(async () =>
         {
             try
@@ -1153,21 +1158,20 @@ public sealed class ChatP2PSession : IAsyncDisposable
             {
                 // shutdown
             }
-            catch
+            catch (Exception ex)
             {
-                // сеть / таймауты
+                _logger.LogDebug(ex, "Chat {ChatId}: outbound flush worker stopped", _chat.Id);
             }
-        }, token);
+        }, CancellationToken.None);
     }
 
     private async Task TryFlushPendingOutgoingAsync(CancellationToken cancellationToken)
     {
-        if (_runtime.Message == null)
-            return;
-
         await _flushPendingSem.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            await _runtime.EnsureStartedAsync(_user, cancellationToken).ConfigureAwait(false);
+
             while (!cancellationToken.IsCancellationRequested)
             {
                 int nextId;
@@ -1181,12 +1185,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 var row = await _repo.GetMessageAsync(nextId).ConfigureAwait(false);
                 if (row == null || row.ChatId != _chat.Id || !row.Outgoing)
                 {
-                    lock (_pendingSync)
-                    {
-                        if (_pendingOutgoing.Count > 0 && _pendingOutgoing[0] == nextId)
-                            _pendingOutgoing.RemoveAt(0);
-                    }
-
+                    DequeuePendingOutgoingHead(nextId);
                     continue;
                 }
 
@@ -1197,23 +1196,52 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 }
                 catch (OperationCanceledException)
                 {
+                    // Keep Pending at head for a later retry / presence flush.
                     throw;
                 }
-                catch
+                catch (Exception ex) when (IsDeferrableSendFailure(ex) && CanQueueUntilPeerSeenOnLan())
                 {
+                    _logger.LogDebug(ex,
+                        "Chat {ChatId}: deferring outbound message {MessageId} until peer is seen on LAN",
+                        _chat.Id, nextId);
+                    HookPresenceForPendingFlush();
                     return;
                 }
-
-                lock (_pendingSync)
+                catch (Exception ex)
                 {
-                    if (_pendingOutgoing.Count > 0 && _pendingOutgoing[0] == nextId)
-                        _pendingOutgoing.RemoveAt(0);
+                    _logger.LogWarning(ex, "Chat {ChatId}: outbound delivery failed for message {MessageId}",
+                        _chat.Id, nextId);
+                    try
+                    {
+                        await _repo.UpdateMessageDeliveryStatusAsync(nextId, MessageDeliveryStatus.Failed)
+                            .ConfigureAwait(false);
+                        RaiseMessagesChanged();
+                    }
+                    catch (Exception updateEx)
+                    {
+                        _logger.LogDebug(updateEx,
+                            "Chat {ChatId}: failed to mark message {MessageId} as failed", _chat.Id, nextId);
+                    }
+
+                    DequeuePendingOutgoingHead(nextId);
+                    continue;
                 }
+
+                DequeuePendingOutgoingHead(nextId);
             }
         }
         finally
         {
             _flushPendingSem.Release();
+        }
+    }
+
+    private void DequeuePendingOutgoingHead(int messageId)
+    {
+        lock (_pendingSync)
+        {
+            if (_pendingOutgoing.Count > 0 && _pendingOutgoing[0] == messageId)
+                _pendingOutgoing.RemoveAt(0);
         }
     }
 
@@ -1341,38 +1369,23 @@ public sealed class ChatP2PSession : IAsyncDisposable
         QueueOutgoingDelivery(messageId, wire, cancellationToken);
     }
 
+    /// <summary>
+    ///     Enqueue for the single per-chat outbound worker. Receive stays independent;
+    ///     parallel fire-and-forget delivers were starving BT/UDP inbound and racing session setup.
+    /// </summary>
     private void QueueOutgoingDelivery(int messageId, byte[] wire, CancellationToken cancellationToken)
     {
-        _ = DeliverOutgoingInBackgroundAsync(messageId, wire, cancellationToken);
-    }
+        // Wire is rebuilt from DB in the flush worker so retries stay consistent with stored payload.
+        _ = wire;
+        _ = cancellationToken;
+        lock (_pendingSync)
+        {
+            if (!_pendingOutgoing.Contains(messageId))
+                _pendingOutgoing.Add(messageId);
+        }
 
-    private async Task DeliverOutgoingInBackgroundAsync(int messageId, byte[] wire, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await _runtime.EnsureStartedAsync(_user, cancellationToken).ConfigureAwait(false);
-            await DeliverOutgoingWireAsync(messageId, wire, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Leave Pending so a later retry / presence flush can finish delivery.
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Chat {ChatId}: background delivery failed for message {MessageId}", _chat.Id,
-                messageId);
-            try
-            {
-                await _repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Failed)
-                    .ConfigureAwait(false);
-                RaiseMessagesChanged();
-            }
-            catch (Exception updateEx)
-            {
-                _logger.LogDebug(updateEx, "Chat {ChatId}: failed to mark message {MessageId} as failed", _chat.Id,
-                    messageId);
-            }
-        }
+        HookPresenceForPendingFlush();
+        StartFlushPendingInBackground();
     }
 
     public async ValueTask SendImageAsync(ReadOnlyMemory<byte> imageBytes, string mimeType,
@@ -1612,8 +1625,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 }
             }
 
-            await DeliverOutgoingWireAsync(messageId, ChatWireCodec.EncodeTransferOffer(offer), cancellationToken)
-                .ConfigureAwait(false);
+            QueueOutgoingDelivery(messageId, ChatWireCodec.EncodeTransferOffer(offer), cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -1941,16 +1953,8 @@ public sealed class ChatP2PSession : IAsyncDisposable
         _logger.LogInformation(
             "Chat {ChatId}: accepted session setup request from {Remote}, sending RSA handshake",
             _chat.Id, FormatTransportAddress(remoteAddress));
-        await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await EnsureLeaderCryptoSessionCoreAsync(cancellationToken, true)
-                .ConfigureAwait(false);
-        }
-        finally
-        {
-            _sessionSetup.Release();
-        }
+        await EnsureLeaderCryptoSessionCoreAsync(cancellationToken, true)
+            .ConfigureAwait(false);
     }
 
     private List<TransportAddress> BuildOrderedDirectPeerAddresses()
@@ -2187,57 +2191,83 @@ public sealed class ChatP2PSession : IAsyncDisposable
         await SendRouteRawAsync(buf, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Вызывается только под захватом <see cref="_sessionSetup" /> (лидер).</summary>
+    /// <summary>
+    ///     Leader crypto setup: holds <see cref="_sessionSetup" /> only for local state mutation.
+    ///     Handshake bytes are sent after release so inbound 0x01/0x04/cipher are not starved.
+    /// </summary>
     /// <param name="forceSendHandshake">Ответ на 0x04 от follower — всегда шлём 0x01, даже если сессия в кэше.</param>
     private async Task EnsureLeaderCryptoSessionCoreAsync(CancellationToken cancellationToken,
         bool forceSendHandshake = false)
     {
-        if (!forceSendHandshake)
+        byte[]? packetToSend = null;
+        MessengerService? msToStart = null;
+
+        await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!forceSendHandshake)
+                lock (_sync)
+                {
+                    if (TryGetCryptoSession(out _) && _messenger != null)
+                    {
+                        _logger.LogDebug("Chat {ChatId}: leader crypto session already active, skip handshake",
+                            _chat.Id);
+                        return;
+                    }
+                }
+
+            if (_peerPublicKey == null)
+            {
+                _logger.LogWarning("Chat {ChatId}: cannot send leader handshake — peer public key missing",
+                    _chat.Id);
+                return;
+            }
+
+            _logger.LogInformation(
+                "Chat {ChatId}: leader sending RSA handshake (0x01), crypto role={Role}, BLE role={BleRole}, force={ForceSendHandshake}",
+                _chat.Id, SessionRoleLabel(), BleSessionRoleLabel() ?? "n/a", forceSendHandshake);
+            var hs = P2PCrypto.CreateHandshakeInitiation(_peerPublicKey);
+            var packet = new byte[129];
+            packet[0] = FrameHandshake;
+            Buffer.BlockCopy(hs.HandshakePacket, 0, packet, 1, hs.HandshakePacket.Length);
+
             lock (_sync)
             {
-                if (TryGetCryptoSession(out _) && _messenger != null)
-                {
-                    _logger.LogDebug("Chat {ChatId}: leader crypto session already active, skip handshake", _chat.Id);
+                if (!forceSendHandshake && TryGetCryptoSession(out _) && _messenger != null)
                     return;
+
+                if (forceSendHandshake)
+                    ClearCryptoSession();
+
+                _ = _cryptoSessionCache.GetSession(_chat.Id, () => hs.Session);
+                _logger.LogInformation("Chat {ChatId}: leader crypto session created in cache (role={Role})",
+                    _chat.Id,
+                    SessionRoleLabel());
+                if (_messenger == null)
+                {
+                    _messenger =
+                        new MessengerService(SendCipherAsync, WaitForCryptoSessionAsync, CreateMessengerOptions(),
+                            OnDecryptFailureAsync);
+                    _messenger.GotData += OnMessengerGotData;
+                    msToStart = _messenger;
                 }
+
+                _handshakeWeInitiated = true;
             }
 
-        _logger.LogInformation(
-            "Chat {ChatId}: leader sending RSA handshake (0x01), crypto role={Role}, BLE role={BleRole}, force={ForceSendHandshake}",
-            _chat.Id, SessionRoleLabel(), BleSessionRoleLabel() ?? "n/a", forceSendHandshake);
-        var hs = P2PCrypto.CreateHandshakeInitiation(_peerPublicKey!);
-        var packet = new byte[129];
-        packet[0] = FrameHandshake;
-        Buffer.BlockCopy(hs.HandshakePacket, 0, packet, 1, hs.HandshakePacket.Length);
-        await SendRouteRawAsync(packet, cancellationToken).ConfigureAwait(false);
-
-        MessengerService? ms = null;
-        lock (_sync)
+            packetToSend = packet;
+        }
+        finally
         {
-            if (!forceSendHandshake && TryGetCryptoSession(out _) && _messenger != null)
-                return;
-
-            if (forceSendHandshake)
-                ClearCryptoSession();
-
-            _ = _cryptoSessionCache.GetSession(_chat.Id, () => hs.Session);
-            _logger.LogInformation("Chat {ChatId}: leader crypto session created in cache (role={Role})", _chat.Id,
-                SessionRoleLabel());
-            if (_messenger == null)
-            {
-                _messenger =
-                    new MessengerService(SendCipherAsync, WaitForCryptoSessionAsync, CreateMessengerOptions(),
-                        OnDecryptFailureAsync);
-                _messenger.GotData += OnMessengerGotData;
-                ms = _messenger;
-            }
-
-            _handshakeWeInitiated = true;
+            _sessionSetup.Release();
         }
 
-        if (ms != null)
+        if (packetToSend != null)
+            await SendRouteRawAsync(packetToSend, cancellationToken).ConfigureAwait(false);
+
+        if (msToStart != null)
         {
-            await ms.StartAsync(cancellationToken).ConfigureAwait(false);
+            await msToStart.StartAsync(cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Chat {ChatId}: messenger started (crypto role={Role}, BLE role={BleRole})",
                 _chat.Id, SessionRoleLabel(), BleSessionRoleLabel() ?? "n/a");
         }
@@ -2251,16 +2281,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
         if (IsCryptoSessionLeader())
         {
             _logger.LogDebug("Chat {ChatId}: leader session setup begin", _chat.Id);
-            await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                await EnsureLeaderCryptoSessionCoreAsync(cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                _sessionSetup.Release();
-            }
-
+            await EnsureLeaderCryptoSessionCoreAsync(cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Chat {ChatId}: leader session setup completed (role={Role})", _chat.Id,
                 SessionRoleLabel());
         }
@@ -2366,6 +2387,8 @@ public sealed class ChatP2PSession : IAsyncDisposable
         _logger.LogInformation(
             "Chat {ChatId}: processing RSA handshake packet (crypto role={Role}, BLE role={BleRole})",
             _chat.Id, SessionRoleLabel(), BleSessionRoleLabel() ?? "n/a");
+
+        MessengerService? created = null;
         await _sessionSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -2375,7 +2398,6 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 return;
             }
 
-            MessengerService? created = null;
             lock (_sync)
             {
                 ClearCryptoSession();
@@ -2397,18 +2419,18 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 }
             }
 
-            if (created != null)
-            {
-                await created.StartAsync(cancellationToken).ConfigureAwait(false);
-                _logger.LogInformation("Chat {ChatId}: messenger started (crypto role={Role}, BLE role={BleRole})",
-                _chat.Id, SessionRoleLabel(), BleSessionRoleLabel() ?? "n/a");
-            }
-
             SignalFollowerHandshakeSuccess();
         }
         finally
         {
             _sessionSetup.Release();
+        }
+
+        if (created != null)
+        {
+            await created.StartAsync(cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Chat {ChatId}: messenger started (crypto role={Role}, BLE role={BleRole})",
+                _chat.Id, SessionRoleLabel(), BleSessionRoleLabel() ?? "n/a");
         }
     }
 

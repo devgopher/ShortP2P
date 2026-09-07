@@ -905,7 +905,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         foreach (var message in messages)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!string.Equals(message.TgtNetworkId.Trim(), user.NetworkIdShort.Trim(), StringComparison.Ordinal))
+            if (!ChatRepository.PeerNetworkIdsEqual(message.TgtNetworkId, user.NetworkIdShort))
                 continue;
 
             byte[] wire;
@@ -936,16 +936,6 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
                 var blocked = await _chats.IsPeerBlockedAsync(user.Id, peerId, cancellationToken)
                     .ConfigureAwait(false);
-                if (!blocked &&
-                    _sessions.TryGetSession(chat.Id, out var pendingSession) &&
-                    pendingSession != null &&
-                    !pendingSession.IsReadyForServerReceive)
-                {
-                    _logger.LogDebug(
-                        "Deferring server message {MessageId} for chat {ChatId} until handshake",
-                        message.MessageId, chat.Id);
-                    continue;
-                }
 
                 var isNew = await _chats.TryClaimServerMessageAsync(message.MessageId).ConfigureAwait(false);
                 if (!isNew)
@@ -955,20 +945,10 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                         message.MessageId,
                         connection.Entity.BaseUrl);
                 }
-                else if (blocked)
-                {
-                    await IngestWireIntoRepositoryAsync(chat.Id, wire, connection.Entity.BaseUrl)
-                        .ConfigureAwait(false);
-                }
-                else if (_sessions.TryGetSession(chat.Id, out var session) && session != null)
-                {
-                    await session.IngestIncomingWireFromServerAsync(wire, cancellationToken,
-                            connection.Entity.BaseUrl)
-                        .ConfigureAwait(false);
-                }
                 else
                 {
-                    await IngestWireIntoRepositoryAsync(chat.Id, wire, connection.Entity.BaseUrl)
+                    await PersistIncomingServerWireAsync(
+                            chat, wire, blocked, connection.Entity.BaseUrl, cancellationToken)
                         .ConfigureAwait(false);
                 }
             }
@@ -993,6 +973,38 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                 _logger.LogDebug(ex, "Delivery receipt failed for {MessageId}", message.MessageId);
             }
         }
+    }
+
+    /// <summary>
+    /// Persist a server wire without waiting for P2P handshake. Session ingest is used only
+    /// when the session is already ready; otherwise (or on failure) write straight to SQLite
+    /// so the UI event fires immediately.
+    /// </summary>
+    private async Task PersistIncomingServerWireAsync(
+        ChatEntity chat,
+        byte[] wire,
+        bool blocked,
+        string? blobServerBaseUrl,
+        CancellationToken cancellationToken)
+    {
+        if (!blocked &&
+            _sessions.TryGetSession(chat.Id, out var session) &&
+            session != null &&
+            session.IsReadyForServerReceive)
+        {
+            try
+            {
+                await session.IngestIncomingWireFromServerAsync(wire, cancellationToken, blobServerBaseUrl)
+                    .ConfigureAwait(false);
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Session ingest failed for chat {ChatId}, using repository", chat.Id);
+            }
+        }
+
+        await IngestWireIntoRepositoryAsync(chat.Id, wire, blobServerBaseUrl).ConfigureAwait(false);
     }
 
     private async Task TrackAsync(MessengerServerConnection connection, Func<Task> action)
