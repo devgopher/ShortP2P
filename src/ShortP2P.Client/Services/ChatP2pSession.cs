@@ -1007,6 +1007,10 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
     private static bool IsDeferrableSendFailure(Exception ex)
     {
+        if (ex is InvalidOperationException ioe &&
+            ioe.Message.Contains("P2P crypto session is not ready", StringComparison.Ordinal))
+            return true;
+
         return ex switch
         {
             IOException => true,
@@ -1143,11 +1147,13 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
     private void StartFlushPendingInBackground()
     {
-        if (_cts is { IsCancellationRequested: true })
+        // Allow flush before StartAsync sets _cts (token = None). Only skip when the session
+        // CTS exists and was cancelled (StopAsync / dispose) — otherwise outbound stays stuck.
+        var cts = _cts;
+        if (cts is { IsCancellationRequested: true })
             return;
 
-        // Session StartAsync may not have set _cts yet; still flush using None / linked outbound CTS.
-        var token = _cts?.Token ?? CancellationToken.None;
+        var token = cts?.Token ?? CancellationToken.None;
         _ = Task.Run(async () =>
         {
             try
@@ -1182,7 +1188,7 @@ public sealed class ChatP2PSession : IAsyncDisposable
                     nextId = _pendingOutgoing[0];
                 }
 
-                var row = await _repo.GetMessageAsync(nextId).ConfigureAwait(false);
+                var row = await _repo.GetMessageAsync(nextId, includePayloadBlob: false).ConfigureAwait(false);
                 if (row == null || row.ChatId != _chat.Id || !row.Outgoing)
                 {
                     DequeuePendingOutgoingHead(nextId);
@@ -1191,6 +1197,16 @@ public sealed class ChatP2PSession : IAsyncDisposable
 
                 try
                 {
+                    if (OutgoingWireNeedsPayloadBlob(row))
+                    {
+                        row = await _repo.GetMessageAsync(nextId, includePayloadBlob: true).ConfigureAwait(false);
+                        if (row == null || row.ChatId != _chat.Id || !row.Outgoing)
+                        {
+                            DequeuePendingOutgoingHead(nextId);
+                            continue;
+                        }
+                    }
+
                     var wire = BuildOutgoingWire(row);
                     await DeliverOutgoingWireAsync(nextId, wire, cancellationToken).ConfigureAwait(false);
                 }
@@ -1245,6 +1261,9 @@ public sealed class ChatP2PSession : IAsyncDisposable
         }
     }
 
+    private static bool OutgoingWireNeedsPayloadBlob(ChatMessageEntity row) =>
+        row.PayloadKind is (int)ChatPayloadKind.File or (int)ChatPayloadKind.Image;
+
     private static byte[] BuildOutgoingWire(ChatMessageEntity row)
     {
         return row.PayloadKind switch
@@ -1288,14 +1307,19 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 if (_handshakeWeInitiated && !_cryptoProbeRoundTripOk)
                     _ = TryConfirmCryptoSessionAsync(ct);
 
+                // Do not enter WaitForCryptoSessionAsync (infinite poll) when handshake is incomplete —
+                // that used to freeze the whole outbound flush after a server receive/send race.
+                if (_messenger == null || !TryGetCryptoSession(out _))
+                    throw new InvalidOperationException("P2P crypto session is not ready for outbound delivery.");
+
                 if (string.IsNullOrEmpty(_chat.RelayRouteBlob))
                 {
                     var dests = BuildOrderedDirectPeerAddresses();
-                    await _messenger!.SendBinaryAsyncExpectAck(wire, dests, ct).ConfigureAwait(false);
+                    await _messenger.SendBinaryAsyncExpectAck(wire, dests, ct).ConfigureAwait(false);
                 }
                 else
                 {
-                    await _messenger!.SendBinaryAsync(wire, _peerAddress!, ct).ConfigureAwait(false);
+                    await _messenger.SendBinaryAsync(wire, _peerAddress!, ct).ConfigureAwait(false);
                 }
             },
             null,
@@ -1325,14 +1349,17 @@ public sealed class ChatP2PSession : IAsyncDisposable
                 if (_handshakeWeInitiated && !_cryptoProbeRoundTripOk)
                     _ = TryConfirmCryptoSessionAsync(ct);
 
+                if (_messenger == null || !TryGetCryptoSession(out _))
+                    throw new InvalidOperationException("P2P crypto session is not ready for outbound delivery.");
+
                 if (string.IsNullOrEmpty(_chat.RelayRouteBlob))
                 {
                     var dests = BuildOrderedDirectPeerAddresses();
-                    await _messenger!.SendBinaryAsyncExpectAck(wire, dests, ct).ConfigureAwait(false);
+                    await _messenger.SendBinaryAsyncExpectAck(wire, dests, ct).ConfigureAwait(false);
                 }
                 else
                 {
-                    await _messenger!.SendBinaryAsync(wire, _peerAddress!, ct).ConfigureAwait(false);
+                    await _messenger.SendBinaryAsync(wire, _peerAddress!, ct).ConfigureAwait(false);
                 }
             },
             null,
@@ -1580,14 +1607,12 @@ public sealed class ChatP2PSession : IAsyncDisposable
         var messageId = await _repo
             .AddFileMessageAsync(_chat.Id, true, fileName, mimeType, bytes, MessageDeliveryStatus.Pending)
             .ConfigureAwait(false);
-        await _repo.UpdateMessagePayloadAsync(messageId, ChatPayloadKind.TransferOffer, fileName, mimeType, bytes)
-            .ConfigureAwait(false);
         var transferId = Guid.NewGuid().ToString("N");
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
         var expires = DateTimeOffset.UtcNow.AddMinutes(2);
-        await _repo.UpdateMessageTransferMetadataAsync(messageId, transferId, token, payloadKind, fileName, bytes.Length,
-                "",
-                0, expires.UtcTicks, ChatTransferState.Offered)
+        // One column UPDATE — do not Find+Update (would rewrite ImageBlob and freeze SQLite).
+        await _repo.PromoteFileToTransferOfferAsync(
+                messageId, transferId, token, payloadKind, fileName, mimeType, bytes.Length, expires.UtcTicks)
             .ConfigureAwait(false);
         RaiseMessagesChanged();
 
@@ -1612,8 +1637,18 @@ public sealed class ChatP2PSession : IAsyncDisposable
             {
                 try
                 {
-                    await servers.TryUploadBlobAsync(_chat, _user, offer.TransferId, innerWire, cancellationToken)
+                    using var uploadCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    // Cap blob PUT so a hung upload cannot leave the chat Pending forever /
+                    // starve the command HttpClient.
+                    uploadCts.CancelAfter(TimeSpan.FromMinutes(2));
+                    await servers.TryUploadBlobAsync(_chat, _user, offer.TransferId, innerWire, uploadCts.Token)
                         .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogWarning(
+                        "Chat {ChatId}: blob upload timed out for message {MessageId}; sending offer anyway",
+                        _chat.Id, messageId);
                 }
                 catch (OperationCanceledException)
                 {
@@ -1669,14 +1704,19 @@ public sealed class ChatP2PSession : IAsyncDisposable
     {
         if (!string.Equals(control.Command, "tcp-ack", StringComparison.OrdinalIgnoreCase))
             return;
-        var rows = await _repo.ListMessagesAsync(_chat.Id).ConfigureAwait(false);
-        var row = rows.LastOrDefault(m => m.Outgoing && m.TransferId == control.TransferId);
-        if (row?.ImageBlob is not { Length: > 0 })
+        // Do NOT ListMessagesAsync (loads every ImageBlob). Resolve by TransferId only.
+        var meta = await _repo.FindOutgoingTransferByIdAsync(_chat.Id, control.TransferId).ConfigureAwait(false);
+        if (meta == null)
             return;
-        if (!string.Equals(row.TransferToken, control.TransferToken, StringComparison.Ordinal))
+        if (!string.Equals(meta.TransferToken, control.TransferToken, StringComparison.Ordinal))
             return;
         if (string.IsNullOrWhiteSpace(control.Host) || control.Port is < 1 or > 65535)
             return;
+
+        var row = await _repo.GetMessageAsync(meta.Id, includePayloadBlob: true).ConfigureAwait(false);
+        if (row?.ImageBlob is not { Length: > 0 })
+            return;
+
         await _repo.UpdateTransferStateAsync(row.Id, ChatTransferState.Transferring).ConfigureAwait(false);
         TransferStateChanged?.Invoke(this, row.Id);
         try

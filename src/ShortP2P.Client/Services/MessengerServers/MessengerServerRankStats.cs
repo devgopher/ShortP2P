@@ -13,8 +13,14 @@ public sealed class MessengerServerRankStats
 
     public DateTime? LastFailureUtc { get; set; }
 
-    /// <summary>True when the last tracked request succeeded (or no failures yet).</summary>
-    public bool IsAvailable => ConsecutiveFailures == 0;
+    /// <summary>
+    /// Soft threshold so one transient HTTP blip (or a cancelled overlapping poll) does not
+    /// drop the server from <c>FilterAvailable</c> / header Connected state.
+    /// </summary>
+    public const int UnavailableAfterFailures = 3;
+
+    /// <summary>True until several consecutive tracked requests fail.</summary>
+    public bool IsAvailable => ConsecutiveFailures < UnavailableAfterFailures;
 }
 
 /// <summary>

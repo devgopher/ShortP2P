@@ -3,209 +3,221 @@ using SQLite;
 
 namespace ShortP2P.Client.Data;
 
-public sealed class AppDatabase(string databasePath)
+/// <summary>
+/// Local SQLite store with WAL and a small read-connection pool.
+/// One shared <see cref="SQLiteAsyncConnection"/> serializes everything on its internal lock;
+/// separate reader connections allow SELECTs to proceed while a writer inserts blobs.
+/// </summary>
+public sealed class AppDatabase
 {
-    private readonly string _databasePath = databasePath ?? throw new global::System.ArgumentNullException(nameof(databasePath));
-    private SQLiteAsyncConnection? _connection;
+    public const int DefaultReadPoolSize = 4;
 
-    public async Task<SQLiteAsyncConnection> GetConnectionAsync()
+    private readonly string _databasePath;
+    private readonly int _readPoolSize;
+    private readonly SemaphoreSlim _initGate = new(1, 1);
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
+
+    private SQLiteAsyncConnection? _write;
+    private SQLiteAsyncConnection[]? _readers;
+    private int _readerCursor;
+    private bool _initialized;
+
+    public AppDatabase(string databasePath, int readPoolSize = DefaultReadPoolSize)
     {
-        if (_connection != null)
-            return _connection;
+        _databasePath = databasePath ?? throw new ArgumentNullException(nameof(databasePath));
+        _readPoolSize = Math.Clamp(readPoolSize, 1, 16);
+    }
 
-        var dir = Path.GetDirectoryName(_databasePath);
-        if (!string.IsNullOrEmpty(dir))
-            Directory.CreateDirectory(dir);
+    /// <summary>Write connection (Insert/Update/Delete). Prefer <see cref="WriteAsync{T}"/> for exclusive writers.</summary>
+    public async Task<SQLiteAsyncConnection> GetConnectionAsync() =>
+        await GetWriteConnectionAsync().ConfigureAwait(false);
 
-        _connection = new SQLiteAsyncConnection(_databasePath,
-            SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.SharedCache);
-        await _connection.CreateTableAsync<UserEntity>();
-        await _connection.CreateTableAsync<ChatEntity>();
-        await _connection.CreateTableAsync<ChatMessageEntity>();
-        await _connection.CreateTableAsync<SeenServerMessageEntity>();
-        await _connection.CreateTableAsync<BleDiscoveredPeerEntity>();
-        await _connection.CreateTableAsync<MessengerServerEntity>();
-        await _connection.CreateTableAsync<PeerBlacklistEntity>();
+    public async Task<SQLiteAsyncConnection> GetWriteConnectionAsync()
+    {
+        await EnsureInitializedAsync().ConfigureAwait(false);
+        return _write!;
+    }
+
+    /// <summary>
+    /// Round-robin reader connection. Safe for concurrent SELECT under WAL while another thread writes.
+    /// </summary>
+    public async Task<SQLiteAsyncConnection> GetReadConnectionAsync()
+    {
+        await EnsureInitializedAsync().ConfigureAwait(false);
+        var readers = _readers!;
+        var i = (Interlocked.Increment(ref _readerCursor) & 0x7FFFFFFF) % readers.Length;
+        return readers[i];
+    }
+
+    /// <summary>Serialize writers so large blob inserts do not stampede SQLITE_BUSY.</summary>
+    public async Task<T> WriteAsync<T>(Func<SQLiteAsyncConnection, Task<T>> work)
+    {
+        Require.NotNull(work);
+        var conn = await GetWriteConnectionAsync().ConfigureAwait(false);
+        await _writeGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await _connection.ExecuteAsync(
-                "ALTER TABLE messenger_servers ADD COLUMN TrustRating REAL NOT NULL DEFAULT 0.8");
+            return await work(conn).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
+
+    public Task WriteAsync(Func<SQLiteAsyncConnection, Task> work) =>
+        WriteAsync(async c =>
+        {
+            await work(c).ConfigureAwait(false);
+            return true;
+        });
+
+    public async Task<T> ReadAsync<T>(Func<SQLiteAsyncConnection, Task<T>> work)
+    {
+        Require.NotNull(work);
+        var conn = await GetReadConnectionAsync().ConfigureAwait(false);
+        return await work(conn).ConfigureAwait(false);
+    }
+
+    private async Task EnsureInitializedAsync()
+    {
+        if (_initialized)
+            return;
+
+        await _initGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_initialized)
+                return;
+
+            var dir = Path.GetDirectoryName(_databasePath);
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+
+            _write = CreateConnection();
+            await ConfigureConnectionAsync(_write, setJournalMode: true).ConfigureAwait(false);
+            await EnsureSchemaAsync(_write).ConfigureAwait(false);
+
+            _readers = new SQLiteAsyncConnection[_readPoolSize];
+            for (var i = 0; i < _readPoolSize; i++)
+            {
+                _readers[i] = CreateConnection();
+                // journal_mode is persistent on the file; readers only need busy_timeout.
+                await ConfigureConnectionAsync(_readers[i], setJournalMode: false).ConfigureAwait(false);
+            }
+
+            _initialized = true;
+        }
+        finally
+        {
+            _initGate.Release();
+        }
+    }
+
+    private SQLiteAsyncConnection CreateConnection() =>
+        new(_databasePath, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create | SQLiteOpenFlags.FullMutex);
+
+    private static async Task ConfigureConnectionAsync(SQLiteAsyncConnection connection, bool setJournalMode)
+    {
+        try
+        {
+            await connection.ExecuteAsync("PRAGMA busy_timeout = 15000").ConfigureAwait(false);
+            if (setJournalMode)
+            {
+                var mode = await connection.ExecuteScalarAsync<string>("PRAGMA journal_mode = WAL")
+                    .ConfigureAwait(false);
+                if (!string.Equals(mode, "wal", StringComparison.OrdinalIgnoreCase))
+                {
+                    mode = await connection.ExecuteScalarAsync<string>("PRAGMA journal_mode = WAL")
+                        .ConfigureAwait(false);
+                }
+
+                if (string.Equals(mode, "wal", StringComparison.OrdinalIgnoreCase))
+                    await connection.ExecuteAsync("PRAGMA synchronous = NORMAL").ConfigureAwait(false);
+            }
+            else
+            {
+                // Ensure we see WAL commits from the writer promptly.
+                await connection.ExecuteAsync("PRAGMA read_uncommitted = 0").ConfigureAwait(false);
+            }
         }
         catch
         {
-            // column already exists
+            // Prefer opening the DB over failing boot if a pragma is unsupported.
         }
+    }
 
+    private static async Task EnsureSchemaAsync(SQLiteAsyncConnection connection)
+    {
+        await connection.CreateTableAsync<UserEntity>().ConfigureAwait(false);
+        await connection.CreateTableAsync<ChatEntity>().ConfigureAwait(false);
+        await connection.CreateTableAsync<ChatMessageEntity>().ConfigureAwait(false);
+        await connection.CreateTableAsync<SeenServerMessageEntity>().ConfigureAwait(false);
+        await connection.CreateTableAsync<BleDiscoveredPeerEntity>().ConfigureAwait(false);
+        await connection.CreateTableAsync<MessengerServerEntity>().ConfigureAwait(false);
+        await connection.CreateTableAsync<PeerBlacklistEntity>().ConfigureAwait(false);
+
+        await TryAlterAsync(connection,
+            "ALTER TABLE messenger_servers ADD COLUMN TrustRating REAL NOT NULL DEFAULT 0.8").ConfigureAwait(false);
+        await TryAlterAsync(connection, "ALTER TABLE chats ADD COLUMN RelayRouteBlob TEXT NULL")
+            .ConfigureAwait(false);
+        await TryAlterAsync(connection, "ALTER TABLE chats ADD COLUMN PeerEndpointsJson TEXT NULL")
+            .ConfigureAwait(false);
+        await TryAlterAsync(connection, "ALTER TABLE chats ADD COLUMN PeerKeySourceKind TEXT NULL")
+            .ConfigureAwait(false);
+        await TryAlterAsync(connection, "ALTER TABLE chats ADD COLUMN PeerKeySourceDetail TEXT NULL")
+            .ConfigureAwait(false);
+        await TryAlterAsync(connection,
+            "ALTER TABLE messages ADD COLUMN DeliveryStatus INTEGER NOT NULL DEFAULT 2").ConfigureAwait(false);
         try
         {
-            await _connection.ExecuteAsync("ALTER TABLE chats ADD COLUMN RelayRouteBlob TEXT NULL");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync("ALTER TABLE chats ADD COLUMN PeerEndpointsJson TEXT NULL");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync("ALTER TABLE chats ADD COLUMN PeerKeySourceKind TEXT NULL");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync("ALTER TABLE chats ADD COLUMN PeerKeySourceDetail TEXT NULL");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync(
-                "ALTER TABLE messages ADD COLUMN DeliveryStatus INTEGER NOT NULL DEFAULT 2");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync("UPDATE messages SET DeliveryStatus = 0 WHERE Outgoing = 0");
+            await connection.ExecuteAsync("UPDATE messages SET DeliveryStatus = 0 WHERE Outgoing = 0")
+                .ConfigureAwait(false);
         }
         catch
         {
             // ignore
         }
 
+        await TryAlterAsync(connection,
+            "ALTER TABLE messages ADD COLUMN PayloadKind INTEGER NOT NULL DEFAULT 0").ConfigureAwait(false);
+        await TryAlterAsync(connection, "ALTER TABLE messages ADD COLUMN MimeType TEXT NOT NULL DEFAULT ''")
+            .ConfigureAwait(false);
+        await TryAlterAsync(connection, "ALTER TABLE messages ADD COLUMN ImageBlob BLOB NULL")
+            .ConfigureAwait(false);
+        await TryAlterAsync(connection, "ALTER TABLE messages ADD COLUMN TransferId TEXT NOT NULL DEFAULT ''")
+            .ConfigureAwait(false);
+        await TryAlterAsync(connection, "ALTER TABLE messages ADD COLUMN TransferToken TEXT NOT NULL DEFAULT ''")
+            .ConfigureAwait(false);
+        await TryAlterAsync(connection,
+            "ALTER TABLE messages ADD COLUMN TransferPayloadKind TEXT NOT NULL DEFAULT ''").ConfigureAwait(false);
+        await TryAlterAsync(connection, "ALTER TABLE messages ADD COLUMN TransferFileName TEXT NOT NULL DEFAULT ''")
+            .ConfigureAwait(false);
+        await TryAlterAsync(connection,
+            "ALTER TABLE messages ADD COLUMN TransferSizeBytes INTEGER NOT NULL DEFAULT 0").ConfigureAwait(false);
+        await TryAlterAsync(connection, "ALTER TABLE messages ADD COLUMN TransferHost TEXT NOT NULL DEFAULT ''")
+            .ConfigureAwait(false);
+        await TryAlterAsync(connection, "ALTER TABLE messages ADD COLUMN TransferPort INTEGER NOT NULL DEFAULT 0")
+            .ConfigureAwait(false);
+        await TryAlterAsync(connection,
+            "ALTER TABLE messages ADD COLUMN TransferExpiresUtcTicks INTEGER NOT NULL DEFAULT 0")
+            .ConfigureAwait(false);
+        await TryAlterAsync(connection, "ALTER TABLE messages ADD COLUMN TransferState INTEGER NOT NULL DEFAULT 0")
+            .ConfigureAwait(false);
+
+        await MigrateBleDiscoveredPeersToFullNetworkIdAsync(connection).ConfigureAwait(false);
+    }
+
+    private static async Task TryAlterAsync(SQLiteAsyncConnection connection, string sql)
+    {
         try
         {
-            await _connection.ExecuteAsync(
-                "ALTER TABLE messages ADD COLUMN PayloadKind INTEGER NOT NULL DEFAULT 0");
+            await connection.ExecuteAsync(sql).ConfigureAwait(false);
         }
         catch
         {
             // column already exists
         }
-
-        try
-        {
-            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN MimeType TEXT NOT NULL DEFAULT ''");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN ImageBlob BLOB NULL");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN TransferId TEXT NOT NULL DEFAULT ''");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN TransferToken TEXT NOT NULL DEFAULT ''");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync(
-                "ALTER TABLE messages ADD COLUMN TransferPayloadKind TEXT NOT NULL DEFAULT ''");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN TransferFileName TEXT NOT NULL DEFAULT ''");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync(
-                "ALTER TABLE messages ADD COLUMN TransferSizeBytes INTEGER NOT NULL DEFAULT 0");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN TransferHost TEXT NOT NULL DEFAULT ''");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN TransferPort INTEGER NOT NULL DEFAULT 0");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync(
-                "ALTER TABLE messages ADD COLUMN TransferExpiresUtcTicks INTEGER NOT NULL DEFAULT 0");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        try
-        {
-            await _connection.ExecuteAsync("ALTER TABLE messages ADD COLUMN TransferState INTEGER NOT NULL DEFAULT 0");
-        }
-        catch
-        {
-            // column already exists
-        }
-
-        await MigrateBleDiscoveredPeersToFullNetworkIdAsync(_connection).ConfigureAwait(false);
-
-        return _connection;
     }
 
     private static async Task MigrateBleDiscoveredPeersToFullNetworkIdAsync(SQLiteAsyncConnection connection)

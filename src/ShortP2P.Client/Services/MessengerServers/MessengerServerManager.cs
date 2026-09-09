@@ -899,6 +899,8 @@ public sealed class MessengerServerManager : IAsyncDisposable
             _logger.LogWarning(pingEx, "Ping failed for {BaseUrl}", entity.BaseUrl);
         }
 
+        // Ping timed out / failed. Probe certificate on a separate client so we do not
+        // tear down a healthy long-poll session on a transient /tech/ping blip.
         try
         {
             await using var probe = MessengerServerConnection.CreateBootstrap(entity.BaseUrl, PingTimeout);
@@ -922,6 +924,14 @@ public sealed class MessengerServerManager : IAsyncDisposable
                 await FailoverAfterUntrustAsync(entity, cancellationToken).ConfigureAwait(false);
                 return;
             }
+
+            // Host answered /certificate with the pinned fingerprint — keep Active.
+            // A single failed Ping must not ClearSession / kill the long-poll waiter.
+            RecordKeepAliveSuccess(entity.Id, PingTimeout);
+            _logger.LogDebug(
+                "Messenger server ping failed but certificate ok for {BaseUrl}; keeping active",
+                entity.BaseUrl);
+            return;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

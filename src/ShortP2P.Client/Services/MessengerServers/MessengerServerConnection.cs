@@ -10,28 +10,37 @@ namespace ShortP2P.Client.Services.MessengerServers;
 /// <summary>Live HTTPS session to one messenger server (pinned TLS fingerprint).</summary>
 public sealed class MessengerServerConnection : IAsyncDisposable
 {
-    private readonly HttpClient _httpClient;
+    private readonly HttpClient _commandHttp;
+    private readonly HttpClient _longPollHttp;
     private readonly MessengerServerSession _session;
     private readonly ConnectionPinHolder _pinHolder;
     private bool _disposed;
 
     private MessengerServerConnection(
         MessengerServerEntity entity,
-        HttpClient httpClient,
+        HttpClient commandHttp,
+        HttpClient longPollHttp,
         MessengerServerSession session,
-        MessengerServerApiClient api,
+        MessengerServerApiClient commandApi,
+        MessengerServerApiClient longPollApi,
         ConnectionPinHolder pinHolder)
     {
         Entity = entity;
-        _httpClient = httpClient;
+        _commandHttp = commandHttp;
+        _longPollHttp = longPollHttp;
         _session = session;
-        Api = api;
+        Api = commandApi;
+        LongPollApi = longPollApi;
         _pinHolder = pinHolder;
     }
 
     public MessengerServerEntity Entity { get; private set; }
 
+    /// <summary>Short requests: send, receipts, GetClients, login, ping — must not share sockets with long-poll.</summary>
     public IMessengerServerApi Api { get; }
+
+    /// <summary>Dedicated client for inbox long-poll so a 25s waiter cannot stall outbound SendMessage.</summary>
+    public IMessengerServerApi LongPollApi { get; }
 
     public bool HasValidToken => _session.HasValidToken;
 
@@ -46,8 +55,40 @@ public sealed class MessengerServerConnection : IAsyncDisposable
             RequirePin = entity.Trusted && !string.IsNullOrWhiteSpace(entity.FingerprintSha256)
         };
 
+        var baseUri = new Uri(SqliteMessengerServerRepository.NormalizeBaseUrl(entity.BaseUrl) + "/");
+
+        // Separate handlers = separate connection pools. One long-poll HTTP/1.1 socket must not
+        // block SendMessage / GetClients on platforms with a low MaxConnectionsPerServer.
+        var commandHttp = CreateHttpClient(session, pinHolder, baseUri, timeout, maxConnectionsPerServer: 8);
+        var longPollHttp = CreateHttpClient(session, pinHolder, baseUri, timeout, maxConnectionsPerServer: 2);
+
+        var commandApi = new MessengerServerApiClient(commandHttp, session);
+        var longPollApi = new MessengerServerApiClient(longPollHttp, session);
+        return new MessengerServerConnection(
+            entity, commandHttp, longPollHttp, session, commandApi, longPollApi, pinHolder);
+    }
+
+    private static HttpClient CreateHttpClient(
+        MessengerServerSession session,
+        ConnectionPinHolder pinHolder,
+        Uri baseUri,
+        TimeSpan timeout,
+        int maxConnectionsPerServer)
+    {
 #if NETFRAMEWORK
         System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+        // Per-host default is often 2; raise it so command + long-poll can overlap.
+        try
+        {
+            var sp = System.Net.ServicePointManager.FindServicePoint(baseUri);
+            if (sp.ConnectionLimit < maxConnectionsPerServer)
+                sp.ConnectionLimit = maxConnectionsPerServer;
+        }
+        catch
+        {
+            // ignore ServicePoint tuning failures
+        }
+
         HttpMessageHandler sockets = new HttpClientHandler
         {
             ServerCertificateCustomValidationCallback = (_, cert, _, _) =>
@@ -56,6 +97,8 @@ public sealed class MessengerServerConnection : IAsyncDisposable
 #else
         var sockets = new SocketsHttpHandler
         {
+            MaxConnectionsPerServer = maxConnectionsPerServer,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
             SslOptions = new SslClientAuthenticationOptions
             {
                 RemoteCertificateValidationCallback = (_, cert, _, _) =>
@@ -66,14 +109,12 @@ public sealed class MessengerServerConnection : IAsyncDisposable
 
         var http = new HttpClient(new MessengerServerBearerHandler(session) { InnerHandler = sockets })
         {
-            BaseAddress = new Uri(SqliteMessengerServerRepository.NormalizeBaseUrl(entity.BaseUrl) + "/"),
+            BaseAddress = baseUri,
             Timeout = timeout
         };
         http.DefaultRequestHeaders.Accept.ParseAdd("application/json");
         http.DefaultRequestHeaders.Accept.ParseAdd("application/octet-stream");
-
-        var api = new MessengerServerApiClient(http, session);
-        return new MessengerServerConnection(entity, http, session, api, pinHolder);
+        return http;
     }
 
     /// <summary>Bootstrap client without pin (first certificate fetch when adding a server).</summary>
@@ -177,7 +218,8 @@ public sealed class MessengerServerConnection : IAsyncDisposable
             return default;
         _disposed = true;
         _session.Clear();
-        _httpClient.Dispose();
+        _commandHttp.Dispose();
+        _longPollHttp.Dispose();
         return default;
     }
 

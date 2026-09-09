@@ -157,7 +157,7 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
 
     public async Task<ChatEntity?> GetChatAsync(int chatId)
     {
-        var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
+        var conn = await _db.GetReadConnectionAsync().ConfigureAwait(false);
         return await conn.FindAsync<ChatEntity>(chatId).ConfigureAwait(false);
     }
 
@@ -596,11 +596,12 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
 
     public async Task<IReadOnlyList<ChatMessageEntity>> ListMessagesAsync(int chatId)
     {
-        var conn = await _db.GetConnectionAsync();
+        var conn = await _db.GetReadConnectionAsync().ConfigureAwait(false);
         return await conn.Table<ChatMessageEntity>()
             .Where(m => m.ChatId == chatId)
             .OrderBy(m => m.SentUtcTicks)
-            .ToListAsync();
+            .ToListAsync()
+            .ConfigureAwait(false);
     }
 
     public Task<IReadOnlyList<ChatMessageEntity>> ListMessagesPageDescAsync(int chatId, int offset, int limit) =>
@@ -617,10 +618,10 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
         if (limit <= 0)
             throw new ArgumentOutOfRangeException(nameof(limit));
 
-        var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
+        var conn = await _db.GetReadConnectionAsync().ConfigureAwait(false);
         if (includePayloadBlob)
         {
-            return await conn.Table<ChatMessageEntity>()
+            var withBlob = await conn.Table<ChatMessageEntity>()
                 .Where(m => m.ChatId == chatId)
                 .OrderByDescending(m => m.SentUtcTicks)
                 .ThenByDescending(m => m.Id)
@@ -628,15 +629,64 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
                 .Take(limit)
                 .ToListAsync()
                 .ConfigureAwait(false);
+            foreach (var m in withBlob)
+                m.HasPayloadBlob = m.ImageBlob is { Length: > 0 };
+            return withBlob;
         }
 
-        return await conn.QueryAsync<ChatMessageEntity>(
+        // length(ImageBlob) stays in SQLite; only 0/1 is returned — keeps history/list fast when chats have media.
+        var rows = await conn.QueryAsync<MessageListSqlRow>(
                 "SELECT Id, ChatId, Outgoing, Text, SentUtcTicks, DeliveryStatus, PayloadKind, MimeType, " +
                 "TransferId, TransferToken, TransferPayloadKind, TransferFileName, " +
-                "TransferSizeBytes, TransferHost, TransferPort, TransferExpiresUtcTicks, TransferState " +
+                "TransferSizeBytes, TransferHost, TransferPort, TransferExpiresUtcTicks, TransferState, " +
+                "(CASE WHEN ImageBlob IS NOT NULL AND length(ImageBlob) > 0 THEN 1 ELSE 0 END) AS HasPayloadBlob " +
                 "FROM messages WHERE ChatId = ? ORDER BY SentUtcTicks DESC, Id DESC LIMIT ? OFFSET ?",
                 chatId, limit, offset)
             .ConfigureAwait(false);
+        return rows.Select(static r => new ChatMessageEntity
+        {
+            Id = r.Id,
+            ChatId = r.ChatId,
+            Outgoing = r.Outgoing,
+            Text = r.Text ?? "",
+            SentUtcTicks = r.SentUtcTicks,
+            DeliveryStatus = r.DeliveryStatus,
+            PayloadKind = r.PayloadKind,
+            MimeType = r.MimeType ?? "",
+            ImageBlob = null,
+            HasPayloadBlob = r.HasPayloadBlob != 0,
+            TransferId = r.TransferId ?? "",
+            TransferToken = r.TransferToken ?? "",
+            TransferPayloadKind = r.TransferPayloadKind ?? "",
+            TransferFileName = r.TransferFileName ?? "",
+            TransferSizeBytes = r.TransferSizeBytes,
+            TransferHost = r.TransferHost ?? "",
+            TransferPort = r.TransferPort,
+            TransferExpiresUtcTicks = r.TransferExpiresUtcTicks,
+            TransferState = r.TransferState
+        }).ToList();
+    }
+
+    private sealed class MessageListSqlRow
+    {
+        public int Id { get; set; }
+        public int ChatId { get; set; }
+        public bool Outgoing { get; set; }
+        public string? Text { get; set; }
+        public long SentUtcTicks { get; set; }
+        public int DeliveryStatus { get; set; }
+        public int PayloadKind { get; set; }
+        public string? MimeType { get; set; }
+        public string? TransferId { get; set; }
+        public string? TransferToken { get; set; }
+        public string? TransferPayloadKind { get; set; }
+        public string? TransferFileName { get; set; }
+        public long TransferSizeBytes { get; set; }
+        public string? TransferHost { get; set; }
+        public int TransferPort { get; set; }
+        public long TransferExpiresUtcTicks { get; set; }
+        public int TransferState { get; set; }
+        public int HasPayloadBlob { get; set; }
     }
 
     /// <summary>
@@ -690,185 +740,315 @@ public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = nu
     public async Task<int> AddMessageAsync(int chatId, bool outgoing, string text,
         MessageDeliveryStatus deliveryStatus = MessageDeliveryStatus.Delivered)
     {
-        var conn = await _db.GetConnectionAsync();
-        var status = outgoing
-            ? deliveryStatus
-            : MessageDeliveryStatus.NotApplicable;
-        var msg = new ChatMessageEntity
+        return await _db.WriteAsync(async conn =>
         {
-            ChatId = chatId,
-            Outgoing = outgoing,
-            Text = text,
-            SentUtcTicks = DateTime.UtcNow.Ticks,
-            DeliveryStatus = (int)status,
-            PayloadKind = (int)ChatPayloadKind.Text,
-            MimeType = "",
-            ImageBlob = null,
-            TransferId = "",
-            TransferToken = "",
-            TransferPayloadKind = "",
-            TransferFileName = "",
-            TransferSizeBytes = 0,
-            TransferHost = "",
-            TransferPort = 0,
-            TransferExpiresUtcTicks = 0,
-            TransferState = (int)ChatTransferState.None
-        };
-        await conn.InsertAsync(msg);
+            var status = outgoing
+                ? deliveryStatus
+                : MessageDeliveryStatus.NotApplicable;
+            var msg = new ChatMessageEntity
+            {
+                ChatId = chatId,
+                Outgoing = outgoing,
+                Text = text,
+                SentUtcTicks = DateTime.UtcNow.Ticks,
+                DeliveryStatus = (int)status,
+                PayloadKind = (int)ChatPayloadKind.Text,
+                MimeType = "",
+                ImageBlob = null,
+                TransferId = "",
+                TransferToken = "",
+                TransferPayloadKind = "",
+                TransferFileName = "",
+                TransferSizeBytes = 0,
+                TransferHost = "",
+                TransferPort = 0,
+                TransferExpiresUtcTicks = 0,
+                TransferState = (int)ChatTransferState.None
+            };
+            await conn.InsertAsync(msg).ConfigureAwait(false);
 
-        var chat = await conn.FindAsync<ChatEntity>(chatId);
-        if (chat != null)
-        {
-            chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
-            await conn.UpdateAsync(chat);
-        }
+            var chat = await conn.FindAsync<ChatEntity>(chatId).ConfigureAwait(false);
+            if (chat != null)
+            {
+                chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
+                await conn.UpdateAsync(chat).ConfigureAwait(false);
+            }
 
-        await RaiseChatMessageAppendedAsync(chatId, outgoing, chat).ConfigureAwait(false);
-        return msg.Id;
+            await RaiseChatMessageAppendedAsync(chatId, outgoing, chat).ConfigureAwait(false);
+            return msg.Id;
+        }).ConfigureAwait(false);
     }
 
     public async Task<int> AddImageMessageAsync(int chatId, bool outgoing, string mimeType, byte[] imageBytes,
         MessageDeliveryStatus deliveryStatus = MessageDeliveryStatus.Delivered)
     {
         Require.NotNull(imageBytes);
-        var conn = await _db.GetConnectionAsync();
-        var status = outgoing
-            ? deliveryStatus
-            : MessageDeliveryStatus.NotApplicable;
-        var msg = new ChatMessageEntity
+        return await _db.WriteAsync(async conn =>
         {
-            ChatId = chatId,
-            Outgoing = outgoing,
-            Text = "",
-            SentUtcTicks = DateTime.UtcNow.Ticks,
-            DeliveryStatus = (int)status,
-            PayloadKind = (int)ChatPayloadKind.Image,
-            MimeType = mimeType.Trim(),
-            ImageBlob = imageBytes,
-            TransferId = "",
-            TransferToken = "",
-            TransferPayloadKind = "",
-            TransferFileName = "",
-            TransferSizeBytes = 0,
-            TransferHost = "",
-            TransferPort = 0,
-            TransferExpiresUtcTicks = 0,
-            TransferState = (int)ChatTransferState.None
-        };
-        await conn.InsertAsync(msg);
+            var status = outgoing
+                ? deliveryStatus
+                : MessageDeliveryStatus.NotApplicable;
+            var msg = new ChatMessageEntity
+            {
+                ChatId = chatId,
+                Outgoing = outgoing,
+                Text = "",
+                SentUtcTicks = DateTime.UtcNow.Ticks,
+                DeliveryStatus = (int)status,
+                PayloadKind = (int)ChatPayloadKind.Image,
+                MimeType = mimeType.Trim(),
+                ImageBlob = imageBytes,
+                TransferId = "",
+                TransferToken = "",
+                TransferPayloadKind = "",
+                TransferFileName = "",
+                TransferSizeBytes = 0,
+                TransferHost = "",
+                TransferPort = 0,
+                TransferExpiresUtcTicks = 0,
+                TransferState = (int)ChatTransferState.None
+            };
+            await conn.InsertAsync(msg).ConfigureAwait(false);
 
-        var chat = await conn.FindAsync<ChatEntity>(chatId);
-        if (chat != null)
-        {
-            chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
-            await conn.UpdateAsync(chat);
-        }
+            var chat = await conn.FindAsync<ChatEntity>(chatId).ConfigureAwait(false);
+            if (chat != null)
+            {
+                chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
+                await conn.UpdateAsync(chat).ConfigureAwait(false);
+            }
 
-        await RaiseChatMessageAppendedAsync(chatId, outgoing, chat).ConfigureAwait(false);
-        return msg.Id;
+            await RaiseChatMessageAppendedAsync(chatId, outgoing, chat).ConfigureAwait(false);
+            return msg.Id;
+        }).ConfigureAwait(false);
     }
 
     public async Task<int> AddFileMessageAsync(int chatId, bool outgoing, string fileName, string mimeType,
         byte[] fileBytes, MessageDeliveryStatus deliveryStatus = MessageDeliveryStatus.Delivered)
     {
         Require.NotNull(fileBytes);
-        var conn = await _db.GetConnectionAsync();
-        var status = outgoing
-            ? deliveryStatus
-            : MessageDeliveryStatus.NotApplicable;
-        var msg = new ChatMessageEntity
+        return await _db.WriteAsync(async conn =>
         {
-            ChatId = chatId,
-            Outgoing = outgoing,
-            Text = fileName.Trim(),
-            SentUtcTicks = DateTime.UtcNow.Ticks,
-            DeliveryStatus = (int)status,
-            PayloadKind = (int)ChatPayloadKind.File,
-            MimeType = mimeType.Trim(),
-            ImageBlob = fileBytes,
-            TransferId = "",
-            TransferToken = "",
-            TransferPayloadKind = "",
-            TransferFileName = "",
-            TransferSizeBytes = 0,
-            TransferHost = "",
-            TransferPort = 0,
-            TransferExpiresUtcTicks = 0,
-            TransferState = (int)ChatTransferState.None
+            var status = outgoing
+                ? deliveryStatus
+                : MessageDeliveryStatus.NotApplicable;
+            var msg = new ChatMessageEntity
+            {
+                ChatId = chatId,
+                Outgoing = outgoing,
+                Text = fileName.Trim(),
+                SentUtcTicks = DateTime.UtcNow.Ticks,
+                DeliveryStatus = (int)status,
+                PayloadKind = (int)ChatPayloadKind.File,
+                MimeType = mimeType.Trim(),
+                ImageBlob = fileBytes,
+                TransferId = "",
+                TransferToken = "",
+                TransferPayloadKind = "",
+                TransferFileName = "",
+                TransferSizeBytes = 0,
+                TransferHost = "",
+                TransferPort = 0,
+                TransferExpiresUtcTicks = 0,
+                TransferState = (int)ChatTransferState.None
+            };
+            await conn.InsertAsync(msg).ConfigureAwait(false);
+
+            var chat = await conn.FindAsync<ChatEntity>(chatId).ConfigureAwait(false);
+            if (chat != null)
+            {
+                chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
+                await conn.UpdateAsync(chat).ConfigureAwait(false);
+            }
+
+            await RaiseChatMessageAppendedAsync(chatId, outgoing, chat).ConfigureAwait(false);
+            return msg.Id;
+        }).ConfigureAwait(false);
+    }
+
+    public async Task<ChatMessageEntity?> GetMessageAsync(int messageId) =>
+        await GetMessageAsync(messageId, includePayloadBlob: true).ConfigureAwait(false);
+
+    /// <param name="includePayloadBlob">
+    ///     False skips <see cref="ChatMessageEntity.ImageBlob"/> so outbound flush / status work
+    ///     does not pull multi‑MB attachments into memory or lock SQLite on every tick.
+    /// </param>
+    public async Task<ChatMessageEntity?> GetMessageAsync(int messageId, bool includePayloadBlob)
+    {
+        var conn = await _db.GetReadConnectionAsync().ConfigureAwait(false);
+        if (includePayloadBlob)
+            return await conn.FindAsync<ChatMessageEntity>(messageId).ConfigureAwait(false);
+
+        var rows = await conn.QueryAsync<MessageListSqlRow>(
+                "SELECT Id, ChatId, Outgoing, Text, SentUtcTicks, DeliveryStatus, PayloadKind, MimeType, " +
+                "TransferId, TransferToken, TransferPayloadKind, TransferFileName, " +
+                "TransferSizeBytes, TransferHost, TransferPort, TransferExpiresUtcTicks, TransferState, " +
+                "(CASE WHEN ImageBlob IS NOT NULL AND length(ImageBlob) > 0 THEN 1 ELSE 0 END) AS HasPayloadBlob " +
+                "FROM messages WHERE Id = ? LIMIT 1",
+                messageId)
+            .ConfigureAwait(false);
+        var r = rows.FirstOrDefault();
+        if (r == null)
+            return null;
+        return new ChatMessageEntity
+        {
+            Id = r.Id,
+            ChatId = r.ChatId,
+            Outgoing = r.Outgoing,
+            Text = r.Text ?? "",
+            SentUtcTicks = r.SentUtcTicks,
+            DeliveryStatus = r.DeliveryStatus,
+            PayloadKind = r.PayloadKind,
+            MimeType = r.MimeType ?? "",
+            ImageBlob = null,
+            HasPayloadBlob = r.HasPayloadBlob != 0,
+            TransferId = r.TransferId ?? "",
+            TransferToken = r.TransferToken ?? "",
+            TransferPayloadKind = r.TransferPayloadKind ?? "",
+            TransferFileName = r.TransferFileName ?? "",
+            TransferSizeBytes = r.TransferSizeBytes,
+            TransferHost = r.TransferHost ?? "",
+            TransferPort = r.TransferPort,
+            TransferExpiresUtcTicks = r.TransferExpiresUtcTicks,
+            TransferState = r.TransferState
         };
-        await conn.InsertAsync(msg);
-
-        var chat = await conn.FindAsync<ChatEntity>(chatId);
-        if (chat != null)
-        {
-            chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
-            await conn.UpdateAsync(chat);
-        }
-
-        await RaiseChatMessageAppendedAsync(chatId, outgoing, chat).ConfigureAwait(false);
-        return msg.Id;
     }
 
-    public async Task<ChatMessageEntity?> GetMessageAsync(int messageId)
-    {
-        var conn = await _db.GetConnectionAsync();
-        return await conn.FindAsync<ChatMessageEntity>(messageId);
-    }
+    public Task UpdateMessageDeliveryStatusAsync(int messageId, MessageDeliveryStatus status) =>
+        _db.WriteAsync(conn => conn.ExecuteAsync(
+            "UPDATE messages SET DeliveryStatus = ? WHERE Id = ?",
+            (int)status, messageId));
 
-    public async Task UpdateMessageDeliveryStatusAsync(int messageId, MessageDeliveryStatus status)
-    {
-        var conn = await _db.GetConnectionAsync();
-        var m = await conn.FindAsync<ChatMessageEntity>(messageId);
-        if (m == null)
-            return;
-        m.DeliveryStatus = (int)status;
-        await conn.UpdateAsync(m);
-    }
+    public Task UpdateTransferStateAsync(int messageId, ChatTransferState state) =>
+        _db.WriteAsync(conn => conn.ExecuteAsync(
+            "UPDATE messages SET TransferState = ? WHERE Id = ?",
+            (int)state, messageId));
 
-    public async Task UpdateTransferStateAsync(int messageId, ChatTransferState state)
-    {
-        var conn = await _db.GetConnectionAsync();
-        var m = await conn.FindAsync<ChatMessageEntity>(messageId);
-        if (m == null)
-            return;
-        m.TransferState = (int)state;
-        await conn.UpdateAsync(m);
-    }
-
-    public async Task UpdateMessageTransferMetadataAsync(int messageId, string transferId, string transferToken,
+    public Task UpdateMessageTransferMetadataAsync(int messageId, string transferId, string transferToken,
         string transferPayloadKind, string transferFileName, long transferSizeBytes, string transferHost,
         int transferPort,
-        long transferExpiresUtcTicks, ChatTransferState transferState)
-    {
-        var conn = await _db.GetConnectionAsync();
-        var m = await conn.FindAsync<ChatMessageEntity>(messageId);
-        if (m == null)
-            return;
-        m.TransferId = transferId?.Trim() ?? "";
-        m.TransferToken = transferToken?.Trim() ?? "";
-        m.TransferPayloadKind = transferPayloadKind?.Trim() ?? "";
-        m.TransferFileName = transferFileName?.Trim() ?? "";
-        m.TransferSizeBytes = Math.Max(0, transferSizeBytes);
-        m.TransferHost = transferHost?.Trim() ?? "";
-        m.TransferPort = transferPort;
-        m.TransferExpiresUtcTicks = transferExpiresUtcTicks;
-        m.TransferState = (int)transferState;
-        await conn.UpdateAsync(m);
-    }
+        long transferExpiresUtcTicks, ChatTransferState transferState) =>
+        _db.WriteAsync(conn => conn.ExecuteAsync(
+            "UPDATE messages SET TransferId = ?, TransferToken = ?, TransferPayloadKind = ?, " +
+            "TransferFileName = ?, TransferSizeBytes = ?, TransferHost = ?, TransferPort = ?, " +
+            "TransferExpiresUtcTicks = ?, TransferState = ? WHERE Id = ?",
+            transferId?.Trim() ?? "",
+            transferToken?.Trim() ?? "",
+            transferPayloadKind?.Trim() ?? "",
+            transferFileName?.Trim() ?? "",
+            Math.Max(0, transferSizeBytes),
+            transferHost?.Trim() ?? "",
+            transferPort,
+            transferExpiresUtcTicks,
+            (int)transferState,
+            messageId));
 
     public async Task UpdateMessagePayloadAsync(int messageId, ChatPayloadKind payloadKind, string text,
         string mimeType,
         byte[] payloadBytes)
     {
-        var conn = await _db.GetConnectionAsync();
-        var m = await conn.FindAsync<ChatMessageEntity>(messageId);
+        var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
+        // When promoting File → TransferOffer the blob is already on the row; rewriting it again
+        // doubles SQLite write time and blocks inbox ingest / text send.
+        if (payloadBytes is { Length: > 0 })
+        {
+            var existingLen = await conn.ExecuteScalarAsync<long>(
+                    "SELECT COALESCE(length(ImageBlob), 0) FROM messages WHERE Id = ?", messageId)
+                .ConfigureAwait(false);
+            if (existingLen == payloadBytes.Length)
+            {
+                await conn.ExecuteAsync(
+                        "UPDATE messages SET PayloadKind = ?, Text = ?, MimeType = ? WHERE Id = ?",
+                        (int)payloadKind, text ?? "", mimeType ?? "", messageId)
+                    .ConfigureAwait(false);
+                return;
+            }
+        }
+
+        var m = await conn.FindAsync<ChatMessageEntity>(messageId).ConfigureAwait(false);
         if (m == null)
             return;
         m.PayloadKind = (int)payloadKind;
         m.Text = text ?? "";
         m.MimeType = mimeType ?? "";
         m.ImageBlob = payloadBytes;
-        await conn.UpdateAsync(m);
+        await conn.UpdateAsync(m).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Marks a stored file row as a transfer-offer without rewriting <see cref="ChatMessageEntity.ImageBlob"/>.
+    /// </summary>
+    public async Task PromoteFileToTransferOfferAsync(
+        int messageId,
+        string transferId,
+        string transferToken,
+        string transferPayloadKind,
+        string fileName,
+        string mimeType,
+        long sizeBytes,
+        long expiresUtcTicks)
+    {
+        var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
+        await conn.ExecuteAsync(
+                "UPDATE messages SET PayloadKind = ?, Text = ?, MimeType = ?, " +
+                "TransferId = ?, TransferToken = ?, TransferPayloadKind = ?, TransferFileName = ?, " +
+                "TransferSizeBytes = ?, TransferHost = ?, TransferPort = ?, TransferExpiresUtcTicks = ?, " +
+                "TransferState = ? WHERE Id = ?",
+                (int)ChatPayloadKind.TransferOffer,
+                fileName ?? "",
+                mimeType ?? "",
+                transferId?.Trim() ?? "",
+                transferToken?.Trim() ?? "",
+                transferPayloadKind?.Trim() ?? "",
+                fileName?.Trim() ?? "",
+                Math.Max(0, sizeBytes),
+                "",
+                0,
+                expiresUtcTicks,
+                (int)ChatTransferState.Offered,
+                messageId)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<ChatMessageEntity?> FindOutgoingTransferByIdAsync(int chatId, string transferId)
+    {
+        var id = transferId?.Trim() ?? "";
+        if (id.Length == 0)
+            return null;
+        var conn = await _db.GetReadConnectionAsync().ConfigureAwait(false);
+        var rows = await conn.QueryAsync<MessageListSqlRow>(
+                "SELECT Id, ChatId, Outgoing, Text, SentUtcTicks, DeliveryStatus, PayloadKind, MimeType, " +
+                "TransferId, TransferToken, TransferPayloadKind, TransferFileName, " +
+                "TransferSizeBytes, TransferHost, TransferPort, TransferExpiresUtcTicks, TransferState, " +
+                "(CASE WHEN ImageBlob IS NOT NULL AND length(ImageBlob) > 0 THEN 1 ELSE 0 END) AS HasPayloadBlob " +
+                "FROM messages WHERE ChatId = ? AND Outgoing = 1 AND TransferId = ? " +
+                "ORDER BY Id DESC LIMIT 1",
+                chatId, id)
+            .ConfigureAwait(false);
+        var r = rows.FirstOrDefault();
+        if (r == null)
+            return null;
+        return new ChatMessageEntity
+        {
+            Id = r.Id,
+            ChatId = r.ChatId,
+            Outgoing = r.Outgoing,
+            Text = r.Text ?? "",
+            SentUtcTicks = r.SentUtcTicks,
+            DeliveryStatus = r.DeliveryStatus,
+            PayloadKind = r.PayloadKind,
+            MimeType = r.MimeType ?? "",
+            ImageBlob = null,
+            HasPayloadBlob = r.HasPayloadBlob != 0,
+            TransferId = r.TransferId ?? "",
+            TransferToken = r.TransferToken ?? "",
+            TransferPayloadKind = r.TransferPayloadKind ?? "",
+            TransferFileName = r.TransferFileName ?? "",
+            TransferSizeBytes = r.TransferSizeBytes,
+            TransferHost = r.TransferHost ?? "",
+            TransferPort = r.TransferPort,
+            TransferExpiresUtcTicks = r.TransferExpiresUtcTicks,
+            TransferState = r.TransferState
+        };
     }
 
     /// <summary>

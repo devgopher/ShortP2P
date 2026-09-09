@@ -21,6 +21,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     /// <summary>Default long-poll wait requested from the server (seconds).</summary>
     public const int LongPollTimeoutSeconds = 25;
 
+    /// <summary>Hard cap for a single outbound SendMessage HTTP call (must stay below HttpClient blob timeout).</summary>
+    public static readonly TimeSpan SendMessageHttpTimeout = TimeSpan.FromSeconds(30);
+
     /// <summary>Max concurrent outbound SendMessage calls (and long-poll workers).</summary>
     public const int MaxLongPollWorkers = 3;
 
@@ -232,37 +235,21 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     }
 
     /// <summary>
-    /// One-shot inbox poll (timeout 1s) so ChatRequest replies / keys are applied before send.
+    /// Wait briefly for the background long-poll to apply ChatRequest keys — never call
+    /// <c>PollEvents</c> here. A second waiter used to replace the long-poll waiter on older
+    /// servers and still races <c>TakeForDevice</c> (destructive) on current ones.
     /// </summary>
     public async Task DrainInboxOnceAsync(CancellationToken cancellationToken = default)
     {
-        var user = _auth.CurrentUser;
-        if (user == null)
-            return;
-
-        var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var conn in ready)
+        // No-op network poll. Callers re-read the chat row after this returns; keys arrive via
+        // LongPollServerLoopAsync. Keep a short yield so PublishChatRequest + long-poll can land.
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!_manager.AllowsTraffic(conn))
-                continue;
-            try
-            {
-                var inbox = await TrackAsync(
-                        conn,
-                        () => conn.Api.PollEventsAsync(1, cancellationToken))
-                    .ConfigureAwait(false);
-                if (inbox.ChatRequests.Count > 0)
-                    await ProcessChatRequestsAsync(conn, user, inbox.ChatRequests, cancellationToken)
-                        .ConfigureAwait(false);
-                if (inbox.Messages.Count > 0)
-                    await ProcessIncomingMessagesAsync(conn, user, inbox.Messages, cancellationToken)
-                        .ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogDebug(ex, "DrainInbox failed on {BaseUrl}", conn.Entity.BaseUrl);
-            }
+            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
     }
 
@@ -283,6 +270,17 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         var latest = await _chats.GetChatAsync(chat.Id).ConfigureAwait(false) ?? chat;
         if (string.IsNullOrWhiteSpace(latest.PeerRsaPublicJson))
         {
+            // Do not PollEvents — long-poll owns the inbox waiter. Re-publish ChatRequest and
+            // give the background poll a moment to write PeerRsaPublicJson locally.
+            try
+            {
+                await PublishChatRequestAsync(latest.PeerNetworkIdShort, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "PublishChatRequest before send failed for chat {ChatId}", latest.Id);
+            }
+
             await DrainInboxOnceAsync(cancellationToken).ConfigureAwait(false);
             latest = await _chats.GetChatAsync(chat.Id).ConfigureAwait(false) ?? latest;
         }
@@ -359,8 +357,17 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                     return;
                 try
                 {
-                    await TrackAsync(conn, () => conn.Api.SendMessageAsync(dto, ct)).ConfigureAwait(false);
+                    // Command Api (not LongPollApi) + short cancel so a hung TCP cannot hold flush forever.
+                    using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    sendCts.CancelAfter(SendMessageHttpTimeout);
+                    await TrackAsync(conn, () => conn.Api.SendMessageAsync(dto, sendCts.Token))
+                        .ConfigureAwait(false);
                     Interlocked.Increment(ref successCount);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    _logger.LogWarning("SendMessage timed out on {BaseUrl}", conn.Entity.BaseUrl);
+                    _manager.RecordRequestFailure(conn.Entity.Id);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -440,9 +447,16 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                     return;
                 try
                 {
-                    await TrackAsync(conn, () => conn.Api.PutBlobAsync(blobId, peerId, ciphertext, ct))
+                    using var putCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    putCts.CancelAfter(TimeSpan.FromMinutes(2));
+                    await TrackAsync(conn, () => conn.Api.PutBlobAsync(blobId, peerId, ciphertext, putCts.Token))
                         .ConfigureAwait(false);
                     Interlocked.Increment(ref successCount);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    _logger.LogWarning("PutBlob timed out on {BaseUrl}", conn.Entity.BaseUrl);
+                    _manager.RecordRequestFailure(conn.Entity.Id);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -686,15 +700,17 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                 }
 
                 var ready = await _manager.EnsureAllActiveReadyAsync(cancellationToken).ConfigureAwait(false);
-                var available = _manager.FilterAvailable(ready);
-                if (available.Count == 0)
+                // Prefer trusted/active servers even after transient HTTP failures — long-poll
+                // itself is the health signal. FilterAvailable would pause inbox for seconds.
+                var pollTargets = ready.Where(c => _manager.AllowsTraffic(c)).ToArray();
+                if (pollTargets.Length == 0)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
                     continue;
                 }
 
-                var degree = Clamp(available.Count, 1, MaxLongPollWorkers);
-                var selected = available.Take(degree).ToArray();
+                var degree = Clamp(pollTargets.Length, 1, MaxLongPollWorkers);
+                var selected = pollTargets.Take(degree).ToArray();
                 var workers = selected
                     .Select(conn => LongPollServerLoopAsync(conn, user, cancellationToken))
                     .ToArray();
@@ -733,9 +749,10 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             try
             {
                 var sw = Stopwatch.StartNew();
+                // LongPollApi uses a separate HttpClient/socket pool from Api (send/receipts).
                 var inbox = await TrackAsync(
                         connection,
-                        () => connection.Api.PollEventsAsync(LongPollTimeoutSeconds, cancellationToken))
+                        () => connection.LongPollApi.PollEventsAsync(LongPollTimeoutSeconds, cancellationToken))
                     .ConfigureAwait(false);
                 sw.Stop();
 

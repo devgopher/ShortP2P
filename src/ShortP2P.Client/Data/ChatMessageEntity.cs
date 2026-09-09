@@ -25,6 +25,13 @@ public class ChatMessageEntity
 
     public byte[]? ImageBlob { get; set; }
 
+    /// <summary>
+    /// Not a DB column. Set by list queries that skip <see cref="ImageBlob"/> but still need a presence flag
+    /// (SQLite <c>length(ImageBlob)</c> — blob bytes are not loaded into the process).
+    /// </summary>
+    [Ignore]
+    public bool HasPayloadBlob { get; set; }
+
     public string TransferId { get; set; } = "";
 
     public string TransferToken { get; set; } = "";

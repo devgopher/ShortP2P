@@ -700,6 +700,9 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         }
         catch
         {
+            // LAN presence can fail (bind denied) while invite/data UDP already work.
+            // Still start messenger-server long-poll so send/receive via servers stays up.
+            MessengerServers?.Start();
             return;
         }
 
