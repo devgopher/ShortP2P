@@ -6,9 +6,9 @@ using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Client.Services;
 
-public sealed class SqliteBleDiscoveredPeerStore(AppDatabase db) : IBleDiscoveredPeerStore
-
+public sealed class SqliteBleDiscoveredPeerStore(AppDatabase appDatabase) : IBleDiscoveredPeerStore
 {
+    private readonly AppDatabase _db = appDatabase ?? throw new global::System.ArgumentNullException(nameof(appDatabase));
     public async ValueTask RecordScanSeenAsync(TransportAddress bluetoothMac, BleAdScanResult scanResult = default,
         CancellationToken cancellationToken = default)
 
@@ -28,39 +28,40 @@ public sealed class SqliteBleDiscoveredPeerStore(AppDatabase db) : IBleDiscovere
             idShort = networkId.ToShortString();
 
 
-        var conn = await db.GetConnectionAsync().ConfigureAwait(false);
-
-        var now = DateTime.UtcNow.Ticks;
-
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var row = await conn.FindAsync<BleDiscoveredPeerEntity>(mac).ConfigureAwait(false);
-
-        if (row == null)
-
+        await _db.WriteAsync(async conn =>
         {
-            await conn.InsertAsync(new BleDiscoveredPeerEntity
+            var now = DateTime.UtcNow.Ticks;
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var row = await conn.FindAsync<BleDiscoveredPeerEntity>(mac).ConfigureAwait(false);
+
+            if (row == null)
 
             {
-                MacNormalized = mac,
+                await conn.InsertAsync(new BleDiscoveredPeerEntity
 
-                LastSeenScanUtcTicks = now,
+                {
+                    MacNormalized = mac,
 
-                PeerNetworkIdShort = idShort
-            }).ConfigureAwait(false);
-        }
+                    LastSeenScanUtcTicks = now,
 
-        else
+                    PeerNetworkIdShort = idShort
+                }).ConfigureAwait(false);
+            }
 
-        {
-            row.LastSeenScanUtcTicks = now;
+            else
 
-            if (idShort != null)
+            {
+                row.LastSeenScanUtcTicks = now;
 
-                row.PeerNetworkIdShort = idShort;
+                if (idShort != null)
 
-            await conn.UpdateAsync(row).ConfigureAwait(false);
-        }
+                    row.PeerNetworkIdShort = idShort;
+
+                await conn.UpdateAsync(row).ConfigureAwait(false);
+            }
+        }).ConfigureAwait(false);
     }
 
 
@@ -86,49 +87,50 @@ public sealed class SqliteBleDiscoveredPeerStore(AppDatabase db) : IBleDiscovere
         var nick = string.IsNullOrWhiteSpace(nickname) ? "?" : nickname.Trim();
 
 
-        var conn = await db.GetConnectionAsync().ConfigureAwait(false);
-
-        var now = DateTime.UtcNow.Ticks;
-
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var row = await conn.FindAsync<BleDiscoveredPeerEntity>(mac).ConfigureAwait(false);
-
-        if (row != null
-            && !string.IsNullOrEmpty(row.PeerNetworkIdShort)
-            && !string.Equals(row.PeerNetworkIdShort, idShort, StringComparison.OrdinalIgnoreCase))
-            return;
-
-
-        if (row == null)
-
+        await _db.WriteAsync(async conn =>
         {
-            await conn.InsertAsync(new BleDiscoveredPeerEntity
+            var now = DateTime.UtcNow.Ticks;
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var row = await conn.FindAsync<BleDiscoveredPeerEntity>(mac).ConfigureAwait(false);
+
+            if (row != null
+                && !string.IsNullOrEmpty(row.PeerNetworkIdShort)
+                && !string.Equals(row.PeerNetworkIdShort, idShort, StringComparison.OrdinalIgnoreCase))
+                return;
+
+
+            if (row == null)
 
             {
-                MacNormalized = mac,
+                await conn.InsertAsync(new BleDiscoveredPeerEntity
 
-                LastSeenScanUtcTicks = now,
+                {
+                    MacNormalized = mac,
 
-                LastPingUtcTicks = now,
+                    LastSeenScanUtcTicks = now,
 
-                PeerNetworkIdShort = idShort,
+                    LastPingUtcTicks = now,
 
-                PeerNickname = nick
-            }).ConfigureAwait(false);
-        }
+                    PeerNetworkIdShort = idShort,
 
-        else
+                    PeerNickname = nick
+                }).ConfigureAwait(false);
+            }
 
-        {
-            row.LastPingUtcTicks = now;
+            else
 
-            row.PeerNetworkIdShort = idShort;
+            {
+                row.LastPingUtcTicks = now;
 
-            row.PeerNickname = nick;
+                row.PeerNetworkIdShort = idShort;
 
-            await conn.UpdateAsync(row).ConfigureAwait(false);
-        }
+                row.PeerNickname = nick;
+
+                await conn.UpdateAsync(row).ConfigureAwait(false);
+            }
+        }).ConfigureAwait(false);
     }
 
     public async ValueTask RecordDataPortNetworkIdAsync(TransportAddress bluetoothMac,
@@ -144,30 +146,32 @@ public sealed class SqliteBleDiscoveredPeerStore(AppDatabase db) : IBleDiscovere
         var mac = BluetoothTransportAddress.ToMacString(bluetoothMac.Data);
         var idShort = peerNetworkId.ToShortString();
 
-        var conn = await db.GetConnectionAsync().ConfigureAwait(false);
-        var now = DateTime.UtcNow.Ticks;
-        cancellationToken.ThrowIfCancellationRequested();
-
-        await conn.ExecuteAsync(
-                "DELETE FROM ble_discovered_peers WHERE PeerNetworkIdShort = ? AND MacNormalized != ? COLLATE NOCASE",
-                idShort, mac)
-            .ConfigureAwait(false);
-
-        var row = await conn.FindAsync<BleDiscoveredPeerEntity>(mac).ConfigureAwait(false);
-        if (row == null)
+        await _db.WriteAsync(async conn =>
         {
-            await conn.InsertAsync(new BleDiscoveredPeerEntity
+            var now = DateTime.UtcNow.Ticks;
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await conn.ExecuteAsync(
+                    "DELETE FROM ble_discovered_peers WHERE PeerNetworkIdShort = ? AND MacNormalized != ? COLLATE NOCASE",
+                    idShort, mac)
+                .ConfigureAwait(false);
+
+            var row = await conn.FindAsync<BleDiscoveredPeerEntity>(mac).ConfigureAwait(false);
+            if (row == null)
             {
-                MacNormalized = mac,
-                LastSeenScanUtcTicks = now,
-                PeerNetworkIdShort = idShort
-            }).ConfigureAwait(false);
-        }
-        else
-        {
-            row.LastSeenScanUtcTicks = now;
-            row.PeerNetworkIdShort = idShort;
-            await conn.UpdateAsync(row).ConfigureAwait(false);
-        }
+                await conn.InsertAsync(new BleDiscoveredPeerEntity
+                {
+                    MacNormalized = mac,
+                    LastSeenScanUtcTicks = now,
+                    PeerNetworkIdShort = idShort
+                }).ConfigureAwait(false);
+            }
+            else
+            {
+                row.LastSeenScanUtcTicks = now;
+                row.PeerNetworkIdShort = idShort;
+                await conn.UpdateAsync(row).ConfigureAwait(false);
+            }
+        }).ConfigureAwait(false);
     }
 }

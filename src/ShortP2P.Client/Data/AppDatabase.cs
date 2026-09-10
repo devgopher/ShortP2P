@@ -25,7 +25,7 @@ public sealed class AppDatabase
     public AppDatabase(string databasePath, int readPoolSize = DefaultReadPoolSize)
     {
         _databasePath = databasePath ?? throw new ArgumentNullException(nameof(databasePath));
-        _readPoolSize = Math.Clamp(readPoolSize, 1, 16);
+        _readPoolSize = Math.Max(1, Math.Min(readPoolSize, 16));
     }
 
     /// <summary>Write connection (Insert/Update/Delete). Prefer <see cref="WriteAsync{T}"/> for exclusive writers.</summary>

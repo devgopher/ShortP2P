@@ -3,26 +3,32 @@ using ShortP2P.Auth.Data;
 
 namespace ShortP2P.Client.Data;
 
-public sealed class SqliteUserAuthRepository(AppDatabase db) : IUserAuthRepository
+public sealed class SqliteUserAuthRepository(AppDatabase appDatabase) : IUserAuthRepository
 {
-    private readonly AppDatabase _db = db ?? throw new global::System.ArgumentNullException(nameof(db));
+    private readonly AppDatabase _db = appDatabase ?? throw new global::System.ArgumentNullException(nameof(appDatabase));
 
     public async Task<UserEntity?> FindByNicknameAsync(string nickname, CancellationToken cancellationToken = default)
     {
-        var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
-        return await conn.Table<UserEntity>().Where(u => u.Nickname == nickname).FirstOrDefaultAsync()
-            .ConfigureAwait(false);
+        return await _db.ReadAsync(async conn =>
+        {
+            return await conn.Table<UserEntity>().Where(u => u.Nickname == nickname).FirstOrDefaultAsync()
+                .ConfigureAwait(false);
+        }).ConfigureAwait(false);
     }
 
     public async Task<UserEntity?> FindByIdAsync(int id, CancellationToken cancellationToken = default)
     {
-        var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
-        return await conn.FindAsync<UserEntity>(id).ConfigureAwait(false);
+        return await _db.ReadAsync(async conn =>
+        {
+            return await conn.FindAsync<UserEntity>(id).ConfigureAwait(false);
+        }).ConfigureAwait(false);
     }
 
     public async Task InsertUserAsync(UserEntity user, CancellationToken cancellationToken = default)
     {
-        var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
-        await conn.InsertAsync(user).ConfigureAwait(false);
+        await _db.WriteAsync(async conn =>
+        {
+            await conn.InsertAsync(user).ConfigureAwait(false);
+        }).ConfigureAwait(false);
     }
 }

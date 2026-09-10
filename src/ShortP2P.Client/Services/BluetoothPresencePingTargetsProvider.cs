@@ -9,9 +9,11 @@ namespace ShortP2P.Client.Services;
 /// <summary>
 ///     Собирает BLE-цели для presence: endpoint'ы из чатов + строки из <c>ble_discovered_peers</c>.
 /// </summary>
-public sealed class BluetoothPresencePingTargetsProvider(AuthService auth, ChatRepository chats, AppDatabase db)
+public sealed class BluetoothPresencePingTargetsProvider(AuthService auth, ChatRepository chats, AppDatabase appDatabase)
     : IBluetoothPresencePingTargetsProvider
 {
+    private readonly AppDatabase _db = appDatabase ?? throw new ArgumentNullException(nameof(appDatabase));
+
     public async ValueTask<IReadOnlyList<TransportAddress>> GetBluetoothPingTargetsAsync(
         CancellationToken cancellationToken = default)
     {
@@ -30,18 +32,22 @@ public sealed class BluetoothPresencePingTargetsProvider(AuthService auth, ChatR
             }
         }
 
-        var conn = await db.GetConnectionAsync().ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
-        var bleRows = await conn.Table<BleDiscoveredPeerEntity>().ToListAsync().ConfigureAwait(false);
-        foreach (var row in bleRows)
+        await _db.ReadAsync(async conn =>
         {
-            if (string.IsNullOrWhiteSpace(row.MacNormalized))
-                continue;
-            if (!BluetoothTransportAddress.TryParseMac(row.MacNormalized, out var mac))
-                continue;
-            var ep = BluetoothTransportAddress.FromMac(mac);
-            dedup[Convert.ToBase64String(ep.Data)] = ep;
-        }
+            cancellationToken.ThrowIfCancellationRequested();
+            var bleRows = await conn.Table<BleDiscoveredPeerEntity>().ToListAsync().ConfigureAwait(false);
+            foreach (var row in bleRows)
+            {
+                if (string.IsNullOrWhiteSpace(row.MacNormalized))
+                    continue;
+                if (!BluetoothTransportAddress.TryParseMac(row.MacNormalized, out var mac))
+                    continue;
+                var ep = BluetoothTransportAddress.FromMac(mac);
+                dedup[Convert.ToBase64String(ep.Data)] = ep;
+            }
+
+            return 0;
+        }).ConfigureAwait(false);
 
         return dedup.Values.ToList();
     }

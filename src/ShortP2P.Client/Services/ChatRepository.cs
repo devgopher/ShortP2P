@@ -30,10 +30,10 @@ public sealed class PeerPublicKeyChangedEventArgs : EventArgs
     public string NewSafetyNumber { get; init; } = "";
 }
 
-public sealed class ChatRepository(AppDatabase db, PeerBlacklist? blacklist = null)
+public sealed class ChatRepository(AppDatabase appDatabase, PeerBlacklist? blacklist = null)
 {
     private readonly SemaphoreSlim _addChatGate = new(1, 1);
-    private readonly AppDatabase _db = db ?? throw new global::System.ArgumentNullException(nameof(db));
+    private readonly AppDatabase _db = appDatabase ?? throw new global::System.ArgumentNullException(nameof(appDatabase));
     private int _seenPruneCounter;
 
     /// <summary>Список чатов на главном экране: обновить после входящего приглашения и т.п.</summary>
