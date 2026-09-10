@@ -24,8 +24,8 @@ public sealed class ChatMediaOptions
         "image/gif"
     ];
 
-    /// <summary>Максимальный размер одного документа (Word / LibreOffice и т.п.), по умолчанию 10 МиБ.</summary>
-    public int MaxDocumentBytes { get; set; } = 10 * 1024 * 1024;
+    /// <summary>Максимальный размер одного документа (Word / LibreOffice и т.п.), по умолчанию 200 КиБ.</summary>
+    public int MaxDocumentBytes { get; set; } = 200 * 1024;
 
     /// <summary>Верхняя граница размера расшифрованного бинарного кадра чата (вложение + заголовок wire).</summary>
     public int MaxMessengerBinaryBytes => MaxDocumentBytes + 256 * 1024;
@@ -68,7 +68,7 @@ public sealed class ChatMediaOptions
                 return o;
             if (dto.MaxImageBytes is >= 4096 and <= 10 * 1024 * 1024)
                 o.MaxImageBytes = dto.MaxImageBytes.Value;
-            if (dto.MaxDocumentBytes is >= 256 * 1024 and <= 15 * 1024 * 1024)
+            if (dto.MaxDocumentBytes is >= 16 * 1024 and <= 15 * 1024 * 1024)
                 o.MaxDocumentBytes = dto.MaxDocumentBytes.Value;
             if (dto.AllowedImageMimeTypes is { Count: > 0 } list)
                 o.AllowedImageMimeTypes = list
