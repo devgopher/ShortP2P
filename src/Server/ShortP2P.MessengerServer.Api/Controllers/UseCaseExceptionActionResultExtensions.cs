@@ -14,6 +14,8 @@ internal static class UseCaseExceptionActionResultExtensions
                 "Unauthorized" => StatusCodes.Status401Unauthorized,
                 "NotFound" => StatusCodes.Status404NotFound,
                 "Conflict" => StatusCodes.Status409Conflict,
+                "PeerOffline" => StatusCodes.Status409Conflict,
+                "PayloadTooLarge" => StatusCodes.Status413PayloadTooLarge,
                 "Unavailable" => StatusCodes.Status503ServiceUnavailable,
                 _ => StatusCodes.Status400BadRequest
             },

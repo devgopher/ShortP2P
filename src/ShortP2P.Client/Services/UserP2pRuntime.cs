@@ -95,6 +95,9 @@ public sealed class UserP2pRuntime : IAsyncDisposable
                 LocalScan.ApplyMessengerServerDirectory(entries);
                 await SyncChatNicknamesFromPresenceAsync(remote, ct).ConfigureAwait(false);
             };
+            LocalScan.RequestPeerProfileViaMessengerServer = (id, ct) =>
+                MessengerServers.RequestPeerProfileViaForwardAsync(id, ct);
+            MessengerServers.PeerAboutMeApplied = (id, about) => LocalScan.ApplyCachedAboutMe(id, about);
         }
     }
 

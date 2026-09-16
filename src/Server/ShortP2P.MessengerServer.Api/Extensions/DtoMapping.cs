@@ -17,6 +17,8 @@ public static class ApiResults
                 "Unauthorized" => StatusCodes.Status401Unauthorized,
                 "NotFound" => StatusCodes.Status404NotFound,
                 "Conflict" => StatusCodes.Status409Conflict,
+                "PeerOffline" => StatusCodes.Status409Conflict,
+                "PayloadTooLarge" => StatusCodes.Status413PayloadTooLarge,
                 "Unavailable" => StatusCodes.Status503ServiceUnavailable,
                 _ => StatusCodes.Status400BadRequest
             });
@@ -78,5 +80,22 @@ public static class DtoMapping
             ? ClientPresenceDto.StatusOnline
             : ClientPresenceDto.StatusOffline,
         LastSeenAtUtc = info.LastSeenAtUtc
+    };
+
+    public static ForwardDto ToDto(this ForwardEnvelope envelope) => new()
+    {
+        ForwardId = envelope.ForwardId,
+        SrcNetworkId = envelope.SrcNetworkId,
+        TgtNetworkId = envelope.TgtNetworkId,
+        Kind = envelope.Kind switch
+        {
+            ShortP2P.MessengerServer.Domain.ForwardKind.PeerProfileRequest =>
+                Contracts.Dtos.ForwardKind.PeerProfileRequest,
+            ShortP2P.MessengerServer.Domain.ForwardKind.PeerProfileReply =>
+                Contracts.Dtos.ForwardKind.PeerProfileReply,
+            _ => Contracts.Dtos.ForwardKind.PeerProfileRequest
+        },
+        PayloadBase64 = envelope.PayloadBase64,
+        CreatedUtc = envelope.CreatedUtc
     };
 }

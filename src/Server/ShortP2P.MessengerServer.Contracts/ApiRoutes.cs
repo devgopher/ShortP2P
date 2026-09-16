@@ -21,6 +21,9 @@ public static class ApiRoutes
     /// <summary>GET long-poll inbox: messages + chat requests for the caller's device.</summary>
     public const string EventsPoll = Prefix + "/events/poll";
 
+    /// <summary>POST ephemeral peer-profile forward (0x44/0x45) to an online peer.</summary>
+    public const string Forward = Prefix + "/forward";
+
     public const string Clients = Prefix + "/clients";
 
     /// <summary>GET anonymous TotalPower (host hardware score).</summary>

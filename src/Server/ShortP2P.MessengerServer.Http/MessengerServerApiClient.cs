@@ -89,6 +89,17 @@ public sealed class MessengerServerApiClient(
         await MessengerServerJson.EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task ForwardAsync(ForwardRequest request, CancellationToken cancellationToken = default)
+    {
+        Require.NotNull(request);
+
+        using var response = await httpClient
+            .PostAsync(ApiRoutes.Forward, MessengerServerJson.ToJsonContent(request), cancellationToken)
+            .ConfigureAwait(false);
+
+        await MessengerServerJson.EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task PutBlobAsync(
         string blobId,
         string targetNetworkId,

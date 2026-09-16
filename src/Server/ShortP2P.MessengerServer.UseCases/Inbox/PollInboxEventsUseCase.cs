@@ -11,7 +11,8 @@ public sealed record PollInboxEventsQuery(
 
 public sealed record PollInboxEventsResult(
     IReadOnlyList<Message> Messages,
-    IReadOnlyList<ChatRequest> ChatRequests);
+    IReadOnlyList<ChatRequest> ChatRequests,
+    IReadOnlyList<ForwardEnvelope> Forwards);
 
 public sealed class PollInboxEventsUseCase(
     IMessageRepository messages,
@@ -19,6 +20,7 @@ public sealed class PollInboxEventsUseCase(
     IMessageInboxRepository messageInbox,
     IMessageInboxCache messageInboxCache,
     IChatRequestRepository chatRequests,
+    IForwardHub forwardHub,
     IInboxWaitService inboxWait,
     MessengerCacheOptions cacheOptions,
     IOptions<MessengerInboxOptions> inboxOptions,
@@ -44,7 +46,7 @@ public sealed class PollInboxEventsUseCase(
         var cutoff = clock.UtcNow - opts.MessageRetention;
 
         var snapshot = await ReadInboxAsync(caller, deviceId, cutoff, cancellationToken).ConfigureAwait(false);
-        if (snapshot.Messages.Count > 0 || snapshot.ChatRequests.Count > 0)
+        if (snapshot.Messages.Count > 0 || snapshot.ChatRequests.Count > 0 || snapshot.Forwards.Count > 0)
             return snapshot;
 
         await inboxWait
@@ -68,7 +70,11 @@ public sealed class PollInboxEventsUseCase(
             .ConfigureAwait(false);
         requests = [.. requests.Where(r => r.CreatedAtUtc >= cutoffUtc)];
 
-        return new PollInboxEventsResult(messageList, requests);
+        var now = clock.UtcNow;
+        forwardHub.PurgeExpired(now);
+        var forwards = forwardHub.TakeForTarget(caller, now);
+
+        return new PollInboxEventsResult(messageList, requests, forwards);
     }
 
     private async Task<IReadOnlyList<Message>> ListMessagesForDeviceAsync(

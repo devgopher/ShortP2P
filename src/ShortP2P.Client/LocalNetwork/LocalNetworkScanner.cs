@@ -93,6 +93,11 @@ public sealed class LocalNetworkScanner(
     /// </summary>
     public Func<CancellationToken, Task>? PrioritizedExternalDiscoveryRound { get; set; }
 
+    /// <summary>
+    /// Optional: request peer profile via messenger-server forward when peer is server-online and not on LAN.
+    /// </summary>
+    public Func<CompressedNetworkId, CancellationToken, Task>? RequestPeerProfileViaMessengerServer { get; set; }
+
     /// <summary>Удалять пира из списка, если не было пинга дольше этого (несколько периодов рассылки).</summary>
     private TimeSpan DiscoveryStaleAfter =>
         TimeSpan.FromTicks(Math.Max(TimeSpan.FromSeconds(45).Ticks,
@@ -168,7 +173,9 @@ public sealed class LocalNetworkScanner(
                 lastSeen,
                 PresencePingCodec.DefaultDataUdpPort,
                 MessengerServerOnline: entry.Online);
-            _entries.AddOrUpdate(id, peer, (_, existing) => MergeDiscoveredPeers(existing, peer));
+            var stored = _entries.AddOrUpdate(id, peer, (_, existing) => MergeDiscoveredPeers(existing, peer));
+            if (entry.Online && stored.TransportKind == TransportKind.MessengerServer)
+                SchedulePeerProfileRequest(stored);
         }
 
         foreach (var kv in _entries.ToArray())
@@ -735,12 +742,14 @@ public sealed class LocalNetworkScanner(
     }
 
     /// <summary>
-    ///     Best-effort: подтянуть кэш и запросить Avatar/AboutMe у пира по discovery wire.
+    ///     Best-effort: подтянуть кэш и запросить Avatar/AboutMe у пира по discovery wire или server forward.
     ///     Ошибки только логируются — скан и discovery не блокируются.
     /// </summary>
     private void SchedulePeerProfileRequest(DiscoveredLocalPeer peer)
     {
-        if (peer.TransportKind is not (TransportKind.Udp or TransportKind.Bluetooth))
+        var viaLan = peer.TransportKind is TransportKind.Udp or TransportKind.Bluetooth;
+        var viaServer = peer.TransportKind == TransportKind.MessengerServer && peer.MessengerServerOnline;
+        if (!viaLan && !viaServer)
             return;
         if (!_profileRequestInFlight.TryAdd(peer.NetworkId, 0))
             return;
@@ -753,6 +762,12 @@ public sealed class LocalNetworkScanner(
                 await TryHydrateAboutMeFromStoreAsync(peer.NetworkId, token).ConfigureAwait(false);
                 if (peer.TransportKind == TransportKind.Udp)
                     await RequestPeerProfileAsync(peer, token).ConfigureAwait(false);
+                else if (viaServer)
+                {
+                    var forward = RequestPeerProfileViaMessengerServer;
+                    if (forward != null)
+                        await forward(peer.NetworkId, token).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -769,6 +784,23 @@ public sealed class LocalNetworkScanner(
                 _profileRequestInFlight.TryRemove(peer.NetworkId, out _);
             }
         }, token);
+    }
+
+    /// <summary>Обновить AboutMe в snapshot после server-forward reply (best-effort).</summary>
+    public void ApplyCachedAboutMe(CompressedNetworkId networkId, string aboutMe)
+    {
+        aboutMe ??= "";
+        if (!_entries.TryGetValue(networkId, out var existing))
+            return;
+        if (string.Equals(existing.AboutMe, aboutMe, StringComparison.Ordinal))
+            return;
+
+        _entries[networkId] = existing with { AboutMe = aboutMe };
+        if (!_scanSessionActive)
+        {
+            RebuildSnapshot();
+            ClientsChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private async Task TryHydrateAboutMeFromStoreAsync(CompressedNetworkId networkId, CancellationToken cancellationToken)
@@ -819,7 +851,16 @@ public sealed class LocalNetworkScanner(
         }
 
         var dest = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(remoteEp.Address, GossipWireCodec.UdpPort));
+#if NETFRAMEWORK
+        long nonce;
+        {
+            var bytes = new byte[8];
+            new Random().NextBytes(bytes);
+            nonce = BitConverter.ToInt64(bytes, 0);
+        }
+#else
         var nonce = Random.Shared.NextInt64();
+#endif
         _pendingProfileNonces[nonce] = peer.NetworkId;
         try
         {

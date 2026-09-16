@@ -14,7 +14,7 @@ public sealed class AuthLocalPeerProfileSource(AuthService auth) : ILocalPeerPro
         cancellationToken.ThrowIfCancellationRequested();
         var user = _auth.CurrentUser;
         if (user == null)
-            return ValueTask.FromResult(("", (byte[]?)null));
-        return ValueTask.FromResult((user.AboutMe ?? "", user.Avatar));
+            return new ValueTask<(string, byte[]?)>(("", null));
+        return new ValueTask<(string, byte[]?)>((user.AboutMe ?? "", user.Avatar));
     }
 }

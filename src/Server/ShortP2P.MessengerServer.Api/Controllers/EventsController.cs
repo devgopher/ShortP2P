@@ -29,7 +29,8 @@ public sealed class EventsController(PollInboxEventsUseCase pollInboxEventsUseCa
             return Ok(new EventsPollResponse
             {
                 Messages = result.Messages.Select(m => m.ToDto()).ToArray(),
-                ChatRequests = result.ChatRequests.Select(r => r.ToDto()).ToArray()
+                ChatRequests = result.ChatRequests.Select(r => r.ToDto()).ToArray(),
+                Forwards = result.Forwards.Select(f => f.ToDto()).ToArray()
             });
         }
         catch (UseCaseException ex)

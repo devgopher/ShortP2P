@@ -268,10 +268,46 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /api/v1/forward:
+    post:
+      operationId: forward
+      summary: Ephemeral peer-profile forward (0x44/0x45) to an online peer
+      description: >
+        Dumb pipe — server does not store AboutMe/Avatar. Returns 409 PeerOffline if target is not online
+        (no queue). Delivered via GET /api/v1/events/poll forwards[]; removed after poll (TTL ~60s).
+      tags: [Forward]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForwardRequest'
+      responses:
+        '202':
+          description: Accepted into ephemeral inbox
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Target peer offline (PeerOffline)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '413':
+          description: Payload too large (PayloadTooLarge)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /api/v1/events/poll:
     get:
       operationId: pollEvents
-      summary: Long-poll inbox (messages + chat requests) for this device
+      summary: Long-poll inbox (messages + chat requests + forwards) for this device
       tags: [Events]
       security:
         - bearerAuth: []
@@ -485,6 +521,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ChatRequestDto'
+        forwards:
+          type: array
+          items:
+            $ref: '#/components/schemas/ForwardDto'
+          description: Ephemeral peer-profile forwards; removed from server RAM after this poll
 
     ServerPowerResponse:
       type: object
@@ -594,6 +635,45 @@ components:
         encryptedDataBase64:
           type: string
           description: Opaque ciphertext, base64
+
+    ForwardKind:
+      type: string
+      enum: [PeerProfileRequest, PeerProfileReply]
+
+    ForwardRequest:
+      type: object
+      required: [forwardId, srcNetworkId, tgtNetworkId, kind, payloadBase64]
+      properties:
+        forwardId:
+          type: string
+          description: Client-generated idempotency id (required)
+        srcNetworkId:
+          type: string
+        tgtNetworkId:
+          type: string
+        kind:
+          $ref: '#/components/schemas/ForwardKind'
+        payloadBase64:
+          type: string
+          description: Full LAN wire frame 0x44 or 0x45, base64
+
+    ForwardDto:
+      type: object
+      required: [forwardId, srcNetworkId, tgtNetworkId, kind, payloadBase64, createdUtc]
+      properties:
+        forwardId:
+          type: string
+        srcNetworkId:
+          type: string
+        tgtNetworkId:
+          type: string
+        kind:
+          $ref: '#/components/schemas/ForwardKind'
+        payloadBase64:
+          type: string
+        createdUtc:
+          type: string
+          format: date-time
 
     DeliveryReceiptRequest:
       type: object

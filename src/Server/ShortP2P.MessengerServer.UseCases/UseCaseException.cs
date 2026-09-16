@@ -15,6 +15,10 @@ public sealed class UseCaseException : Exception
 
     public static UseCaseException Conflict(string message) => new("Conflict", message);
 
+    public static UseCaseException PeerOffline(string message) => new("PeerOffline", message);
+
+    public static UseCaseException PayloadTooLarge(string message) => new("PayloadTooLarge", message);
+
     public static UseCaseException NotFound(string message) => new("NotFound", message);
 
     public static UseCaseException Unauthorized(string message) => new("Unauthorized", message);

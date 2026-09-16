@@ -142,9 +142,49 @@
 | Кадр | Первый байт | Описание |
 |------|-------------|----------|
 | Request | `0x44` | `nonce int64 LE` + `senderNetworkId` (длина как у route-table request). |
-| Reply | `0x45` | `nonce LE` + `responderNetworkId` + `aboutLen uint16 BE` + AboutMe UTF-8 (≤250 символов / ≤1000 UTF-8 байт) + `avatarLen uint16 BE` + Avatar blob (≤40960 байт). |
+| Reply | `0x45` | `nonce LE` + `responderNetworkId` + `aboutLen uint16 BE` + AboutMe UTF-8 (≤250 символов / ≤1000 UTF-8 байт) + `avatarLen uint16 BE` + Avatar blob (≤20480 байт / 20 КБ). |
 
 Запрос уходит unicast на discovery-порт пира при LAN-скане / presence; ответ хранится **только локально** (`peer_profiles`). Ошибки загрузки/разбора/записи — best-effort (лог + продолжение скана). Кодек: `PeerProfileWireCodec`.
+
+### 8.4. Профиль через MessengerServer — `POST /api/v1/forward`
+
+Для пиров, известных по серверу, но **не** в LAN: сервер только **эфемерно пересылает** (dumb pipe) online-абоненту. **Не** store-and-forward (`MessageDto` / `Blobs`). Кэш профиля — только локальный `peer_profiles`. JWT как у остальных `/api/v1/*`.
+
+**Запрос** `POST /api/v1/forward` (JSON, camelCase):
+
+| Поле | Тип | Обяз. | Описание |
+|------|-----|-------|----------|
+| `srcNetworkId` | string | да | Короткий NetworkId; должен совпадать с JWT |
+| `tgtNetworkId` | string | да | Короткий NetworkId получателя |
+| `kind` | string enum | да | `PeerProfileRequest` \| `PeerProfileReply` |
+| `payloadBase64` | string | да | Полный кадр **`0x44`/`0x45`** (см. §8.3), без обрезки первого байта; v1 **без** `MessengerServerPayloadCodec` |
+| `forwardId` | string | да | Клиентский id (UUID и т.п.) для идемпотентности POST |
+
+Лимиты тела: как LAN — AboutMe ≤250 символов / ≤1000 UTF-8 байт, Avatar ≤20 KB (`PeerProfileLimits`); max decoded payload ≈ 21 505 байт (`0x45`).
+
+**Ответы POST:**
+
+| Код | Тело | Когда |
+|-----|------|--------|
+| `202` | пусто | принято в эфемерный inbox получателя |
+| `409` | `ApiError { code: "PeerOffline", message }` | `tgt` не online → **без** очереди |
+| `413` | `ApiError { code: "PayloadTooLarge", message }` | payload / avatar / about сверх лимита |
+| `400` | `ApiError { code: "Validation", message }` | неверный kind, base64, несовпадение kind↔первый байт кадра, пустой `forwardId`, `src` ≠ JWT и т.п. |
+
+**Доставка:** `GET /api/v1/events/poll` → `EventsPollResponse.forwards[]` (`ForwardDto`):
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `forwardId` | string | id пересылки |
+| `srcNetworkId` | string | отправитель |
+| `tgtNetworkId` | string | получатель (caller) |
+| `kind` | string enum | те же значения, что в POST |
+| `payloadBase64` | string | тот же полный `0x44`/`0x45` |
+| `createdUtc` | DateTime | UTC штамп сервера при приёме |
+
+После выдачи в poll — удалить из RAM (TTL ~60 с). **Без** durable store профиля. Шифрование оболочки — **не** в v1 (только TLS).
+
+**Логирование (сервер):** на Information/Release — только `src`/`tgt` NetworkId, `forwardId`, идентификатор сервера (host), hash аватара и hash секции AboutMe (из разобранного `0x45`; для `0x44` — пусто). Полные тела — только Debug. Сервер **не** сохраняет AboutMe/Avatar в БД.
 
 ---
 

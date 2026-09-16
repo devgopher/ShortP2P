@@ -8,6 +8,8 @@ using ShortP2P.Auth.Data;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Crypto;
+using ShortP2P.Discovery.Gossip;
+using ShortP2P.Discovery.Profile;
 using ShortP2P.MessengerServer.Contracts.Dtos;
 using ShortP2P.MessengerServer.Http;
 
@@ -34,9 +36,12 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     private readonly ChatRepository _chats;
     private readonly ChatSessionCache _sessions;
     private readonly MessengerServerManager _manager;
+    private readonly IPeerProfileStore? _peerProfiles;
+    private readonly ILocalPeerProfileSource? _localProfile;
     private readonly ILogger<MessengerServerSyncService> _logger;
     private readonly object _startGate = new();
     private readonly SemaphoreSlim _ingestGate = new(1, 1);
+    private readonly ConcurrentDictionary<long, string> _pendingForwardProfileNonces = new();
 
     private CancellationTokenSource? _cts;
     private Task? _longPollLoop;
@@ -49,14 +54,21 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         ChatRepository chats,
         ChatSessionCache sessions,
         MessengerServerManager manager,
+        IPeerProfileStore? peerProfiles = null,
+        ILocalPeerProfileSource? localProfile = null,
         ILogger<MessengerServerSyncService>? logger = null)
     {
         _auth = auth ?? throw new global::System.ArgumentNullException(nameof(auth));
         _chats = chats ?? throw new global::System.ArgumentNullException(nameof(chats));
         _sessions = sessions ?? throw new global::System.ArgumentNullException(nameof(sessions));
         _manager = manager ?? throw new global::System.ArgumentNullException(nameof(manager));
+        _peerProfiles = peerProfiles;
+        _localProfile = localProfile;
         _logger = logger ?? NullLogger<MessengerServerSyncService>.Instance;
     }
+
+    /// <summary>Optional: refresh LAN scan AboutMe after a server-forward profile reply.</summary>
+    public Action<CompressedNetworkId, string>? PeerAboutMeApplied { get; set; }
 
     public MessengerServerManager Manager => _manager;
 
@@ -195,6 +207,70 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     public Task<IReadOnlyList<ClientPresenceDto>> KeepAliveAndListRemoteClientsAsync(
         CancellationToken cancellationToken) =>
         ProbeAndListRemoteClientsAsync(cancellationToken);
+
+    /// <summary>
+    /// Best-effort: send PeerProfileRequest (0x44) via POST /forward when peer is reachable on a trusted server.
+    /// </summary>
+    public async Task RequestPeerProfileViaForwardAsync(
+        CompressedNetworkId peerNetworkId,
+        CancellationToken cancellationToken = default)
+    {
+        var user = _auth.CurrentUser;
+        if (user == null || peerNetworkId.IsEmpty)
+            return;
+
+        var self = user.NetworkIdShort.Trim();
+        var peerId = peerNetworkId.ToShortString();
+        if (string.IsNullOrEmpty(peerId) ||
+            string.Equals(peerId, self, StringComparison.Ordinal))
+            return;
+
+#if NETFRAMEWORK
+        long nonce;
+        {
+            var bytes = new byte[8];
+            new Random().NextBytes(bytes);
+            nonce = BitConverter.ToInt64(bytes, 0);
+        }
+#else
+        var nonce = Random.Shared.NextInt64();
+#endif
+        _pendingForwardProfileNonces[nonce] = peerId;
+
+        byte[] requestBytes;
+        try
+        {
+            requestBytes = PeerProfileWireCodec.BuildRequest(nonce, CompressedNetworkId.FromShortString(self));
+        }
+        catch (Exception ex)
+        {
+            _pendingForwardProfileNonces.TryRemove(nonce, out _);
+            _logger.LogWarning(ex, "Peer profile forward: failed to build 0x44 for {PeerId}", peerId);
+            return;
+        }
+
+        var forwardId = Guid.NewGuid().ToString("N");
+        var dto = new ForwardRequest
+        {
+            ForwardId = forwardId,
+            SrcNetworkId = self,
+            TgtNetworkId = peerId,
+            Kind = ForwardKind.PeerProfileRequest,
+            PayloadBase64 = Convert.ToBase64String(requestBytes)
+        };
+
+        try
+        {
+            var accepted = await TryPostForwardAsync(dto, peerId, cancellationToken).ConfigureAwait(false);
+            if (!accepted)
+                _pendingForwardProfileNonces.TryRemove(nonce, out _);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _pendingForwardProfileNonces.TryRemove(nonce, out _);
+            _logger.LogWarning(ex, "Peer profile forward request failed for {PeerId} (best-effort)", peerId);
+        }
+    }
 
     /// <summary>Publish (or refresh) our public key to the peer via all ready servers.</summary>
     public async Task PublishChatRequestAsync(string targetNetworkId, CancellationToken cancellationToken = default)
@@ -761,6 +837,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
                 if (inbox.Messages.Count > 0 ||
                     inbox.ChatRequests.Count > 0 ||
+                    (inbox.Forwards?.Count ?? 0) > 0 ||
                     sw.Elapsed < TimeSpan.FromSeconds(LongPollTimeoutSeconds - 2))
                 {
                     _manager.RecordProbeSuccess(connection.Entity.Id, sw.Elapsed);
@@ -772,6 +849,11 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
                 if (inbox.Messages.Count > 0)
                     await ProcessIncomingMessagesAsync(connection, user, inbox.Messages, cancellationToken)
+                        .ConfigureAwait(false);
+
+                var forwards = inbox.Forwards ?? [];
+                if (forwards.Count > 0)
+                    await ProcessIncomingForwardsAsync(connection, user, forwards, cancellationToken)
                         .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -794,6 +876,210 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                 }
             }
         }
+    }
+
+    private async Task ProcessIncomingForwardsAsync(
+        MessengerServerConnection connection,
+        UserEntity user,
+        IReadOnlyList<ForwardDto> forwards,
+        CancellationToken cancellationToken)
+    {
+        if (!_manager.AllowsTraffic(connection) || forwards.Count == 0)
+            return;
+
+        var self = user.NetworkIdShort.Trim();
+        foreach (var forward in forwards)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                if (!string.Equals(forward.TgtNetworkId?.Trim(), self, StringComparison.Ordinal))
+                    continue;
+
+                byte[] payload;
+                try
+                {
+                    payload = Convert.FromBase64String(forward.PayloadBase64 ?? "");
+                }
+                catch (FormatException ex)
+                {
+                    _logger.LogWarning(ex, "Forward {ForwardId}: invalid payloadBase64 (best-effort)", forward.ForwardId);
+                    continue;
+                }
+
+                _logger.LogDebug(
+                    "Forward received on {BaseUrl} forwardId={ForwardId} src={Src} tgt={Tgt} kind={Kind} payloadBase64={Payload}",
+                    connection.Entity.BaseUrl,
+                    forward.ForwardId,
+                    forward.SrcNetworkId,
+                    forward.TgtNetworkId,
+                    forward.Kind,
+                    forward.PayloadBase64);
+
+                switch (forward.Kind)
+                {
+                    case ForwardKind.PeerProfileRequest:
+                        await ReplyToPeerProfileForwardAsync(connection, user, forward, payload, cancellationToken)
+                            .ConfigureAwait(false);
+                        break;
+                    case ForwardKind.PeerProfileReply:
+                        await HandlePeerProfileForwardReplyAsync(forward, payload, cancellationToken)
+                            .ConfigureAwait(false);
+                        break;
+                    default:
+                        _logger.LogWarning("Forward {ForwardId}: unsupported kind {Kind}", forward.ForwardId,
+                            forward.Kind);
+                        break;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Forward {ForwardId} handling failed (best-effort); continuing",
+                    forward.ForwardId);
+            }
+        }
+    }
+
+    private async Task ReplyToPeerProfileForwardAsync(
+        MessengerServerConnection connection,
+        UserEntity user,
+        ForwardDto request,
+        byte[] payload,
+        CancellationToken cancellationToken)
+    {
+        if (!PeerProfileWireCodec.TryParseRequest(payload, out var nonce, out var sender))
+        {
+            _logger.LogWarning("Forward {ForwardId}: PeerProfileRequest parse failed", request.ForwardId);
+            return;
+        }
+
+        var senderId = sender.ToShortString();
+        if (!string.Equals(senderId, request.SrcNetworkId?.Trim(), StringComparison.Ordinal))
+        {
+            _logger.LogWarning(
+                "Forward {ForwardId}: srcNetworkId mismatch with 0x44 sender",
+                request.ForwardId);
+            return;
+        }
+
+        string aboutMe = "";
+        byte[]? avatar = null;
+        if (_localProfile != null)
+        {
+            try
+            {
+                (aboutMe, avatar) = await _localProfile.GetLocalProfileAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Local profile source failed while answering forward request");
+            }
+        }
+
+        var localId = CompressedNetworkId.FromShortString(user.NetworkIdShort.Trim());
+        var replyBytes = PeerProfileWireCodec.BuildReply(nonce, localId, aboutMe, avatar);
+        var dto = new ForwardRequest
+        {
+            ForwardId = Guid.NewGuid().ToString("N"),
+            SrcNetworkId = user.NetworkIdShort.Trim(),
+            TgtNetworkId = senderId,
+            Kind = ForwardKind.PeerProfileReply,
+            PayloadBase64 = Convert.ToBase64String(replyBytes)
+        };
+
+        try
+        {
+            await TrackAsync(connection, () => connection.Api.ForwardAsync(dto, cancellationToken))
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Prefer the server that delivered the request; fall back to other trusted servers.
+            _logger.LogDebug(ex, "Forward reply on {BaseUrl} failed; trying other servers", connection.Entity.BaseUrl);
+            await TryPostForwardAsync(dto, senderId, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task HandlePeerProfileForwardReplyAsync(
+        ForwardDto forward,
+        byte[] payload,
+        CancellationToken cancellationToken)
+    {
+        if (!PeerProfileWireCodec.TryParseReply(payload, out var nonce, out var responderId, out var aboutMe,
+                out var avatar))
+        {
+            _logger.LogWarning("Forward {ForwardId}: PeerProfileReply parse failed", forward.ForwardId);
+            return;
+        }
+
+        if (!_pendingForwardProfileNonces.TryRemove(nonce, out var expectedId) ||
+            !string.Equals(expectedId, responderId.ToShortString(), StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (_peerProfiles != null)
+        {
+            try
+            {
+                await _peerProfiles.UpsertAsync(responderId, null, aboutMe, avatar, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Peer profile store write failed for {NetworkId} (best-effort)",
+                    responderId.ToShortString());
+            }
+        }
+
+        try
+        {
+            PeerAboutMeApplied?.Invoke(responderId, aboutMe ?? "");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "PeerAboutMeApplied callback failed");
+        }
+    }
+
+    private async Task<bool> TryPostForwardAsync(
+        ForwardRequest dto,
+        string peerIdHint,
+        CancellationToken cancellationToken)
+    {
+        var targets = await CollectPeerServerTargetsAsync(dto.TgtNetworkId, cancellationToken).ConfigureAwait(false);
+        if (targets.Count == 0)
+        {
+            _logger.LogDebug("No messenger server for forward to {PeerId}", peerIdHint);
+            return false;
+        }
+
+        foreach (var conn in targets)
+        {
+            if (!_manager.AllowsTraffic(conn))
+                continue;
+            try
+            {
+                await TrackAsync(conn, () => conn.Api.ForwardAsync(dto, cancellationToken)).ConfigureAwait(false);
+                return true;
+            }
+            catch (MessengerServerApiException ex) when (
+                string.Equals(ex.ErrorCode, "PeerOffline", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug("Forward PeerOffline on {BaseUrl} for {PeerId}", conn.Entity.BaseUrl, peerIdHint);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Forward failed on {BaseUrl} for {PeerId}", conn.Entity.BaseUrl, peerIdHint);
+            }
+        }
+
+        return false;
     }
 
     private async Task ProcessChatRequestsAsync(

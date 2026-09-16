@@ -3,6 +3,7 @@ using ShortP2P.MessengerServer.UseCases.Abstractions;
 using ShortP2P.MessengerServer.UseCases.Auth;
 using ShortP2P.MessengerServer.UseCases.Blobs;
 using ShortP2P.MessengerServer.UseCases.Chats;
+using ShortP2P.MessengerServer.UseCases.Forwards;
 using ShortP2P.MessengerServer.UseCases.Hosting;
 using ShortP2P.MessengerServer.UseCases.Inbox;
 using ShortP2P.MessengerServer.UseCases.Messages;
@@ -18,6 +19,7 @@ public static class UseCasesServiceCollectionExtensions
     public static IServiceCollection AddMessengerUseCases(this IServiceCollection services)
     {
         services.AddSingleton<IInboxWaitService, InboxWaitService>();
+        services.AddSingleton<IForwardHub, InMemoryForwardHub>();
         services.AddSingleton<IHostHardwareInfoProvider, OsHostHardwareInfoProvider>();
         services.AddSingleton<IHostLoadInfoProvider, OsHostLoadInfoProvider>();
         services.AddScoped<HostPowersMeasurementService>();
@@ -34,6 +36,7 @@ public static class UseCasesServiceCollectionExtensions
         services.AddScoped<PutBlobUseCase>();
         services.AddScoped<GetBlobUseCase>();
         services.AddScoped<DeleteBlobUseCase>();
+        services.AddScoped<ForwardPeerProfileUseCase>();
         services.AddScoped<PollInboxEventsUseCase>();
         services.AddScoped<GetClientPresencesUseCase>();
         services.AddScoped<GetServerCertificateUseCase>();

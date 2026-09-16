@@ -22,7 +22,10 @@
     <Compile Include="..\ShortP2P.Client\Data\MessageDeliveryStatus.cs" />
     <Compile Include="..\ShortP2P.Client\Data\MessengerServerEntity.cs" />
     <Compile Include="..\ShortP2P.Client\Data\PeerBlacklistEntity.cs" />
+    <Compile Include="..\ShortP2P.Client\Data\PeerProfileEntity.cs" />
     <Compile Include="..\ShortP2P.Client\Data\SqliteUserAuthRepository.cs" />
+    <Compile Include="..\ShortP2P.Client\Services\SqlitePeerProfileStore.cs" />
+    <Compile Include="..\ShortP2P.Client\Services\AuthLocalPeerProfileSource.cs" />
     <Compile Include="..\ShortP2P.Client\ChatMedia\ChatWireCodec.cs" />
     <Compile Include="..\ShortP2P.Client\Qr\QrImageCodec.cs" />
     <Compile Include="..\ShortP2P.Client\Qr\LocalIPv4Resolver.cs" />
@@ -53,7 +56,9 @@
     <Compile Include="..\ShortP2P.Discovery\UdpPeerDiscoveryOptions.cs" />
     <Compile Include="..\ShortP2P.Discovery\IBluetoothPresencePingTargetsProvider.cs" />
     <Compile Include="..\ShortP2P.Discovery\Gossip\GossipWireCodec.cs" />
+    <Compile Include="..\ShortP2P.Discovery\Gossip\PeerProfileWireCodec.cs" />
     <Compile Include="..\ShortP2P.Discovery\Gossip\RouteTableWireCodec.cs" />
+    <Compile Include="..\ShortP2P.Discovery\Profile\IPeerProfileStore.cs" />
     <Compile Include="..\ShortP2P.Discovery\Pings\IDiscoveryPingStore.cs" />
     <Compile Include="..\ShortP2P.Discovery\Pings\DiscoveryPingEntry.cs" />
     <Compile Include="..\ShortP2P.Discovery\RouteTables\IRouteTableSnapshotSource.cs" />

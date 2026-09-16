@@ -6,4 +6,7 @@ public sealed class EventsPollResponse
     public required IReadOnlyList<MessageDto> Messages { get; init; }
 
     public required IReadOnlyList<ChatRequestDto> ChatRequests { get; init; }
+
+    /// <summary>Ephemeral peer-profile forwards; removed from server RAM after this poll.</summary>
+    public IReadOnlyList<ForwardDto> Forwards { get; init; } = [];
 }

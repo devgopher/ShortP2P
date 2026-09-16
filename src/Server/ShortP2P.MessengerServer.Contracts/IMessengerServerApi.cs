@@ -28,6 +28,11 @@ public interface IMessengerServerApi
     Task SendMessageAsync(MessageDto message, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// POST <see cref="ApiRoutes.Forward"/> — ephemeral peer-profile forward (0x44/0x45) to an online peer.
+    /// </summary>
+    Task ForwardAsync(ForwardRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// PUT <see cref="ApiRoutes.Blobs"/>/{blobId} — store an opaque encrypted attachment (same envelope as messages).
     /// </summary>
     Task PutBlobAsync(
