@@ -14,6 +14,7 @@ using ShortP2P.Client.Transceivers;
 using ShortP2P.Discovery;
 using ShortP2P.Discovery.Ble;
 using ShortP2P.Discovery.Pings;
+using ShortP2P.Discovery.Profile;
 using ShortP2P.Discovery.RouteTables;
 using ShortP2P.Discovery.Transceivers;
 using ShortP2P.MessengerServer.Contracts.Dtos;
@@ -65,7 +66,9 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         IBleDiscoveredPeerStore? bleDiscoveredPeerStore = null,
         IBluetoothPresencePingTargetsProvider? bluetoothPresencePingTargetsProvider = null,
         ILoggerFactory? loggerFactory = null,
-        MessengerServerSyncService? messengerServers = null)
+        MessengerServerSyncService? messengerServers = null,
+        IPeerProfileStore? peerProfileStore = null,
+        ILocalPeerProfileSource? localPeerProfileSource = null)
     {
         _store = store;
         _auth = auth;
@@ -78,9 +81,11 @@ public sealed class UserP2pRuntime : IAsyncDisposable
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         _bluetooth = bluetooth;
         MessengerServers = messengerServers;
+        PeerProfiles = peerProfileStore;
         LocalScan = new LocalNetworkScanner(Settings, udpTransportFactory, () => _bluetooth?.Current,
             additionalDiscoveryTransports, routeTableSnapshotSource, discoveryPingStore, blePeripheralScanner,
-            bleDiscoveredPeerStore, bluetoothPresencePingTargetsProvider);
+            bleDiscoveredPeerStore, bluetoothPresencePingTargetsProvider, peerProfileStore, localPeerProfileSource,
+            _loggerFactory.CreateLogger("ShortP2P.Discovery.LocalNetworkScanner"));
         if (MessengerServers != null)
         {
             LocalScan.PrioritizedExternalDiscoveryRound = async ct =>
@@ -95,6 +100,9 @@ public sealed class UserP2pRuntime : IAsyncDisposable
 
     /// <summary>Optional HTTPS messenger-server sync (long-poll inbox, ChatRequest, messages).</summary>
     public MessengerServerSyncService? MessengerServers { get; }
+
+    /// <summary>Локальный кэш профилей пиров (Avatar / AboutMe), без синхронизации с сервером.</summary>
+    public IPeerProfileStore? PeerProfiles { get; }
 
     private async Task SyncChatNicknamesFromPresenceAsync(
         IReadOnlyList<ClientPresenceDto> remote,

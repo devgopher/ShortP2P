@@ -137,7 +137,14 @@
 | Request | `0x42` | `nonce LE` + `senderNetworkId 16`. |
 | Reply | `0x43` | Заголовок с nonce, id ответчика, флагами и количеством маршрутов + сериализованные маршруты (`RouteTableWireCodec`). |
 
-Подробности сериализации маршрутов — в исходниках `RouteTableWireCodec`.
+### 8.3. Профиль абонента (AboutMe + Avatar)
+
+| Кадр | Первый байт | Описание |
+|------|-------------|----------|
+| Request | `0x44` | `nonce int64 LE` + `senderNetworkId` (длина как у route-table request). |
+| Reply | `0x45` | `nonce LE` + `responderNetworkId` + `aboutLen uint16 BE` + AboutMe UTF-8 (≤250 символов / ≤1000 UTF-8 байт) + `avatarLen uint16 BE` + Avatar blob (≤40960 байт). |
+
+Запрос уходит unicast на discovery-порт пира при LAN-скане / presence; ответ хранится **только локально** (`peer_profiles`). Ошибки загрузки/разбора/записи — best-effort (лог + продолжение скана). Кодек: `PeerProfileWireCodec`.
 
 ---
 

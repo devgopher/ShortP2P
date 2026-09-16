@@ -50,11 +50,12 @@ public sealed class LocalNetworkScanForm : Form
         Height = 420;
         MinimizeBox = false;
 
-        _list.Columns.Add("Ник", 140);
-        _list.Columns.Add("Network id", 180);
+        _list.Columns.Add("Ник", 120);
+        _list.Columns.Add("Network id", 150);
+        _list.Columns.Add("О себе", 160);
         _list.Columns.Add("Транспорт", 80);
-        _list.Columns.Add("Статус", 80);
-        _list.Columns.Add("Последний контакт", 140);
+        _list.Columns.Add("Статус", 70);
+        _list.Columns.Add("Последний контакт", 120);
 
         var bottom = new FlowLayoutPanel
         {
@@ -131,6 +132,10 @@ public sealed class LocalNetworkScanForm : Form
                     Tag = p
                 };
                 row.SubItems.Add(idShort);
+                var about = p.AboutMe ?? "";
+                if (about.Length > 40)
+                    about = about[..40] + "…";
+                row.SubItems.Add(string.IsNullOrEmpty(about) ? "—" : about);
                 row.SubItems.Add(FormatTransport(p.TransportKind));
                 var online = p.TransportKind == TransportKind.MessengerServer
                     ? p.MessengerServerOnline

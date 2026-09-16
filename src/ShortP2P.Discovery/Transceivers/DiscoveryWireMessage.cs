@@ -2,13 +2,15 @@ using ShortP2P.Transport.Abstractions;
 
 namespace ShortP2P.Discovery.Transceivers;
 
-/// <summary>Тип wire-пакета discovery (gossip + route table) на UDP 17890.</summary>
+/// <summary>Тип wire-пакета discovery (gossip + route table + peer profile) на UDP 17890.</summary>
 public enum DiscoveryWireKind : byte
 {
     GossipProbe = 0x40,
     GossipAck = 0x41,
     RouteTableRequest = 0x42,
-    RouteTableReply = 0x43
+    RouteTableReply = 0x43,
+    PeerProfileRequest = 0x44,
+    PeerProfileReply = 0x45
 }
 
 /// <summary>

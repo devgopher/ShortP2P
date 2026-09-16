@@ -13,6 +13,7 @@ public sealed class LanScanRow
     public required DiscoveredLocalPeer Peer { get; init; }
     public string Nickname { get; init; } = "";
     public string NetworkIdShort { get; init; } = "";
+    public string AboutMeLine { get; init; } = "";
     public string DetailLine { get; init; } = "";
     public bool IsPeerOnline { get; init; }
 
@@ -28,12 +29,16 @@ public sealed class LanScanRow
             _ => p.TransportKind.ToString()
         };
         var seen = p.LastSeenUtc.ToLocalTime().ToString("g");
+        var about = p.AboutMe ?? "";
+        if (about.Length > 80)
+            about = about[..80] + "…";
         return new LanScanRow
         {
             Peer = p,
             IsPeerOnline = isPeerOnline,
             Nickname = string.IsNullOrEmpty(p.Nickname) ? "—" : p.Nickname,
             NetworkIdShort = idShort,
+            AboutMeLine = string.IsNullOrEmpty(about) ? "" : about,
             DetailLine = $"{transport} · {(isPeerOnline ? "online" : "offline")} · last {seen}"
         };
     }

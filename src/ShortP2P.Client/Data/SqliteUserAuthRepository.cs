@@ -31,4 +31,12 @@ public sealed class SqliteUserAuthRepository(AppDatabase appDatabase) : IUserAut
             await conn.InsertAsync(user).ConfigureAwait(false);
         }).ConfigureAwait(false);
     }
+
+    public async Task UpdateUserAsync(UserEntity user, CancellationToken cancellationToken = default)
+    {
+        await _db.WriteAsync(async conn =>
+        {
+            await conn.UpdateAsync(user).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+    }
 }

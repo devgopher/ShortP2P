@@ -21,5 +21,11 @@ public class UserEntity
 
     public int DataUdpPort { get; set; } = 17500;
 
+    /// <summary>Короткое «о себе» (до 250 символов). Только локально и в ответах на peer profile request.</summary>
+    public string AboutMe { get; set; } = "";
+
+    /// <summary>Аватар (blob, до 40 КБ). Только локально и в ответах на peer profile request.</summary>
+    public byte[]? Avatar { get; set; }
+
     public long CreatedUtcTicks { get; set; }
 }

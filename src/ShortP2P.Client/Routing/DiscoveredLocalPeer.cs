@@ -16,6 +16,7 @@ namespace ShortP2P.Discovery;
 ///     <see cref="PresencePeerCapabilities.Chat" />.
 /// </param>
 /// <param name="MessengerServerOnline">Online по каталогу messenger-сервера (GetClients).</param>
+/// <param name="AboutMe">Локально известное «о себе» (из peer profile reply при скане).</param>
 public sealed record DiscoveredLocalPeer(
     CompressedNetworkId NetworkId,
     string Nickname,
@@ -25,7 +26,8 @@ public sealed record DiscoveredLocalPeer(
     int PeerDataUdpPort,
     LinkTechnologyPreset AdvertisedLinkTechnology = LinkTechnologyPreset.Unlimited,
     PresencePeerCapabilities AdvertisedCapabilities = PresencePeerCapabilities.Chat,
-    bool MessengerServerOnline = false);
+    bool MessengerServerOnline = false,
+    string AboutMe = "");
 
 /// <summary>Клиент из каталога messenger-сервера (без прямого UDP/BT адреса).</summary>
 /// <param name="NetworkIdShort">Короткий network id (base64url).</param>

@@ -84,6 +84,12 @@ public partial class ChatsPage : ContentPage
         await Navigation.PushAsync(page).ConfigureAwait(true);
     }
 
+    private async void OnProfileClicked(object? sender, EventArgs e)
+    {
+        var page = MauiProgram.Services.GetRequiredService<ProfilePage>();
+        await Navigation.PushAsync(page).ConfigureAwait(true);
+    }
+
     private async void OnLogsClicked(object? sender, EventArgs e)
     {
         var page = MauiProgram.Services.GetRequiredService<LogsPage>();
@@ -231,8 +237,18 @@ public partial class ChatsPage : ContentPage
             return;
         }
 
-        ProfileLabel.Text =
-            $"You: {u.Nickname} · id {u.NetworkIdShort} · local UDP {u.DataUdpPort}";
+        try
+        {
+            var about = string.IsNullOrWhiteSpace(u.AboutMe) ? "" : $" · {TrimAbout(u.AboutMe, 40)}";
+            ProfileLabel.Text =
+                $"You: {u.Nickname} · id {u.NetworkIdShort} · local UDP {u.DataUdpPort}{about}";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to render own profile header (best-effort)");
+            ProfileLabel.Text =
+                $"You: {u.Nickname} · id {u.NetworkIdShort} · local UDP {u.DataUdpPort}";
+        }
         RefreshSafetyHeader(u);
 
         var list = await _chats.ListChatsAsync(u.Id).ConfigureAwait(true);
@@ -373,6 +389,13 @@ public partial class ChatsPage : ContentPage
         var page = MauiProgram.Services.GetRequiredService<ChatDetailPage>();
         page.ChatId = row.Chat.Id;
         await Navigation.PushAsync(page).ConfigureAwait(true);
+    }
+
+    private static string TrimAbout(string text, int maxChars)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= maxChars)
+            return text;
+        return text[..maxChars] + "…";
     }
 }
 

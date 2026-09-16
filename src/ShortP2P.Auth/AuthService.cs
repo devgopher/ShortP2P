@@ -95,4 +95,26 @@ public sealed class AuthService(IUserAuthRepository users, ISessionStorage sessi
             ? throw new InvalidOperationException("Not logged in.")
             : RsaKeySerializer.DeserializePublic(CurrentUser.RsaPublicJson);
     }
+
+    /// <summary>
+    ///     Обновляет локальные Avatar / AboutMe текущего пользователя (не уходят на messenger-сервер).
+    /// </summary>
+    public async Task<(bool ok, string? error)> UpdateProfileAsync(string? aboutMe, byte[]? avatar)
+    {
+        var user = CurrentUser;
+        if (user == null)
+            return (false, "Not logged in.");
+
+        aboutMe ??= "";
+        if (aboutMe.Length > PeerProfileLimits.MaxAboutMeChars)
+            return (false, $"AboutMe max {PeerProfileLimits.MaxAboutMeChars} characters.");
+        if (avatar != null && avatar.Length > PeerProfileLimits.MaxAvatarBytes)
+            return (false, $"Avatar max {PeerProfileLimits.MaxAvatarBytes / 1024} KB.");
+
+        user.AboutMe = aboutMe;
+        user.Avatar = avatar is { Length: 0 } ? null : avatar;
+        await _users.UpdateUserAsync(user).ConfigureAwait(false);
+        CurrentUser = user;
+        return (true, null);
+    }
 }

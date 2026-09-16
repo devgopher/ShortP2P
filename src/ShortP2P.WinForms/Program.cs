@@ -16,6 +16,7 @@ using ShortP2P.Client.Services.MessengerServers;
 using ShortP2P.Discovery;
 using ShortP2P.Discovery.Ble;
 using ShortP2P.Discovery.Pings;
+using ShortP2P.Discovery.Profile;
 using ShortP2P.Discovery.RouteTables;
 using ShortP2P.Transport;
 using ShortP2P.Transport.Abstractions;
@@ -50,6 +51,8 @@ internal static class Program
         services.AddSingleton<ChatRepository>();
         services.AddSingleton<IBluetoothPresencePingTargetsProvider, BluetoothPresencePingTargetsProvider>();
         services.AddSingleton<IBleDiscoveredPeerStore, SqliteBleDiscoveredPeerStore>();
+        services.AddSingleton<IPeerProfileStore, SqlitePeerProfileStore>();
+        services.AddSingleton<ILocalPeerProfileSource, AuthLocalPeerProfileSource>();
         services.AddSingleton<P2pRoutingSettingsStore>();
         services.AddSingleton<AppSettingsStore>();
         services.AddSingleton<BluetoothTransportRegistration>();
@@ -81,7 +84,9 @@ internal static class Program
             sp.GetRequiredService<IBleDiscoveredPeerStore>(),
             sp.GetRequiredService<IBluetoothPresencePingTargetsProvider>(),
             sp.GetRequiredService<ILoggerFactory>(),
-            sp.GetRequiredService<MessengerServerSyncService>()));
+            sp.GetRequiredService<MessengerServerSyncService>(),
+            sp.GetRequiredService<IPeerProfileStore>(),
+            sp.GetRequiredService<ILocalPeerProfileSource>()));
 
         services.AddTransient<LoginForm>();
         services.AddTransient<RegisterForm>();
@@ -91,6 +96,7 @@ internal static class Program
         services.AddTransient<RoutingSettingsForm>();
         services.AddTransient<MessengerServersForm>();
         services.AddTransient<AppSettingsForm>();
+        services.AddTransient<ProfileForm>();
 
         using var host = builder.Build();
         host.Services.ApplyRouteDatabaseMigrationsAsync().GetAwaiter().GetResult();

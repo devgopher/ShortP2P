@@ -5,8 +5,9 @@ using ShortP2P.Transport.Abstractions;
 namespace ShortP2P.Discovery.Transceivers;
 
 /// <summary>
-///     Приёмопередатчик discovery wire-пакетов (gossip 0x40/0x41 + route table 0x42/0x43)
-///     на UDP <see cref="GossipWireCodec.UdpPort" />. Поддерживает unicast и IPv4 broadcast.
+///     Приёмопередатчик discovery wire-пакетов (gossip 0x40/0x41 + route table 0x42/0x43 +
+///     peer profile 0x44/0x45) на UDP <see cref="GossipWireCodec.UdpPort" />. Поддерживает unicast и
+///     IPv4 broadcast.
 /// </summary>
 public sealed class DiscoveryWireTransceiver(ITransport transport, int udpPort = GossipWireCodec.UdpPort)
     : IBroadcastTransceiver<DiscoveryWireMessage>
@@ -107,6 +108,12 @@ public sealed class DiscoveryWireTransceiver(ITransport transport, int udpPort =
                 return true;
             case (byte)DiscoveryWireKind.RouteTableReply:
                 kind = DiscoveryWireKind.RouteTableReply;
+                return true;
+            case (byte)DiscoveryWireKind.PeerProfileRequest:
+                kind = DiscoveryWireKind.PeerProfileRequest;
+                return true;
+            case (byte)DiscoveryWireKind.PeerProfileReply:
+                kind = DiscoveryWireKind.PeerProfileReply;
                 return true;
             default:
                 kind = default;

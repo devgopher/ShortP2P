@@ -110,6 +110,7 @@ public sealed class MainChatsForm : Form
         var btnRouting = new Button { Text = "P2P routing", AutoSize = true };
         var btnServers = new Button { Text = "Servers", AutoSize = true };
         var btnSettings = new Button { Text = "Настройки", AutoSize = true };
+        var btnProfile = new Button { Text = "Мой профиль", AutoSize = true };
         var btnLanScan = new Button { Text = "LAN scan", AutoSize = true };
         var btnDelete = new Button { Text = "Delete chat", AutoSize = true };
         var btnSeeLogs = new Button { Text = "See logs", AutoSize = true };
@@ -118,6 +119,7 @@ public sealed class MainChatsForm : Form
         toolbar.Controls.Add(btnMyQr);
         toolbar.Controls.Add(btnMyAddresses);
         toolbar.Controls.Add(btnCopy);
+        toolbar.Controls.Add(btnProfile);
         toolbar.Controls.Add(btnLanScan);
         toolbar.Controls.Add(btnRouting);
         toolbar.Controls.Add(btnServers);
@@ -130,6 +132,7 @@ public sealed class MainChatsForm : Form
         btnMyQr.Click += OnMyQr;
         btnMyAddresses.Click += OnMyAddresses;
         btnCopy.Click += OnCopyKeys;
+        btnProfile.Click += OnProfile;
         btnLanScan.Click += OnLanScan;
         btnRouting.Click += OnRoutingSettings;
         btnServers.Click += OnMessengerServers;
@@ -429,7 +432,8 @@ public sealed class MainChatsForm : Form
             var prevTop = _list.Items.Count > 0 ? _list.TopIndex : 0;
             var prevSelectedId = (_list.SelectedItem as ChatEntity)?.Id;
 
-            _profile.Text = $"You: {u.Nickname} · id {u.NetworkIdShort} · local UDP {u.DataUdpPort}";
+            var about = string.IsNullOrWhiteSpace(u.AboutMe) ? "" : $" · {TrimAbout(u.AboutMe, 40)}";
+            _profile.Text = $"You: {u.Nickname} · id {u.NetworkIdShort} · local UDP {u.DataUdpPort}{about}";
             var list = await _chats.ListChatsAsync(u.Id).ConfigureAwait(true);
             var idsNow = list.Select(c => c.Id).ToHashSet();
             if (!_knownChatsInitialized)
@@ -579,6 +583,14 @@ public sealed class MainChatsForm : Form
         _userActions.LogInformation("Chats: open app settings");
         using var f = _services.GetRequiredService<AppSettingsForm>();
         f.ShowDialog(this);
+    }
+
+    private void OnProfile(object? sender, EventArgs e)
+    {
+        _userActions.LogInformation("Chats: open own profile");
+        using var f = _services.GetRequiredService<ProfileForm>();
+        f.ShowDialog(this);
+        _ = RefreshAsync();
     }
 
     private void OnMyQr(object? sender, EventArgs e)
@@ -822,5 +834,12 @@ public sealed class MainChatsForm : Form
 
         label.Text = available ? $"● {name}: доступен" : $"● {name}: недоступен";
         label.ForeColor = available ? Color.ForestGreen : Color.IndianRed;
+    }
+
+    private static string TrimAbout(string text, int maxChars)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= maxChars)
+            return text;
+        return text[..maxChars] + "…";
     }
 }

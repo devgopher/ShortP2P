@@ -9,4 +9,6 @@ public interface IUserAuthRepository
     Task<UserEntity?> FindByIdAsync(int id, CancellationToken cancellationToken = default);
 
     Task InsertUserAsync(UserEntity user, CancellationToken cancellationToken = default);
+
+    Task UpdateUserAsync(UserEntity user, CancellationToken cancellationToken = default);
 }

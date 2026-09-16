@@ -4,10 +4,13 @@ using ShortP2P.Client.Compat;
 #endif
 using System.Diagnostics;
 using System.Net;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ShortP2P.Auth.Data;
 using ShortP2P.Discovery.Ble;
 using ShortP2P.Discovery.Gossip;
 using ShortP2P.Discovery.Pings;
+using ShortP2P.Discovery.Profile;
 using ShortP2P.Discovery.RouteTables;
 using ShortP2P.Discovery.Transceivers;
 using ShortP2P.Transport;
@@ -35,7 +38,10 @@ public sealed class LocalNetworkScanner(
     IDiscoveryPingStore? discoveryPingStore = null,
     IBleShortP2PPeripheralScanner? blePeripheralScanner = null,
     IBleDiscoveredPeerStore? bleDiscoveredPeerStore = null,
-    IBluetoothPresencePingTargetsProvider? bluetoothPresencePingTargetsProvider = null) : IAsyncDisposable
+    IBluetoothPresencePingTargetsProvider? bluetoothPresencePingTargetsProvider = null,
+    IPeerProfileStore? peerProfileStore = null,
+    ILocalPeerProfileSource? localPeerProfileSource = null,
+    ILogger? logger = null) : IAsyncDisposable
 {
     /// <summary>Длительность приёма пингов при ручном сканировании по умолчанию.</summary>
     public static readonly TimeSpan DefaultScanListenDuration = TimeSpan.FromSeconds(45);
@@ -48,6 +54,9 @@ public sealed class LocalNetworkScanner(
 
     private readonly ConcurrentDictionary<CompressedNetworkId, DiscoveredLocalPeer> _entries = new();
     private readonly Func<ITransport?>? _getBluetoothTransport = getBluetoothTransport;
+    private readonly ILogger _logger = logger ?? NullLogger.Instance;
+    private readonly ConcurrentDictionary<long, CompressedNetworkId> _pendingProfileNonces = new();
+    private readonly ConcurrentDictionary<CompressedNetworkId, byte> _profileRequestInFlight = new();
     private readonly List<PresencePingCodec.Transceiver> _secondaryPingTransceivers = [];
     private readonly List<Task> _secondaryPresenceReceiveTasks = [];
     private readonly object _snapshotSync = new();
@@ -463,6 +472,9 @@ public sealed class LocalNetworkScanner(
                 _entries.TryRemove(kv.Key, out _);
             }
 
+            _pendingProfileNonces.Clear();
+            _profileRequestInFlight.Clear();
+
             RebuildSnapshot();
             ClientsChanged?.Invoke(this, EventArgs.Empty);
 
@@ -541,6 +553,7 @@ public sealed class LocalNetworkScanner(
 
         OnDiscoveryPingReceived(peer);
         DiscoveryPingReceived?.Invoke(this, new DiscoveryPingReceivedEventArgs(peer));
+        SchedulePeerProfileRequest(peer);
     }
 
     private static DiscoveredLocalPeer MergeDiscoveredPeers(DiscoveredLocalPeer existing, DiscoveredLocalPeer incoming)
@@ -548,6 +561,7 @@ public sealed class LocalNetworkScanner(
         var lastSeen = incoming.LastSeenUtc > existing.LastSeenUtc ? incoming.LastSeenUtc : existing.LastSeenUtc;
         var nick = !string.IsNullOrEmpty(existing.Nickname) ? existing.Nickname : incoming.Nickname;
         var serverOnline = existing.MessengerServerOnline || incoming.MessengerServerOnline;
+        var aboutMe = !string.IsNullOrEmpty(incoming.AboutMe) ? incoming.AboutMe : existing.AboutMe;
 
         if (existing.TransportKind is TransportKind.Udp or TransportKind.Bluetooth &&
             incoming.TransportKind == TransportKind.MessengerServer)
@@ -556,7 +570,8 @@ public sealed class LocalNetworkScanner(
             {
                 LastSeenUtc = lastSeen,
                 Nickname = nick,
-                MessengerServerOnline = incoming.MessengerServerOnline
+                MessengerServerOnline = incoming.MessengerServerOnline,
+                AboutMe = aboutMe
             };
         }
 
@@ -567,7 +582,8 @@ public sealed class LocalNetworkScanner(
             {
                 LastSeenUtc = lastSeen,
                 Nickname = string.IsNullOrEmpty(incoming.Nickname) ? existing.Nickname : incoming.Nickname,
-                MessengerServerOnline = existing.MessengerServerOnline
+                MessengerServerOnline = existing.MessengerServerOnline,
+                AboutMe = aboutMe
             };
         }
 
@@ -577,18 +593,21 @@ public sealed class LocalNetworkScanner(
             {
                 LastSeenUtc = lastSeen,
                 Nickname = nick,
-                MessengerServerOnline = serverOnline
+                MessengerServerOnline = serverOnline,
+                AboutMe = aboutMe
             },
             TransportKind.Bluetooth when incoming.TransportKind == TransportKind.Udp => incoming with
             {
                 LastSeenUtc = lastSeen,
                 Nickname = string.IsNullOrEmpty(incoming.Nickname) ? existing.Nickname : incoming.Nickname,
-                MessengerServerOnline = serverOnline
+                MessengerServerOnline = serverOnline,
+                AboutMe = aboutMe
             },
             _ => (incoming.LastSeenUtc >= existing.LastSeenUtc ? incoming : existing) with
             {
                 Nickname = nick,
-                MessengerServerOnline = serverOnline
+                MessengerServerOnline = serverOnline,
+                AboutMe = aboutMe
             }
         };
     }
@@ -659,15 +678,22 @@ public sealed class LocalNetworkScanner(
                 case DiscoveryWireKind.RouteTableReply:
                     // Reply парсится потребителем (Discovery), здесь — только ack-стейт через DiscoveryPingReceived при необходимости.
                     return;
+                case DiscoveryWireKind.PeerProfileRequest:
+                    await TryReplyToPeerProfileRequestAsync(wireUdp, buf, msg.RemoteAddress, cancellationToken)
+                        .ConfigureAwait(false);
+                    return;
+                case DiscoveryWireKind.PeerProfileReply:
+                    await TryHandlePeerProfileReplyAsync(buf, cancellationToken).ConfigureAwait(false);
+                    return;
             }
         }
         catch (OperationCanceledException)
         {
             // ignore
         }
-        catch
+        catch (Exception ex)
         {
-            // safety: подписчик не должен ронять цикл приёма транспивера
+            _logger.LogWarning(ex, "Discovery wire handling failed (best-effort); continuing");
         }
     }
 
@@ -704,7 +730,198 @@ public sealed class LocalNetworkScanner(
             dataPort);
         OnDiscoveryPingReceived(peer);
         DiscoveryPingReceived?.Invoke(this, new DiscoveryPingReceivedEventArgs(peer));
+        SchedulePeerProfileRequest(peer);
         return true;
+    }
+
+    /// <summary>
+    ///     Best-effort: подтянуть кэш и запросить Avatar/AboutMe у пира по discovery wire.
+    ///     Ошибки только логируются — скан и discovery не блокируются.
+    /// </summary>
+    private void SchedulePeerProfileRequest(DiscoveredLocalPeer peer)
+    {
+        if (peer.TransportKind is not (TransportKind.Udp or TransportKind.Bluetooth))
+            return;
+        if (!_profileRequestInFlight.TryAdd(peer.NetworkId, 0))
+            return;
+
+        var token = _cts?.Token ?? CancellationToken.None;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await TryHydrateAboutMeFromStoreAsync(peer.NetworkId, token).ConfigureAwait(false);
+                if (peer.TransportKind == TransportKind.Udp)
+                    await RequestPeerProfileAsync(peer, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // stop / dispose
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Peer profile request failed for {NetworkId} (best-effort); continuing scan",
+                    peer.NetworkId.ToShortString());
+            }
+            finally
+            {
+                _profileRequestInFlight.TryRemove(peer.NetworkId, out _);
+            }
+        }, token);
+    }
+
+    private async Task TryHydrateAboutMeFromStoreAsync(CompressedNetworkId networkId, CancellationToken cancellationToken)
+    {
+        if (peerProfileStore == null)
+            return;
+        try
+        {
+            var snap = await peerProfileStore.GetAsync(networkId, cancellationToken).ConfigureAwait(false);
+            if (snap == null || string.IsNullOrEmpty(snap.AboutMe))
+                return;
+            if (_entries.TryGetValue(networkId, out var existing) && string.IsNullOrEmpty(existing.AboutMe))
+            {
+                _entries[networkId] = existing with { AboutMe = snap.AboutMe };
+                if (!_scanSessionActive)
+                {
+                    RebuildSnapshot();
+                    ClientsChanged?.Invoke(this, EventArgs.Empty);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Peer profile cache read failed for {NetworkId} (best-effort); continuing",
+                networkId.ToShortString());
+        }
+    }
+
+    private async Task RequestPeerProfileAsync(DiscoveredLocalPeer peer, CancellationToken cancellationToken)
+    {
+        var wireUdp = _discoveryWireUdp;
+        var localPeer = _localPeer;
+        if (wireUdp == null || localPeer == null)
+            return;
+
+        IPEndPoint remoteEp;
+        try
+        {
+            remoteEp = UdpTransportAddress.ToIPEndPoint(peer.SourceAddress);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Peer profile: cannot resolve UDP endpoint for {NetworkId}; skipping",
+                peer.NetworkId.ToShortString());
+            return;
+        }
+
+        var dest = UdpTransportAddress.FromIPEndPoint(new IPEndPoint(remoteEp.Address, GossipWireCodec.UdpPort));
+        var nonce = Random.Shared.NextInt64();
+        _pendingProfileNonces[nonce] = peer.NetworkId;
+        try
+        {
+            var request = PeerProfileWireCodec.BuildRequest(nonce, localPeer.NetworkId);
+            await wireUdp.SendAsync(request, dest, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _pendingProfileNonces.TryRemove(nonce, out _);
+            _logger.LogWarning(ex,
+                "Peer profile request send failed for {NetworkId} (best-effort)",
+                peer.NetworkId.ToShortString());
+        }
+    }
+
+    private async Task TryReplyToPeerProfileRequestAsync(ITransport replyTransport, byte[] buf,
+        TransportAddress remote, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!PeerProfileWireCodec.TryParseRequest(buf, out var nonce, out var sender))
+                return;
+
+            var localPeer = _localPeer;
+            if (localPeer == null)
+                return;
+            if (sender == localPeer.NetworkId)
+                return;
+
+            string aboutMe = "";
+            byte[]? avatar = null;
+            if (localPeerProfileSource != null)
+            {
+                try
+                {
+                    (aboutMe, avatar) = await localPeerProfileSource.GetLocalProfileAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Local profile source failed while answering peer profile request");
+                }
+            }
+
+            var reply = PeerProfileWireCodec.BuildReply(nonce, localPeer.NetworkId, aboutMe, avatar);
+            await replyTransport.SendAsync(reply, remote, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Peer profile reply failed (best-effort); continuing");
+        }
+    }
+
+    private async Task TryHandlePeerProfileReplyAsync(byte[] buf, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!PeerProfileWireCodec.TryParseReply(buf, out var nonce, out var responderId, out var aboutMe,
+                    out var avatar))
+            {
+                _logger.LogWarning("Peer profile reply parse failed (best-effort); ignoring datagram");
+                return;
+            }
+
+            if (!_pendingProfileNonces.TryRemove(nonce, out var expectedId) || expectedId != responderId)
+            {
+                // чужой/просроченный nonce — игнорируем без ошибки скана
+                return;
+            }
+
+            if (peerProfileStore != null)
+            {
+                try
+                {
+                    string? nick = null;
+                    if (_entries.TryGetValue(responderId, out var known))
+                        nick = known.Nickname;
+                    await peerProfileStore.UpsertAsync(responderId, nick, aboutMe, avatar, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Peer profile store write failed for {NetworkId} (best-effort); continuing",
+                        responderId.ToShortString());
+                }
+            }
+
+            if (_entries.TryGetValue(responderId, out var existing))
+            {
+                _entries[responderId] = existing with { AboutMe = aboutMe ?? "" };
+                if (!_scanSessionActive)
+                {
+                    RebuildSnapshot();
+                    ClientsChanged?.Invoke(this, EventArgs.Empty);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Peer profile reply handling failed (best-effort); continuing");
+        }
     }
 
     private void RegisterGossipBroadcastNonce(long nonce)

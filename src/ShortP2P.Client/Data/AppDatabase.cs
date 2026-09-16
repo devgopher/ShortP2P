@@ -156,9 +156,14 @@ public sealed class AppDatabase
         await connection.CreateTableAsync<BleDiscoveredPeerEntity>().ConfigureAwait(false);
         await connection.CreateTableAsync<MessengerServerEntity>().ConfigureAwait(false);
         await connection.CreateTableAsync<PeerBlacklistEntity>().ConfigureAwait(false);
+        await connection.CreateTableAsync<PeerProfileEntity>().ConfigureAwait(false);
 
         await TryAlterAsync(connection,
             "ALTER TABLE messenger_servers ADD COLUMN TrustRating REAL NOT NULL DEFAULT 0.8").ConfigureAwait(false);
+        await TryAlterAsync(connection, "ALTER TABLE users ADD COLUMN AboutMe TEXT NOT NULL DEFAULT ''")
+            .ConfigureAwait(false);
+        await TryAlterAsync(connection, "ALTER TABLE users ADD COLUMN Avatar BLOB NULL")
+            .ConfigureAwait(false);
         await TryAlterAsync(connection, "ALTER TABLE chats ADD COLUMN RelayRouteBlob TEXT NULL")
             .ConfigureAwait(false);
         await TryAlterAsync(connection, "ALTER TABLE chats ADD COLUMN PeerEndpointsJson TEXT NULL")
