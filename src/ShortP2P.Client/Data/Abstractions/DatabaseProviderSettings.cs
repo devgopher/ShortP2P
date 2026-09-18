@@ -6,7 +6,7 @@ namespace ShortP2P.Client.Data.Abstractions;
 public class DatabaseProviderSettings
 {
     private readonly string _settingsPath;
-    private DatabaseProviderType _currentProvider = DatabaseProviderType.Sqlite;
+    private DatabaseProviderType _currentProvider = DatabaseProviderType.LiteDbAsync;
 
     public DatabaseProviderSettings(string appDataDirectory)
     {
@@ -34,7 +34,16 @@ public class DatabaseProviderSettings
     /// Get all available provider types
     /// </summary>
     public static DatabaseProviderType[] AvailableProviders =>
-        new[] { DatabaseProviderType.Sqlite, DatabaseProviderType.LiteDbAsync };
+        new[] { DatabaseProviderType.LiteDbAsync, DatabaseProviderType.Sqlite };
+
+    /// <summary>
+    /// User-facing label (keeps enum/type names technical).
+    /// </summary>
+    public static string GetDisplayName(DatabaseProviderType provider) => provider switch
+    {
+        DatabaseProviderType.LiteDbAsync => "LiteDB",
+        _ => provider.ToString()
+    };
 
     private void Load()
     {
