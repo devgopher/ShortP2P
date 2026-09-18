@@ -42,6 +42,9 @@ public sealed class ChatRepository(AppDatabase appDatabase, PeerBlacklist? black
     /// <summary>Новое сообщение записано в БД (входящее или исходящее).</summary>
     public event EventHandler<ChatMessageAppendedEventArgs>? ChatMessageAppended;
 
+    /// <summary>Изменился статус доставки исходящего сообщения (квитанция и т.п.).</summary>
+    public event EventHandler<ChatMessageAppendedEventArgs>? ChatMessageDeliveryChanged;
+
     /// <summary>В БД вставлен новый чат (не обновление существующего).</summary>
     public event EventHandler<ChatCreatedEventArgs>? ChatCreated;
 
@@ -737,6 +740,81 @@ public sealed class ChatRepository(AppDatabase appDatabase, PeerBlacklist? black
         return true;
     }
 
+    /// <summary>
+    /// Remembers that local outgoing <paramref name="localMessageId"/> was posted to messenger servers
+    /// under <paramref name="serverMessageId"/> (for delivery-receipt correlation).
+    /// </summary>
+    public async Task RegisterOutgoingServerMessageAsync(string serverMessageId, int localMessageId, int chatId)
+    {
+        var id = serverMessageId?.Trim() ?? "";
+        if (id.Length == 0 || localMessageId <= 0 || chatId <= 0)
+            return;
+
+        await _db.WriteAsync(async conn =>
+        {
+            var existing = await conn.FindAsync<OutgoingServerMessageEntity>(id).ConfigureAwait(false);
+            if (existing != null)
+            {
+                existing.LocalMessageId = localMessageId;
+                existing.ChatId = chatId;
+                existing.CreatedUtcTicks = DateTime.UtcNow.Ticks;
+                await conn.UpdateAsync(existing).ConfigureAwait(false);
+                return;
+            }
+
+            try
+            {
+                await conn.InsertAsync(new OutgoingServerMessageEntity
+                {
+                    ServerMessageId = id,
+                    LocalMessageId = localMessageId,
+                    ChatId = chatId,
+                    CreatedUtcTicks = DateTime.UtcNow.Ticks
+                }).ConfigureAwait(false);
+            }
+            catch (SQLiteException)
+            {
+                // Concurrent insert of the same primary key — treat as already registered.
+            }
+        }).ConfigureAwait(false);
+
+        if ((Interlocked.Increment(ref _seenPruneCounter) & 31) == 0)
+        {
+            try
+            {
+                var cutoff = DateTime.UtcNow.AddDays(-30).Ticks;
+                await _db.WriteAsync(conn => conn.ExecuteAsync(
+                        "DELETE FROM outgoing_server_messages WHERE CreatedUtcTicks < ?", cutoff))
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore prune failures
+            }
+        }
+    }
+
+    /// <summary>
+    /// Looks up and removes a pending outgoing server-message mapping.
+    /// Returns local message id + chat id when found.
+    /// </summary>
+    public async Task<(int LocalMessageId, int ChatId)?> TryTakeOutgoingServerMessageAsync(string? serverMessageId)
+    {
+        var id = serverMessageId?.Trim() ?? "";
+        if (id.Length == 0)
+            return null;
+
+        return await _db.WriteAsync(async conn =>
+        {
+            var row = await conn.FindAsync<OutgoingServerMessageEntity>(id).ConfigureAwait(false);
+            if (row == null)
+                return ((int LocalMessageId, int ChatId)?)null;
+
+            await conn.DeleteAsync(row).ConfigureAwait(false);
+            return (row.LocalMessageId, row.ChatId);
+        }).ConfigureAwait(false);
+    }
+
     public async Task<int> AddMessageAsync(int chatId, bool outgoing, string text,
         MessageDeliveryStatus deliveryStatus = MessageDeliveryStatus.Delivered)
     {
@@ -865,6 +943,62 @@ public sealed class ChatRepository(AppDatabase appDatabase, PeerBlacklist? black
         }).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Inserts an incoming transfer-offer row in one write so UI never sees a bare text stub
+    /// ("image" / "video") before payload/transfer metadata is applied.
+    /// </summary>
+    public async Task<int> AddIncomingTransferOfferAsync(
+        int chatId,
+        string displayText,
+        string mimeType,
+        string transferId,
+        string transferToken,
+        string transferPayloadKind,
+        string transferFileName,
+        long transferSizeBytes,
+        string transferHost,
+        int transferPort,
+        long transferExpiresUtcTicks)
+    {
+        var text = string.IsNullOrWhiteSpace(displayText)
+            ? (string.IsNullOrWhiteSpace(transferFileName) ? "[Входящее вложение]" : transferFileName.Trim())
+            : displayText.Trim();
+        return await _db.WriteAsync(async conn =>
+        {
+            var msg = new ChatMessageEntity
+            {
+                ChatId = chatId,
+                Outgoing = false,
+                Text = text,
+                SentUtcTicks = DateTime.UtcNow.Ticks,
+                DeliveryStatus = (int)MessageDeliveryStatus.NotApplicable,
+                PayloadKind = (int)ChatPayloadKind.TransferOffer,
+                MimeType = mimeType?.Trim() ?? "",
+                ImageBlob = null,
+                TransferId = transferId?.Trim() ?? "",
+                TransferToken = transferToken?.Trim() ?? "",
+                TransferPayloadKind = transferPayloadKind?.Trim() ?? "",
+                TransferFileName = transferFileName?.Trim() ?? "",
+                TransferSizeBytes = Math.Max(0, transferSizeBytes),
+                TransferHost = transferHost?.Trim() ?? "",
+                TransferPort = transferPort,
+                TransferExpiresUtcTicks = transferExpiresUtcTicks,
+                TransferState = (int)ChatTransferState.AwaitingClick
+            };
+            await conn.InsertAsync(msg).ConfigureAwait(false);
+
+            var chat = await conn.FindAsync<ChatEntity>(chatId).ConfigureAwait(false);
+            if (chat != null)
+            {
+                chat.UpdatedUtcTicks = DateTime.UtcNow.Ticks;
+                await conn.UpdateAsync(chat).ConfigureAwait(false);
+            }
+
+            await RaiseChatMessageAppendedAsync(chatId, outgoing: false, chat).ConfigureAwait(false);
+            return msg.Id;
+        }).ConfigureAwait(false);
+    }
+
     public async Task<ChatMessageEntity?> GetMessageAsync(int messageId) =>
         await GetMessageAsync(messageId, includePayloadBlob: true).ConfigureAwait(false);
 
@@ -913,10 +1047,35 @@ public sealed class ChatRepository(AppDatabase appDatabase, PeerBlacklist? black
         };
     }
 
-    public Task UpdateMessageDeliveryStatusAsync(int messageId, MessageDeliveryStatus status) =>
-        _db.WriteAsync(conn => conn.ExecuteAsync(
-            "UPDATE messages SET DeliveryStatus = ? WHERE Id = ?",
-            (int)status, messageId));
+    public async Task UpdateMessageDeliveryStatusAsync(int messageId, MessageDeliveryStatus status)
+    {
+        ChatMessageEntity? row = null;
+        var changed = false;
+        await _db.WriteAsync(async conn =>
+        {
+            row = await conn.FindAsync<ChatMessageEntity>(messageId).ConfigureAwait(false);
+            if (row == null)
+                return;
+
+            // Never downgrade Delivered → Sent/Pending (receipt may race with local Sent update).
+            var current = (MessageDeliveryStatus)row.DeliveryStatus;
+            if (current == MessageDeliveryStatus.Delivered &&
+                status is MessageDeliveryStatus.Sent or MessageDeliveryStatus.Pending)
+                return;
+
+            if (current == status)
+                return;
+
+            await conn.ExecuteAsync(
+                "UPDATE messages SET DeliveryStatus = ? WHERE Id = ?",
+                (int)status, messageId).ConfigureAwait(false);
+            row.DeliveryStatus = (int)status;
+            changed = true;
+        }).ConfigureAwait(false);
+
+        if (changed && row is { Outgoing: true })
+            RaiseEvent(ChatMessageDeliveryChanged, new ChatMessageAppendedEventArgs(row.ChatId, outgoing: true));
+    }
 
     public Task UpdateTransferStateAsync(int messageId, ChatTransferState state) =>
         _db.WriteAsync(conn => conn.ExecuteAsync(

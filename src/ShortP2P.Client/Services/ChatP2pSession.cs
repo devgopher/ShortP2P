@@ -342,6 +342,11 @@ public sealed class ChatP2PSession : IAsyncDisposable
     public event EventHandler<int>? TransferStateChanged;
     public event EventHandler? HandshakeStatusChanged;
 
+    /// <summary>
+    /// UI refresh when delivery status changes outside this session (e.g. server delivery receipt).
+    /// </summary>
+    public void NotifyMessagesChangedFromExternal() => RaiseMessagesChanged();
+
     /// <summary>Текущий статус handshake для шапки чата.</summary>
     public ChatHandshakeStatus HandshakeStatus => _handshakeStatus;
 
@@ -1294,14 +1299,26 @@ public sealed class ChatP2PSession : IAsyncDisposable
         SubscribeToTransceivers();
         using var linkedCts = CreateOutboundLinkedCts(cancellationToken, _outboundCts);
         var deliveryToken = linkedCts?.Token ?? cancellationToken;
-        
+
+        string? serverMessageId = null;
         await _guaranteedDelivery.ExecuteAsync(
             async ct =>
             {
                 var servers = _runtime.MessengerServers;
-                if (servers != null &&
-                    await servers.TryDeliverWireAsync(_chat, _user, wire, ct).ConfigureAwait(false))
-                    return;
+                if (servers != null)
+                {
+                    var acceptedId = await servers.TryDeliverWireAsync(_chat, _user, wire, ct)
+                        .ConfigureAwait(false);
+                    if (!string.IsNullOrEmpty(acceptedId))
+                    {
+                        // Register immediately so a fast peer receipt can correlate even if we crash
+                        // before the outer Sent update.
+                        await _repo.RegisterOutgoingServerMessageAsync(acceptedId, messageId, _chat.Id)
+                            .ConfigureAwait(false);
+                        serverMessageId = acceptedId;
+                        return;
+                    }
+                }
 
                 await EnsureSessionAsInitiatorAsync(ct).ConfigureAwait(false);
                 if (_handshakeWeInitiated && !_cryptoProbeRoundTripOk)
@@ -1327,7 +1344,19 @@ public sealed class ChatP2PSession : IAsyncDisposable
             _routingSettings,
             deliveryToken).ConfigureAwait(false);
 
-        await _repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Delivered).ConfigureAwait(false);
+        if (!string.IsNullOrEmpty(serverMessageId))
+        {
+            // Server accepted — one checkmark (Sent). Delivered waits for the peer receipt.
+            await _repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Sent)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            // P2P path: ExpectAck (or relay send) already completed — peer-side delivery confirmed.
+            await _repo.UpdateMessageDeliveryStatusAsync(messageId, MessageDeliveryStatus.Delivered)
+                .ConfigureAwait(false);
+        }
+
         RaiseMessagesChanged();
     }
 
@@ -1342,7 +1371,8 @@ public sealed class ChatP2PSession : IAsyncDisposable
             {
                 var servers = _runtime.MessengerServers;
                 if (servers != null &&
-                    await servers.TryDeliverWireAsync(_chat, _user, wire, ct).ConfigureAwait(false))
+                    !string.IsNullOrEmpty(
+                        await servers.TryDeliverWireAsync(_chat, _user, wire, ct).ConfigureAwait(false)))
                     return;
 
                 await EnsureSessionAsInitiatorAsync(ct).ConfigureAwait(false);
@@ -1688,15 +1718,19 @@ public sealed class ChatP2PSession : IAsyncDisposable
     private async Task HandleTransferOfferAsync(ChatWireTransferOffer offer, string? blobServerBaseUrl = null)
     {
         var text = string.IsNullOrWhiteSpace(offer.FileName) ? "[Входящее вложение]" : offer.FileName;
-        var payloadKind = ChatPayloadKind.TransferOffer;
-        var messageId = await _repo.AddMessageAsync(_chat.Id, false, text).ConfigureAwait(false);
-        await _repo.UpdateMessagePayloadAsync(messageId, payloadKind, text, offer.MimeType, [])
-            .ConfigureAwait(false);
         var host = !string.IsNullOrWhiteSpace(offer.Host) ? offer.Host : blobServerBaseUrl?.Trim() ?? "";
-        await _repo.UpdateMessageTransferMetadataAsync(messageId, offer.TransferId, offer.TransferToken,
+        await _repo.AddIncomingTransferOfferAsync(
+                _chat.Id,
+                text,
+                offer.MimeType,
+                offer.TransferId,
+                offer.TransferToken,
                 offer.PayloadKind,
-                offer.FileName, offer.SizeBytes, host, offer.Port, offer.ExpiresUtcTicks,
-                ChatTransferState.AwaitingClick)
+                offer.FileName,
+                offer.SizeBytes,
+                host,
+                offer.Port,
+                offer.ExpiresUtcTicks)
             .ConfigureAwait(false);
     }
 

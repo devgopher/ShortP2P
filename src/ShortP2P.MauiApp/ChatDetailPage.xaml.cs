@@ -894,6 +894,7 @@ public partial class ChatDetailPage : ContentPage
         return status switch
         {
             MessageDeliveryStatus.Pending => (OutgoingDeliveryIndicators.Pending, Color.FromArgb("#B8860B"), true),
+            MessageDeliveryStatus.Sent => (OutgoingDeliveryIndicators.Sent, Color.FromArgb("#228B22"), true),
             MessageDeliveryStatus.Delivered => (OutgoingDeliveryIndicators.Delivered, Color.FromArgb("#228B22"), true),
             MessageDeliveryStatus.Failed => (OutgoingDeliveryIndicators.Failed, Colors.Red, true),
             _ => (OutgoingDeliveryIndicators.Delivered, Color.FromArgb("#228B22"), true)

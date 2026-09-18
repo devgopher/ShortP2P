@@ -331,9 +331,9 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
     /// <summary>
     /// Delivers an already-built chat wire through trusted messenger servers where the peer is registered.
-    /// Returns true if at least one such server accepted the message.
+    /// Returns the server <c>MessageId</c> if at least one such server accepted the message; otherwise null.
     /// </summary>
-    public async Task<bool> TryDeliverWireAsync(
+    public async Task<string?> TryDeliverWireAsync(
         ChatEntity chat,
         UserEntity user,
         byte[] wire,
@@ -364,7 +364,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         if (string.IsNullOrWhiteSpace(latest.PeerRsaPublicJson))
         {
             _logger.LogInformation("Send skipped: no peer public key for chat {ChatId}", latest.Id);
-            return false;
+            return null;
         }
 
         RsaPublicKey peerKey;
@@ -374,7 +374,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         }
         catch
         {
-            return false;
+            return null;
         }
 
         string encrypted;
@@ -385,12 +385,12 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to encrypt server payload for chat {ChatId}", latest.Id);
-            return false;
+            return null;
         }
 
         var peerId = ChatRepository.CanonicalPeerNetworkId(latest.PeerNetworkIdShort);
         if (peerId.Length == 0)
-            return false;
+            return null;
 
         var targets = await CollectPeerServerTargetsAsync(peerId, cancellationToken).ConfigureAwait(false);
         if (targets.Count == 0)
@@ -398,13 +398,14 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             _logger.LogInformation(
                 "Send skipped: no ready trusted messenger server for peer {PeerId}",
                 peerId);
-            return false;
+            return null;
         }
 
         var now = DateTime.UtcNow;
+        var messageId = Guid.NewGuid().ToString("N");
         var dto = new MessageDto
         {
-            MessageId = Guid.NewGuid().ToString("N"),
+            MessageId = messageId,
             SrcNetworkId = user.NetworkIdShort.Trim(),
             TgtNetworkId = peerId,
             CreatedUtc = now,
@@ -451,7 +452,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                 }
             }).ConfigureAwait(false);
 
-        return successCount > 0;
+        return successCount > 0 ? messageId : null;
     }
 
     /// <summary>
@@ -855,6 +856,8 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                 if (forwards.Count > 0)
                     await ProcessIncomingForwardsAsync(connection, user, forwards, cancellationToken)
                         .ConfigureAwait(false);
+
+                await ProcessDeliveryReceiptsAsync(connection, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -1279,6 +1282,60 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Pulls delivery tickets for messages we sent (destructive on the server) and marks
+    /// matching local outgoing rows as <see cref="MessageDeliveryStatus.Delivered"/>.
+    /// </summary>
+    private async Task ProcessDeliveryReceiptsAsync(
+        MessengerServerConnection connection,
+        CancellationToken cancellationToken)
+    {
+        if (!_manager.AllowsTraffic(connection))
+            return;
+
+        IReadOnlyList<DeliveryReceiptDto> receipts;
+        try
+        {
+            receipts = await TrackAsync(
+                    connection,
+                    () => connection.Api.GetDeliveryReceiptsAsync(cancellationToken))
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "GetDeliveryReceipts failed on {BaseUrl}", connection.Entity.BaseUrl);
+            return;
+        }
+
+        if (receipts.Count == 0)
+            return;
+
+        var touchedChatIds = new HashSet<int>();
+        foreach (var receipt in receipts)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var mapped = await _chats.TryTakeOutgoingServerMessageAsync(receipt.MessageId).ConfigureAwait(false);
+            if (mapped == null)
+                continue;
+
+            var (localMessageId, chatId) = mapped.Value;
+            await _chats
+                .UpdateMessageDeliveryStatusAsync(localMessageId, MessageDeliveryStatus.Delivered)
+                .ConfigureAwait(false);
+            touchedChatIds.Add(chatId);
+            _logger.LogDebug(
+                "Delivery receipt applied: serverMessageId={ServerMessageId} localMessageId={LocalMessageId}",
+                receipt.MessageId,
+                localMessageId);
+        }
+
+        foreach (var chatId in touchedChatIds)
+        {
+            if (_sessions.TryGetSession(chatId, out var session) && session != null)
+                session.NotifyMessagesChangedFromExternal();
+        }
+    }
+
+    /// <summary>
     /// Persist a server wire without waiting for P2P handshake. Session ingest is used only
     /// when the session is already ready; otherwise (or on failure) write straight to SQLite
     /// so the UI event fires immediately.
@@ -1364,15 +1421,13 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                     return;
                 case ChatWireTransferOffer offer:
                     var text = string.IsNullOrWhiteSpace(offer.FileName) ? "[Входящее вложение]" : offer.FileName;
-                    var messageId = await _chats.AddMessageAsync(chatId, false, text).ConfigureAwait(false);
-                    await _chats.UpdateMessagePayloadAsync(
-                            messageId, ChatPayloadKind.TransferOffer, text, offer.MimeType, [])
-                        .ConfigureAwait(false);
                     var host = !string.IsNullOrWhiteSpace(offer.Host)
                         ? offer.Host
                         : blobServerBaseUrl?.Trim() ?? "";
-                    await _chats.UpdateMessageTransferMetadataAsync(
-                            messageId,
+                    await _chats.AddIncomingTransferOfferAsync(
+                            chatId,
+                            text,
+                            offer.MimeType,
                             offer.TransferId,
                             offer.TransferToken,
                             offer.PayloadKind,
@@ -1380,8 +1435,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                             offer.SizeBytes,
                             host,
                             offer.Port,
-                            offer.ExpiresUtcTicks,
-                            ChatTransferState.AwaitingClick)
+                            offer.ExpiresUtcTicks)
                         .ConfigureAwait(false);
                     return;
                 default:

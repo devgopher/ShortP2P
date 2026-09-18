@@ -1735,6 +1735,7 @@ public sealed class ChatForm : Form
         return status switch
         {
             MessageDeliveryStatus.Pending => (OutgoingDeliveryIndicators.Pending, Color.DarkGoldenrod),
+            MessageDeliveryStatus.Sent => (OutgoingDeliveryIndicators.Sent, Color.ForestGreen),
             MessageDeliveryStatus.Delivered => (OutgoingDeliveryIndicators.Delivered, Color.ForestGreen),
             MessageDeliveryStatus.Failed => (OutgoingDeliveryIndicators.Failed, Color.Red),
             _ => (OutgoingDeliveryIndicators.Delivered, Color.ForestGreen)

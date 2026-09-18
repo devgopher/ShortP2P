@@ -6,5 +6,7 @@ public enum MessageDeliveryStatus
     NotApplicable = 0,
     Pending = 1,
     Delivered = 2,
-    Failed = 3
+    Failed = 3,
+    /// <summary>Принято сервером (или ушло в канал); ждём квитанцию собеседника.</summary>
+    Sent = 4
 }
