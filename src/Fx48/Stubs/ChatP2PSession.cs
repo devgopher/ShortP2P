@@ -4,6 +4,7 @@ using ShortP2P.Auth.Data;
 using ShortP2P.Client.ChatMedia;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Services.MessengerServers;
+using ShortP2P.Crypto;
 
 namespace ShortP2P.Client.Services;
 
@@ -54,6 +55,129 @@ public sealed class ChatP2PSession
     public bool IsReadyForServerReceive => false;
 
     public event EventHandler? MessagesChanged;
+
+    public event EventHandler<int>? TransferStateChanged;
+
+    /// <summary>
+    /// Downloads an incoming transfer blob from messenger servers (no TCP P2P on Fx48).
+    /// Mirrors the server path of the full <c>ChatP2PSession.RequestBinaryDownloadAsync</c>.
+    /// </summary>
+    public async Task RequestBinaryDownloadAsync(int messageId, CancellationToken cancellationToken = default)
+    {
+        var row = await _repo.GetMessageAsync(messageId).ConfigureAwait(false);
+        if (row == null || row.ChatId != _chat.Id || row.Outgoing || string.IsNullOrWhiteSpace(row.TransferId))
+            return;
+
+        var state = (ChatTransferState)row.TransferState;
+        if (state == ChatTransferState.Received && row.ImageBlob is { Length: > 0 })
+            return;
+        if (state == ChatTransferState.Transferring)
+            return;
+
+        await _repo.UpdateTransferStateAsync(messageId, ChatTransferState.Transferring).ConfigureAwait(false);
+        TransferStateChanged?.Invoke(this, messageId);
+        RaiseMessagesChanged();
+
+        try
+        {
+            if (!await TryReceiveBlobFromMessengerServersAsync(row, cancellationToken).ConfigureAwait(false))
+            {
+                throw new InvalidOperationException(
+                    "Не удалось скачать файл с сервера сообщений. Проверьте подключение и повторите.");
+            }
+        }
+        catch
+        {
+            await _repo.UpdateTransferStateAsync(messageId, ChatTransferState.Failed).ConfigureAwait(false);
+            TransferStateChanged?.Invoke(this, messageId);
+            RaiseMessagesChanged();
+            throw;
+        }
+    }
+
+    private async Task<bool> TryReceiveBlobFromMessengerServersAsync(
+        ChatMessageEntity row,
+        CancellationToken cancellationToken)
+    {
+        var blobId = row.TransferId.Trim();
+        if (blobId.Length == 0)
+            return false;
+
+        var hint = LooksLikeHttpBaseUrl(row.TransferHost) ? row.TransferHost : null;
+        var ciphertext = await _servers.TryDownloadBlobAsync(blobId, hint, cancellationToken).ConfigureAwait(false);
+        if (ciphertext == null || ciphertext.Length == 0)
+            return false;
+
+        if (string.IsNullOrWhiteSpace(_user.RsaPrivateJson))
+            return false;
+
+        byte[] wire;
+        try
+        {
+            var privateKey = RsaKeySerializer.DeserializePrivate(_user.RsaPrivateJson);
+            wire = MessengerServerPayloadCodec.Decrypt(ciphertext, privateKey);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex, "Chat {ChatId}: blob decrypt failed for message {MessageId}", _chat.Id, row.Id);
+            return false;
+        }
+
+        if (!ChatWireCodec.TryParse(wire, out var parsed) || parsed == null)
+            return false;
+
+        byte[] bytes;
+        string mimeType;
+        string fileName;
+        ChatPayloadKind kind;
+        switch (parsed)
+        {
+            case ChatWireImage img:
+                bytes = img.ImageBytes;
+                mimeType = img.MimeType;
+                fileName = string.IsNullOrWhiteSpace(row.TransferFileName) ? row.Text : row.TransferFileName;
+                kind = ChatPayloadKind.Image;
+                break;
+            case ChatWireFile f:
+                bytes = f.FileBytes;
+                mimeType = f.MimeType;
+                fileName = string.IsNullOrWhiteSpace(f.FileName)
+                    ? (string.IsNullOrWhiteSpace(row.TransferFileName) ? row.Text : row.TransferFileName)
+                    : f.FileName;
+                kind = ChatPayloadKind.File;
+                break;
+            default:
+                return false;
+        }
+
+        await _repo.UpdateMessagePayloadAsync(row.Id, kind, fileName, mimeType, bytes).ConfigureAwait(false);
+        await _repo.UpdateMessageTransferMetadataAsync(
+                row.Id, row.TransferId, row.TransferToken, row.TransferPayloadKind, row.TransferFileName,
+                bytes.Length, "", 0, 0, ChatTransferState.Received)
+            .ConfigureAwait(false);
+        TransferStateChanged?.Invoke(this, row.Id);
+        RaiseMessagesChanged();
+
+        try
+        {
+            await _servers.TryDeleteBlobAsync(blobId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex, "Chat {ChatId}: blob delete after receive failed", _chat.Id);
+        }
+
+        return true;
+    }
+
+    private static bool LooksLikeHttpBaseUrl(string? host) =>
+        !string.IsNullOrWhiteSpace(host) &&
+        (host.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+         host.StartsWith("http://", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Updates the cached chat row from DB (same Id) without creating a new session.</summary>
     public void ApplyChatRow(ChatEntity row)
