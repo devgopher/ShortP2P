@@ -241,6 +241,51 @@ public sealed class ChatP2PSession
         QueueOutgoingDelivery(messageId);
     }
 
+    public async ValueTask SendImageAsync(ReadOnlyMemory<byte> imageBytes, string mimeType,
+        CancellationToken cancellationToken = default)
+    {
+        if (imageBytes.Length == 0)
+            throw new ArgumentException("Image is empty.", nameof(imageBytes));
+        if (string.IsNullOrWhiteSpace(mimeType))
+            throw new ArgumentException("MIME type is required.", nameof(mimeType));
+
+        var bytes = imageBytes.ToArray();
+        var messageId = await _repo
+            .AddImageMessageAsync(_chat.Id, true, mimeType.Trim(), bytes, MessageDeliveryStatus.Pending)
+            .ConfigureAwait(false);
+        RaiseMessagesChanged();
+        QueueOutgoingDelivery(messageId);
+    }
+
+    public async ValueTask SendFileAsync(string fileName, ReadOnlyMemory<byte> fileBytes, string mimeType,
+        CancellationToken cancellationToken = default)
+    {
+        if (fileBytes.Length == 0)
+            throw new ArgumentException("File is empty.", nameof(fileBytes));
+        if (string.IsNullOrWhiteSpace(mimeType))
+            throw new ArgumentException("MIME type is required.", nameof(mimeType));
+
+        var bytes = fileBytes.ToArray();
+        var safeName = Path.GetFileName((fileName ?? "").Trim());
+        if (string.IsNullOrEmpty(safeName))
+            safeName = "file";
+
+        var payloadKind = mimeType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase)
+            ? "voice"
+            : mimeType.StartsWith("video/", StringComparison.OrdinalIgnoreCase)
+                ? "video"
+                : "document";
+
+        var messageId = await _repo
+            .AddFileMessageAsync(_chat.Id, true, safeName, mimeType.Trim(), bytes, MessageDeliveryStatus.Pending)
+            .ConfigureAwait(false);
+        await _repo.UpdateMessageTransferMetadataAsync(
+                messageId, "", "", payloadKind, safeName, bytes.Length, "", 0, 0, ChatTransferState.None)
+            .ConfigureAwait(false);
+        RaiseMessagesChanged();
+        QueueOutgoingDelivery(messageId);
+    }
+
     public async ValueTask RetryFailedMessageAsync(int messageId, CancellationToken cancellationToken = default)
     {
         var row = await _repo.GetMessageAsync(messageId, includePayloadBlob: false).ConfigureAwait(false);

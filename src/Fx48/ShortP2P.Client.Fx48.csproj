@@ -28,6 +28,10 @@
     <Compile Include="..\ShortP2P.Client\Services\SqlitePeerProfileStore.cs" />
     <Compile Include="..\ShortP2P.Client\Services\AuthLocalPeerProfileSource.cs" />
     <Compile Include="..\ShortP2P.Client\ChatMedia\ChatWireCodec.cs" />
+    <Compile Include="..\ShortP2P.Client\ChatMedia\ChatMediaOptions.cs" />
+    <Compile Include="..\ShortP2P.Client\ChatMedia\DocumentAttachHelper.cs" />
+    <Compile Include="..\ShortP2P.Client\ChatMedia\ImageAttachHelper.cs" />
+    <Compile Include="..\ShortP2P.Client\ChatMedia\ImageAttachmentCompressor.cs" />
     <Compile Include="..\ShortP2P.Client\Qr\QrImageCodec.cs" />
     <Compile Include="..\ShortP2P.Client\Qr\LocalIPv4Resolver.cs" />
     <Compile Include="..\ShortP2P.Client\Qr\MessengerServerQrCodec.cs" />

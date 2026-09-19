@@ -42,7 +42,7 @@ public static class ImageAttachmentCompressor
                     work.Mutate(x => x.Resize(w, h));
                 }
 
-                var q = Math.Clamp(90 - attempt, 28, 90);
+                var q = Math.Min(90, Math.Max(28, 90 - attempt));
                 using var ms = new MemoryStream();
                 work.SaveAsJpeg(ms, new JpegEncoder { Quality = q });
                 var bytes = ms.ToArray();
