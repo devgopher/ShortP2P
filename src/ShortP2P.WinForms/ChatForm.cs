@@ -39,7 +39,7 @@ public sealed class ChatForm : Form
         Dock = DockStyle.Right,
         Width = 36,
         Height = 36,
-        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point)
+        Font = new Font("Segoe UI Emoji", 12, FontStyle.Regular, GraphicsUnit.Point)
     };
 
     private readonly Button _attachDocument = new()
@@ -48,7 +48,7 @@ public sealed class ChatForm : Form
         Dock = DockStyle.Right,
         Width = 36,
         Height = 36,
-        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point)
+        Font = new Font("Segoe UI Emoji", 12, FontStyle.Regular, GraphicsUnit.Point)
     };
 
     private readonly Button _attachImage = new()
@@ -57,7 +57,7 @@ public sealed class ChatForm : Form
         Dock = DockStyle.Right,
         Width = 36,
         Height = 36,
-        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point)
+        Font = new Font("Segoe UI Emoji", 12, FontStyle.Regular, GraphicsUnit.Point)
     };
 
     private readonly Button _attachVideo = new()
@@ -66,7 +66,7 @@ public sealed class ChatForm : Form
         Dock = DockStyle.Right,
         Width = 36,
         Height = 36,
-        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point)
+        Font = new Font("Segoe UI Emoji", 12, FontStyle.Regular, GraphicsUnit.Point)
     };
 
     private readonly Button _attachVoice = new()
@@ -75,7 +75,7 @@ public sealed class ChatForm : Form
         Dock = DockStyle.Right,
         Width = 36,
         Height = 36,
-        Font = new Font("Segoe UI Emoji", 10, FontStyle.Regular, GraphicsUnit.Point)
+        Font = new Font("Segoe UI Emoji", 12, FontStyle.Regular, GraphicsUnit.Point)
     };
 
     private readonly AuthService _auth;
@@ -128,7 +128,7 @@ public sealed class ChatForm : Form
     private readonly Label _safetyNumberLabel = new()
     {
         AutoSize = true,
-        Font = new Font("Segoe UI Emoji", 10f),
+        Font = new Font("Segoe UI Emoji", 12f),
         TextAlign = ContentAlignment.TopRight,
         Padding = new Padding(4, 0, 4, 0)
     };
@@ -137,7 +137,7 @@ public sealed class ChatForm : Form
     {
         Text = "🚨",
         AutoSize = true,
-        Font = new Font("Segoe UI Emoji", 11f),
+        Font = new Font("Segoe UI Emoji", 12f),
         FlatStyle = FlatStyle.Flat
     };
 
@@ -149,7 +149,7 @@ public sealed class ChatForm : Form
         Dock = DockStyle.Right,
         Width = 36,
         Height = 36,
-        Font = new Font("Segoe UI", 10, FontStyle.Bold, GraphicsUnit.Point)
+        Font = new Font("Segoe UI", 12, FontStyle.Bold, GraphicsUnit.Point)
     };
 
     private readonly GroupBox _techGroup = new()
@@ -1685,9 +1685,11 @@ public sealed class ChatForm : Form
 
     private void OnMessagesMeasureItem(object? sender, MeasureItemEventArgs e)
     {
+        // Vertical padding for Segoe UI 12pt (OwnerDrawVariable).
+        const int rowPad = 10;
         if (e.Index < 0 || e.Index >= _messages.Items.Count)
         {
-            e.ItemHeight = Font.Height + 8;
+            e.ItemHeight = Math.Max(Font.Height + rowPad, 26);
             return;
         }
 
@@ -1699,12 +1701,12 @@ public sealed class ChatForm : Form
             _messages.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 12 - reserveRight);
         var measured = TextRenderer.MeasureText(text, _messages.Font, new Size(width, int.MaxValue),
             TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
-        var h = measured.Height + 8;
+        var h = measured.Height + rowPad;
         if (line is { Kind: ChatLineKind.Image, Thumbnail: { } thumb })
             h += 4 + thumb.Height + 4;
         if (line?.Kind is ChatLineKind.Voice or ChatLineKind.Video)
             h += 4 + 22 + 4;
-        e.ItemHeight = Math.Max(_messages.Font.Height + 8, h);
+        e.ItemHeight = Math.Max(_messages.Font.Height + rowPad, h);
     }
 
     private void PlayVideoMessage(byte[] ogvBytes, string? fileName)

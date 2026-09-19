@@ -111,6 +111,7 @@ internal static class Program
 
         Batteries_V2.Init();
         ApplicationConfiguration.Initialize();
+        Application.SetDefaultFont(new Font("Segoe UI", 12f, FontStyle.Regular, GraphicsUnit.Point));
         hostLogger.LogInformation("WinForms application started");
 
         var appSettings = provider.GetRequiredService<AppSettingsStore>();

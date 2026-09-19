@@ -34,7 +34,7 @@ public sealed class MainChatsForm : Form
     private readonly Label _safetyNumberLabel = new()
     {
         AutoSize = true,
-        Font = new Font("Segoe UI Emoji", 10f),
+        Font = new Font("Segoe UI Emoji", 12f),
         TextAlign = ContentAlignment.TopRight,
         Padding = new Padding(8, 0, 4, 0)
     };
@@ -42,7 +42,7 @@ public sealed class MainChatsForm : Form
     {
         Text = "🚨",
         AutoSize = true,
-        Font = new Font("Segoe UI Emoji", 11f),
+        Font = new Font("Segoe UI Emoji", 12f),
         FlatStyle = FlatStyle.Flat
     };
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
@@ -155,6 +155,9 @@ public sealed class MainChatsForm : Form
         _list.ValueMember = nameof(ChatEntity.Id);
         _list.DoubleClick += async (_, _) => await OpenSelectedChatAsync().ConfigureAwait(true);
         _list.DrawItem += OnDrawChatItem;
+        // Bold unread/new rows need a taller fixed height than regular Segoe UI 12pt.
+        using (var bold = new Font(_list.Font, FontStyle.Bold))
+            _list.ItemHeight = Math.Max(bold.Height + 8, 26);
         _list.SelectedIndexChanged += (_, _) => RefreshSafetyHeader();
         _emergencyUntrust.Click += async (_, _) => await OnEmergencyUntrustAsync().ConfigureAwait(true);
 

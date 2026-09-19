@@ -59,7 +59,7 @@ public sealed class LogViewerForm : Form
             ReadOnly = true,
             ScrollBars = ScrollBars.Both,
             WordWrap = false,
-            Font = new Font(FontFamily.GenericMonospace, 9f),
+            Font = new Font(FontFamily.GenericMonospace, 12f),
             Dock = DockStyle.Fill
         };
     }
