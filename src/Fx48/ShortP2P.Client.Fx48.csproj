@@ -20,6 +20,7 @@
     <Compile Include="..\ShortP2P.Client\Data\ChatPayloadKind.cs" />
     <Compile Include="..\ShortP2P.Client\Data\ChatTransferState.cs" />
     <Compile Include="..\ShortP2P.Client\Data\MessageDeliveryStatus.cs" />
+    <Compile Include="..\ShortP2P.Client\Data\OutgoingServerMessageEntity.cs" />
     <Compile Include="..\ShortP2P.Client\Data\MessengerServerEntity.cs" />
     <Compile Include="..\ShortP2P.Client\Data\PeerBlacklistEntity.cs" />
     <Compile Include="..\ShortP2P.Client\Data\PeerProfileEntity.cs" />

@@ -401,9 +401,8 @@ public sealed class ChatForm : Form
 
     private ChatLine BuildChatLine(ChatMessageEntity m)
     {
-        var sender = m.Outgoing ? "You" : _chat.PeerNickname;
         var whoPrefix = m.Outgoing ? "[Я:]" : $"[{_chat.PeerNickname}:]";
-        var color = m.Outgoing ? Color.DodgerBlue : GetPaletteColor(sender);
+        var color = m.Outgoing ? Color.DodgerBlue : Color.FromArgb(0x00, 0x99, 0x99);
         var sentLocal = new DateTimeOffset(m.SentUtcTicks, TimeSpan.Zero).ToLocalTime();
         var ts = sentLocal.ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.InvariantCulture);
         var ds = (MessageDeliveryStatus)m.DeliveryStatus;
@@ -1740,38 +1739,6 @@ public sealed class ChatForm : Form
             MessageDeliveryStatus.Failed => (OutgoingDeliveryIndicators.Failed, Color.Red),
             _ => (OutgoingDeliveryIndicators.Delivered, Color.ForestGreen)
         };
-    }
-
-    private static Color GetPaletteColor(string key)
-    {
-        var hash = Math.Abs(StringComparer.Ordinal.GetHashCode(key));
-        const int hueSteps = 12;
-        const int lightSteps = 3;
-        var h = hash % hueSteps;
-        var lBand = hash / hueSteps % lightSteps;
-        var hue = h * (360.0 / hueSteps);
-        var lightness = 0.40 + lBand * 0.06;
-        return ColorFromHsl(hue, 0.72, lightness);
-    }
-
-    private static Color ColorFromHsl(double hue, double saturation, double lightness)
-    {
-        hue = hue % 360.0;
-        var c = (1.0 - Math.Abs(2.0 * lightness - 1.0)) * saturation;
-        var x = c * (1.0 - Math.Abs(hue / 60.0 % 2.0 - 1.0));
-        var m = lightness - c / 2.0;
-        double r1, g1, b1;
-        if (hue < 60) (r1, g1, b1) = (c, x, 0);
-        else if (hue < 120) (r1, g1, b1) = (x, c, 0);
-        else if (hue < 180) (r1, g1, b1) = (0, c, x);
-        else if (hue < 240) (r1, g1, b1) = (0, x, c);
-        else if (hue < 300) (r1, g1, b1) = (x, 0, c);
-        else (r1, g1, b1) = (c, 0, x);
-
-        var r = (int)Math.Round((r1 + m) * 255.0);
-        var g = (int)Math.Round((g1 + m) * 255.0);
-        var b = (int)Math.Round((b1 + m) * 255.0);
-        return Color.FromArgb(r, g, b);
     }
 
     private static Bitmap? TryCreateThumbnail(byte[] bytes, int maxEdge)

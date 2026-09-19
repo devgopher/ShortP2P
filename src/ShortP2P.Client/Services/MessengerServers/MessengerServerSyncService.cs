@@ -1108,12 +1108,15 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
 
             var blocked = await _chats.IsPeerBlockedAsync(user.Id, peerId, cancellationToken).ConfigureAwait(false);
             var existing = await _chats.FindChatByPeerNetworkIdAsync(user.Id, peerId).ConfigureAwait(false);
+            var requestKey = request.PublicKey.Trim();
+            var isNewChat = existing == null;
+            var keyChanged = existing != null &&
+                             !SafetyNumber.PublicKeyJsonEquals(existing.PeerRsaPublicJson, requestKey);
             var peerNick = await ResolvePeerNicknameAsync(connection, peerId, cancellationToken).ConfigureAwait(false);
             var source = PeerKeySource.Server(connection.Entity.BaseUrl);
             LogChatRequest("receive", connection, peerId);
             ChatEntity chat;
-            if (existing == null ||
-                !SafetyNumber.PublicKeyJsonEquals(existing.PeerRsaPublicJson, request.PublicKey.Trim()))
+            if (isNewChat || keyChanged)
             {
                 chat = await _chats.AddChatAsync(
                     user.Id,
@@ -1127,7 +1130,7 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
             }
             else
             {
-                chat = existing;
+                chat = existing!;
                 await _chats.TryUpdatePeerNicknameAsync(chat.Id, peerNick).ConfigureAwait(false);
             }
 
@@ -1140,33 +1143,38 @@ public sealed class MessengerServerSyncService : IAsyncDisposable
                 continue;
             }
 
-            try
+            // Reply only when the peer may still need our key. Always-reply + failover republish
+            // used to ping-pong ChatRequests and re-fire IncomingChatInvite on every long-poll.
+            if (isNewChat || keyChanged)
             {
-                LogChatRequest("reply", connection, peerId);
-                await TrackAsync(connection, () => connection.Api.CreateChatRequestAsync(
-                    new ChatRequestCreateRequest
-                    {
-                        PublicKey = ourPublic,
-                        TargetNetworkId = peerId
-                    },
-                    cancellationToken)).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                var (host, port) = SplitServerHostPort(connection.Entity.BaseUrl);
-                _logger.LogWarning(ex, "Reply ChatRequest failed for peer {PeerId} on {Host}:{Port}",
-                    peerId, host, port);
+                try
+                {
+                    LogChatRequest("reply", connection, peerId);
+                    await TrackAsync(connection, () => connection.Api.CreateChatRequestAsync(
+                        new ChatRequestCreateRequest
+                        {
+                            PublicKey = ourPublic,
+                            TargetNetworkId = peerId
+                        },
+                        cancellationToken)).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    var (host, port) = SplitServerHostPort(connection.Entity.BaseUrl);
+                    _logger.LogWarning(ex, "Reply ChatRequest failed for peer {PeerId} on {Host}:{Port}",
+                        peerId, host, port);
+                }
             }
 
-            if (existing == null)
+            if (isNewChat)
             {
                 _logger.LogInformation(
                     "Accepted server chat request from {PeerId} into local chat {ChatId}",
                     peerId,
                     chat.Id);
+                // Open UI only for a genuine new chat — not duplicate/failover re-delivery.
+                await _chats.NotifyIncomingChatInviteAsync(chat.Id, cancellationToken).ConfigureAwait(false);
             }
-
-            await _chats.NotifyIncomingChatInviteAsync(chat.Id, cancellationToken).ConfigureAwait(false);
         }
     }
 

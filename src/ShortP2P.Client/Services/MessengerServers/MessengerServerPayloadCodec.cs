@@ -33,7 +33,7 @@ public static class MessengerServerPayloadCodec
         Buffer.BlockCopy(nonce, 0, keyMaterial, AesKeyBytes, NonceBytes);
 
         byte[] wrappedKey;
-        using (var rsa = RSA.Create())
+        using (var rsa = CreateRsa())
         {
             rsa.ImportParameters(new RSAParameters
             {
@@ -86,7 +86,7 @@ public static class MessengerServerPayloadCodec
         var tag = cipherAndTag[cipherLen..].ToArray();
 
         byte[] keyMaterial;
-        using (var rsa = RSA.Create())
+        using (var rsa = CreateRsa())
         {
             rsa.ImportParameters(new RSAParameters
             {
@@ -124,6 +124,19 @@ public static class MessengerServerPayloadCodec
         using var rng = RandomNumberGenerator.Create();
         rng.GetBytes(bytes);
         return bytes;
+#endif
+    }
+
+    /// <summary>
+    /// net48 <see cref="RSA.Create()"/> returns <c>RSACryptoServiceProvider</c>, which rejects
+    /// <see cref="RSAEncryptionPadding.OaepSHA256"/>. Use CNG so server envelopes match net10.
+    /// </summary>
+    private static RSA CreateRsa()
+    {
+#if NETFRAMEWORK
+        return new RSACng();
+#else
+        return RSA.Create();
 #endif
     }
 }

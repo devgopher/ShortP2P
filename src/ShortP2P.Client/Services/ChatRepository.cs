@@ -48,7 +48,10 @@ public sealed class ChatRepository(AppDatabase appDatabase, PeerBlacklist? black
     /// <summary>В БД вставлен новый чат (не обновление существующего).</summary>
     public event EventHandler<ChatCreatedEventArgs>? ChatCreated;
 
-    /// <summary>Входящее приглашение (ChatRequest / LAN): открыть чат, даже если строка уже была.</summary>
+    /// <summary>
+    /// Genuine new incoming invite (first acceptance of a ChatRequest). UI may open the chat.
+    /// Not raised for duplicate/failover re-delivery of an already-known peer.
+    /// </summary>
     public event EventHandler<ChatCreatedEventArgs>? IncomingChatInvite;
 
     /// <summary>Сохранённый публичный ключ пира заменён другим (возможный MITM).</summary>
