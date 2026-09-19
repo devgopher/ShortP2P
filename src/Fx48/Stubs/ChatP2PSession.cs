@@ -389,6 +389,23 @@ public sealed class ChatP2PSession
 
                 try
                 {
+                    // Image/File rows need ImageBlob on the wire. The metadata-only fetch above
+                    // leaves ImageBlob null, which made BuildOutgoingWire fall back to EncodeText
+                    // (filename only) — receivers saw names with no downloadable payload.
+                    if (row.PayloadKind is (int)ChatPayloadKind.Image or (int)ChatPayloadKind.File &&
+                        row.ImageBlob is not { Length: > 0 })
+                    {
+                        var withBlob = await _repo.GetMessageAsync(nextId, includePayloadBlob: true)
+                            .ConfigureAwait(false);
+                        if (withBlob == null || withBlob.ChatId != _chat.Id || !withBlob.Outgoing)
+                        {
+                            DequeuePendingOutgoingHead(nextId);
+                            continue;
+                        }
+
+                        row = withBlob;
+                    }
+
                     var wire = BuildOutgoingWire(row);
                     await DeliverOutgoingWireAsync(nextId, wire, cancellationToken).ConfigureAwait(false);
                     DequeuePendingOutgoingHead(nextId);
@@ -453,6 +470,9 @@ public sealed class ChatP2PSession
                 ChatWireCodec.EncodeImage(row.MimeType, row.ImageBlob),
             (int)ChatPayloadKind.File when row.ImageBlob is { Length: > 0 } =>
                 ChatWireCodec.EncodeFile(row.Text, row.MimeType, row.ImageBlob),
+            (int)ChatPayloadKind.Image or (int)ChatPayloadKind.File =>
+                throw new InvalidOperationException(
+                    $"Outgoing attachment {row.Id} has no payload blob; refusing to send filename as text."),
             _ => ChatWireCodec.EncodeText(row.Text)
         };
 
