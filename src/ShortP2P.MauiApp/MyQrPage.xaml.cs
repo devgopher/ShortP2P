@@ -30,15 +30,26 @@ public partial class MyQrPage : ContentPage
         }
 
         var pub = RsaKeySerializer.SerializePublic(_auth.GetCurrentPublicKey());
-        RenderQr(u, pub);
+        _ = RenderQrAsync(u, pub);
     }
 
-    private void RenderQr(UserEntity u, string pub)
+    private async Task RenderQrAsync(UserEntity u, string pub)
     {
-        var payload = PeerQrService.BuildPayload(u, pub);
-        var png = PeerQrService.EncodeQrPng(payload);
-        _currentQrPng = png;
-        QrImage.Source = ImageSource.FromStream(() => new MemoryStream(png));
+        try
+        {
+            // InviteHostsBuilder → GetAllUnicastIpv6Ordered / public IP — blocking; off UI thread.
+            var png = await Task.Run(() =>
+            {
+                var payload = PeerQrService.BuildPayload(u, pub);
+                return PeerQrService.EncodeQrPng(payload);
+            }).ConfigureAwait(true);
+            _currentQrPng = png;
+            QrImage.Source = ImageSource.FromStream(() => new MemoryStream(png));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Render my QR failed");
+        }
     }
 
     private async void OnShareQrClicked(object? sender, EventArgs e)

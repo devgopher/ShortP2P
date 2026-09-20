@@ -620,7 +620,9 @@ public sealed class MainChatsForm : Form
             // ignore
         }
 
-        var text = MyTransportEndpointsText.Build(u, _p2P.Settings, bt);
+        // NIC enum + public IP lookup are sync/blocking — keep off UI thread.
+        var text = await Task.Run(() => MyTransportEndpointsText.Build(u, _p2P.Settings, bt))
+            .ConfigureAwait(true);
         try
         {
             Clipboard.SetText(text);

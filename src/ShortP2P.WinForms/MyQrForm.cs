@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using ShortP2P.Auth;
+using ShortP2P.Auth.Data;
 using ShortP2P.Client.Qr;
 using ShortP2P.Crypto;
 
@@ -8,11 +9,21 @@ namespace ShortP2P.WinForms;
 
 public sealed class MyQrForm : Form
 {
-    private readonly string _qrPayloadJson = string.Empty;
-    private readonly byte[]? _qrPng;
+    private readonly AuthService _auth;
+    private readonly ILogger<MyQrForm> _log;
+    private readonly ILogger<UserAction> _userActions;
+    private readonly PictureBox? _picture;
+    private readonly Label? _status;
+    private string _qrPayloadJson = string.Empty;
+    private byte[]? _qrPng;
+    private bool _loadStarted;
 
     public MyQrForm(AuthService auth, ILogger<MyQrForm> log, ILogger<UserAction> userActions)
     {
+        _auth = auth;
+        _log = log;
+        _userActions = userActions;
+
         Text = "My QR code";
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -39,17 +50,18 @@ public sealed class MyQrForm : Form
             Dock = DockStyle.Top
         };
 
-        var pub = RsaKeySerializer.SerializePublic(auth.GetCurrentPublicKey());
-        var payload = PeerQrService.BuildPayload(u, pub);
-        _qrPayloadJson = PeerQrCodec.Serialize(payload);
-        _qrPng = PeerQrService.EncodeQrPng(payload);
+        _status = new Label
+        {
+            Text = "Loading…",
+            AutoSize = true,
+            Dock = DockStyle.Top
+        };
 
-        var picture = new PictureBox
+        _picture = new PictureBox
         {
             Size = new Size(280, 280),
             SizeMode = PictureBoxSizeMode.Zoom,
-            BorderStyle = BorderStyle.FixedSingle,
-            Image = new Bitmap(new MemoryStream(_qrPng))
+            BorderStyle = BorderStyle.FixedSingle
         };
         var btnShare = new Button { Text = "Поделиться", AutoSize = true };
         btnShare.Click += (_, _) => OnShareClicked();
@@ -62,12 +74,48 @@ public sealed class MyQrForm : Form
             AutoScroll = true
         };
         panel.Controls.Add(hint);
-        panel.Controls.Add(picture);
+        panel.Controls.Add(_status);
+        panel.Controls.Add(_picture);
         panel.Controls.Add(btnShare);
         Controls.Add(panel);
 
-        userActions.LogInformation("My QR: opened (user {Nickname}, network id {NetworkId})",
-            u.Nickname, u.NetworkIdShort);
+        Shown += (_, _) => _ = LoadQrAsync(u);
+    }
+
+    private async Task LoadQrAsync(UserEntity u)
+    {
+        if (_loadStarted)
+            return;
+        _loadStarted = true;
+
+        try
+        {
+            var pub = RsaKeySerializer.SerializePublic(_auth.GetCurrentPublicKey());
+            // InviteHostsBuilder → GetAllUnicastIpv6Ordered / public IP — blocking; off UI thread.
+            var (payloadJson, png) = await Task.Run(() =>
+            {
+                var payload = PeerQrService.BuildPayload(u, pub);
+                return (PeerQrCodec.Serialize(payload), PeerQrService.EncodeQrPng(payload));
+            }).ConfigureAwait(true);
+
+            if (_picture == null || _status == null)
+                return;
+
+            _qrPayloadJson = payloadJson;
+            _qrPng = png;
+            _picture.Image?.Dispose();
+            _picture.Image = new Bitmap(new MemoryStream(png));
+            _status.Text = string.Empty;
+
+            _userActions.LogInformation("My QR: opened (user {Nickname}, network id {NetworkId})",
+                u.Nickname, u.NetworkIdShort);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "My QR load failed");
+            if (_status != null)
+                _status.Text = ex.Message;
+        }
     }
 
     private void OnShareClicked()
@@ -143,5 +191,12 @@ public sealed class MyQrForm : Form
             MessageBox.Show(this, $"Не удалось открыть передачу Bluetooth: {ex.Message}", "Bluetooth",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _picture?.Image?.Dispose();
+        base.Dispose(disposing);
     }
 }

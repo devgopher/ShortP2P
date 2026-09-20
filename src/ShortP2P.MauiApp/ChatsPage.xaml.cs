@@ -317,7 +317,9 @@ public partial class ChatsPage : ContentPage
             // ignore
         }
 
-        var text = MyTransportEndpointsText.Build(u, _p2p.Settings, bt);
+        // NIC enum + public IP lookup are sync/blocking — keep off UI thread.
+        var text = await Task.Run(() => MyTransportEndpointsText.Build(u, _p2p.Settings, bt))
+            .ConfigureAwait(true);
         await Clipboard.Default.SetTextAsync(text).ConfigureAwait(true);
         await DisplayAlert("Copied", "My addresses copied to clipboard.", "OK").ConfigureAwait(true);
     }

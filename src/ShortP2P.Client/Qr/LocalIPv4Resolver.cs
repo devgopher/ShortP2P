@@ -14,86 +14,73 @@ public static class LocalIPv4Resolver
         "https://ifconfig.me/ip"
     ];
 
+    private static readonly object NicCacheLock = new();
+    private static readonly TimeSpan NicCacheTtl = TimeSpan.FromSeconds(3);
+    private static DateTime _nicCacheUtc = DateTime.MinValue;
+    private static List<string> _cachedIpv4Ordered = [];
+    private static List<string> _cachedIpv6Ordered = [];
+
     public static string? TryGetPreferredUnicastIpv4()
-    {
-        var scored = new List<(string Ip, int Score)>();
-        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
-        {
-            if (ni.OperationalStatus != OperationalStatus.Up)
-                continue;
-            if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
-                continue;
-
-            foreach (var ua in ni.GetIPProperties()
-                         .UnicastAddresses
-                         .Select(u => u.Address))
-            {
-                if (ua.AddressFamily != AddressFamily.InterNetwork)
-                    continue;
-                if (IPAddress.IsLoopback(ua))
-                    continue;
-
-                var ip = ua.ToString();
-                var score = Score(ua);
-                scored.Add((ip, score));
-            }
-        }
-
-        return scored.OrderByDescending(x => x.Score).Select(x => x.Ip).FirstOrDefault();
-    }
+        => GetAllUnicastIpv4Ordered().FirstOrDefault();
 
     /// <summary>Все поднятые unicast IPv4 (без loopback), от лучшего к худшему по эвристике <see cref="Score" />.</summary>
     public static List<string> GetAllUnicastIpv4Ordered()
     {
-        var scored = new List<(string Ip, int Score)>();
-        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
-        {
-            if (ni.OperationalStatus != OperationalStatus.Up)
-                continue;
-            if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
-                continue;
-
-            foreach (var ua in ni.GetIPProperties().UnicastAddresses.Select(u => u.Address))
-            {
-                if (ua.AddressFamily != AddressFamily.InterNetwork)
-                    continue;
-                if (IPAddress.IsLoopback(ua))
-                    continue;
-
-                scored.Add((ua.ToString(), Score(ua)));
-            }
-        }
-
-        return scored
-            .OrderByDescending(x => x.Score)
-            .Select(x => x.Ip)
-            .Distinct()
-            .ToList();
+        EnsureNicCache();
+        lock (NicCacheLock)
+            return [.._cachedIpv4Ordered];
     }
 
     /// <summary>Все поднятые unicast IPv6 (без loopback), лексикографически.</summary>
     public static List<string> GetAllUnicastIpv6Ordered()
     {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+        EnsureNicCache();
+        lock (NicCacheLock)
+            return [.._cachedIpv6Ordered];
+    }
+
+    /// <summary>
+    ///     Один проход <see cref="NetworkInterface.GetAllNetworkInterfaces" /> + короткий TTL-кэш:
+    ///     вызов на UI-потоке всё ещё дорог при cold miss — вызывайте с фонового потока.
+    /// </summary>
+    private static void EnsureNicCache()
+    {
+        lock (NicCacheLock)
         {
-            if (ni.OperationalStatus != OperationalStatus.Up)
-                continue;
-            if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
-                continue;
+            if (DateTime.UtcNow - _nicCacheUtc < NicCacheTtl)
+                return;
 
-            foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+            var scoredV4 = new List<(string Ip, int Score)>();
+            var setV6 = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
             {
-                var addr = ua.Address;
-                if (addr.AddressFamily != AddressFamily.InterNetworkV6)
+                if (ni.OperationalStatus != OperationalStatus.Up)
                     continue;
-                if (IPAddress.IsLoopback(addr))
+                if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
                     continue;
-                set.Add(addr.ToString());
-            }
-        }
 
-        return set.OrderBy(x => x, StringComparer.Ordinal).ToList();
+                foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+                {
+                    var addr = ua.Address;
+                    if (IPAddress.IsLoopback(addr))
+                        continue;
+
+                    if (addr.AddressFamily == AddressFamily.InterNetwork)
+                        scoredV4.Add((addr.ToString(), Score(addr)));
+                    else if (addr.AddressFamily == AddressFamily.InterNetworkV6)
+                        setV6.Add(addr.ToString());
+                }
+            }
+
+            _cachedIpv4Ordered = scoredV4
+                .OrderByDescending(x => x.Score)
+                .Select(x => x.Ip)
+                .Distinct()
+                .ToList();
+            _cachedIpv6Ordered = setV6.OrderBy(x => x, StringComparer.Ordinal).ToList();
+            _nicCacheUtc = DateTime.UtcNow;
+        }
     }
 
     /// <summary>Best-effort public IPv4 via external HTTP echo services; null if unavailable.</summary>
