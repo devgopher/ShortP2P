@@ -9,7 +9,7 @@ using ShortP2P.Crypto;
 namespace ShortP2P.Client.Services;
 
 /// <summary>
-/// Fx48 / Iskra.WinForms session: no UDP/BLE P2P.
+/// Fx48 old windows session: no UDP/BLE P2P.
 /// Outbound delivery is a single per-chat background flush worker that reads Pending rows from
 /// SQLite, posts via <see cref="MessengerServerSyncService.TryDeliverWireAsync"/>, and updates
 /// Sent / Failed in the DB. Incoming wires stay on the repository path
