@@ -40,6 +40,7 @@ public sealed class LoginForm : Form
             AutoSize = true,
             Dock = DockStyle.Fill
         };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -56,6 +57,16 @@ public sealed class LoginForm : Form
 
         _nick.Width = 320;
         _pass.Width = 320;
+
+        var preferred = new Size(
+            Math.Max(layout.PreferredSize.Width, _nick.Width) + Padding.Horizontal,
+            layout.PreferredSize.Height + Padding.Vertical);
+        AutoSize = false;
+        ClientSize = new Size(
+            (int)Math.Round(preferred.Width * 1.25),
+            (int)Math.Round(preferred.Height * 1.25));
+        _nick.Dock = DockStyle.Fill;
+        _pass.Dock = DockStyle.Fill;
 
         _btnLogin.Click += async (_, _) => await OnLoginAsync().ConfigureAwait(true);
         _btnRegister.Click += OnRegisterClicked;

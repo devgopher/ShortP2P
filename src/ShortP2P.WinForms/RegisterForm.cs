@@ -27,7 +27,8 @@ public sealed class RegisterForm : Form
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
         Padding = new Padding(16);
 
-        var layout = new TableLayoutPanel { ColumnCount = 1, AutoSize = true };
+        var layout = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, Dock = DockStyle.Fill };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         layout.Controls.Add(_nick, 0, 0);
         layout.Controls.Add(_pass, 0, 1);
         var buttons = new FlowLayoutPanel { AutoSize = true };
@@ -37,6 +38,16 @@ public sealed class RegisterForm : Form
         Controls.Add(layout);
         _nick.Width = 300;
         _pass.Width = 300;
+
+        var preferred = new Size(
+            Math.Max(layout.PreferredSize.Width, _nick.Width) + Padding.Horizontal,
+            layout.PreferredSize.Height + Padding.Vertical);
+        AutoSize = false;
+        ClientSize = new Size(
+            (int)Math.Round(preferred.Width * 1.25),
+            (int)Math.Round(preferred.Height * 1.25));
+        _nick.Dock = DockStyle.Fill;
+        _pass.Dock = DockStyle.Fill;
 
         _btnOk.Click += async (_, _) => await OnRegisterAsync().ConfigureAwait(true);
         CancelButton = _btnCancel;

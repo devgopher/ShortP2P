@@ -74,8 +74,8 @@ public sealed class MainChatsForm : Form
         _messengerServers = messengerServers;
         Text = "ShortP2P — Chats";
         StartPosition = FormStartPosition.CenterScreen;
-        Width = 680;
-        Height = 480;
+        Width = 850;
+        Height = 600;
         _emergencyUntrust.FlatAppearance.BorderSize = 0;
         new ToolTip { ShowAlways = true }.SetToolTip(_emergencyUntrust,
             "Срочно пометить текущий messenger-сервер как недоверенный и переключиться.");
@@ -143,8 +143,9 @@ public sealed class MainChatsForm : Form
         var transportIndicators = new FlowLayoutPanel
         {
             AutoSize = true,
+            Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.LeftToRight,
-            Dock = DockStyle.Bottom,
+            WrapContents = true,
             Padding = new Padding(0, 6, 0, 0)
         };
         transportIndicators.Controls.Add(_udpTransportIndicator);
@@ -155,9 +156,6 @@ public sealed class MainChatsForm : Form
         _list.ValueMember = nameof(ChatEntity.Id);
         _list.DoubleClick += async (_, _) => await OpenSelectedChatAsync().ConfigureAwait(true);
         _list.DrawItem += OnDrawChatItem;
-        // Bold unread/new rows need a taller fixed height than regular Segoe UI 12pt.
-        using (var bold = new Font(_list.Font, FontStyle.Bold))
-            _list.ItemHeight = Math.Max(bold.Height + 8, 26);
         _list.SelectedIndexChanged += (_, _) => RefreshSafetyHeader();
         _emergencyUntrust.Click += async (_, _) => await OnEmergencyUntrustAsync().ConfigureAwait(true);
 
@@ -182,6 +180,9 @@ public sealed class MainChatsForm : Form
         root.Controls.Add(transportIndicators, 0, 4);
         _list.Dock = DockStyle.Fill;
         Controls.Add(root);
+        // After parenting so ItemHeight uses the form font, not the default 8.25pt.
+        using (var bold = new Font(_list.Font, FontStyle.Bold))
+            _list.ItemHeight = Math.Max(bold.Height + 8, 26);
 
         Shown += async (_, _) =>
         {
@@ -350,7 +351,7 @@ public sealed class MainChatsForm : Form
             return;
         try
         {
-            BeginInvoke(() => _list.Invalidate());
+            BeginInvoke(ReorderChatListByPresence);
         }
         catch (ObjectDisposedException)
         {
@@ -437,7 +438,7 @@ public sealed class MainChatsForm : Form
 
             var about = string.IsNullOrWhiteSpace(u.AboutMe) ? "" : $" · {TrimAbout(u.AboutMe, 40)}";
             _profile.Text = $"You: {u.Nickname} · id {u.NetworkIdShort} · local UDP {u.DataUdpPort}{about}";
-            var list = await _chats.ListChatsAsync(u.Id).ConfigureAwait(true);
+            var list = SortChats(await _chats.ListChatsAsync(u.Id).ConfigureAwait(true));
             var idsNow = list.Select(c => c.Id).ToHashSet();
             if (!_knownChatsInitialized)
             {
@@ -529,6 +530,72 @@ public sealed class MainChatsForm : Form
         {
             _refreshGate.Release();
         }
+    }
+
+    private List<ChatEntity> SortChats(IEnumerable<ChatEntity> chats) =>
+        ChatListOrder.Sort(
+            chats,
+            c => _p2P.LocalScan.IsPeerSeenRecentlyOnLan(c.PeerNetworkIdShort),
+            c => c.PeerNickname);
+
+    private void ReorderChatListByPresence()
+    {
+        if (IsDisposed || !IsHandleCreated)
+            return;
+        if (_list.Items.Count <= 1)
+        {
+            _list.Invalidate();
+            return;
+        }
+
+        var current = new ChatEntity[_list.Items.Count];
+        for (var i = 0; i < _list.Items.Count; i++)
+        {
+            if (_list.Items[i] is not ChatEntity chat)
+            {
+                _list.Invalidate();
+                return;
+            }
+
+            current[i] = chat;
+        }
+
+        var ordered = SortChats(current);
+        var sameOrder = true;
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            if (!ReferenceEquals(current[i], ordered[i]))
+            {
+                sameOrder = false;
+                break;
+            }
+        }
+
+        if (sameOrder)
+        {
+            _list.Invalidate();
+            return;
+        }
+
+        var prevSelectedId = (_list.SelectedItem as ChatEntity)?.Id;
+        var prevTop = _list.TopIndex;
+        _list.BeginUpdate();
+        _list.Items.Clear();
+        foreach (var c in ordered)
+            _list.Items.Add(c);
+
+        if (prevSelectedId.HasValue)
+            foreach (var item in _list.Items)
+                if (item is ChatEntity chat && chat.Id == prevSelectedId.Value)
+                {
+                    _list.SelectedItem = item;
+                    break;
+                }
+
+        if (_list.Items.Count > 0)
+            _list.TopIndex = Math.Clamp(prevTop, 0, _list.Items.Count - 1);
+
+        _list.EndUpdate();
     }
 
     private Rectangle GetItemRectSafe(int index)

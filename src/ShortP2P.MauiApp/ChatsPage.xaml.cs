@@ -209,7 +209,31 @@ public partial class ChatsPage : ContentPage
     {
         foreach (var row in _chatRows)
             row.IsPeerOnline = _p2p.LocalScan.IsPeerSeenRecentlyOnLan(row.Chat.PeerNetworkIdShort);
+        ReorderChatRows();
     }
+
+    private void ReorderChatRows()
+    {
+        if (_chatRows.Count <= 1)
+            return;
+
+        var ordered = SortChatRows(_chatRows);
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var currentIndex = _chatRows.IndexOf(ordered[i]);
+            if (currentIndex >= 0 && currentIndex != i)
+                _chatRows.Move(currentIndex, i);
+        }
+    }
+
+    private List<ChatListRowVm> SortChatRows(IEnumerable<ChatListRowVm> rows) =>
+        ChatListOrder.Sort(rows, r => r.IsPeerOnline, r => r.PeerNickname);
+
+    private List<ChatEntity> SortChats(IEnumerable<ChatEntity> chats) =>
+        ChatListOrder.Sort(
+            chats,
+            c => _p2p.LocalScan.IsPeerSeenRecentlyOnLan(c.PeerNetworkIdShort),
+            c => c.PeerNickname);
 
     private void EnsurePresenceRefreshTimerStarted()
     {
@@ -257,13 +281,15 @@ public partial class ChatsPage : ContentPage
 
     private void ApplyChatList(IReadOnlyList<ChatEntity> list)
     {
+        var sorted = SortChats(list);
+
         // Same membership and order: update rows in place (no Clear → no flicker).
-        if (_chatRows.Count == list.Count)
+        if (_chatRows.Count == sorted.Count)
         {
             var sameIds = true;
-            for (var i = 0; i < list.Count; i++)
+            for (var i = 0; i < sorted.Count; i++)
             {
-                if (_chatRows[i].Chat.Id != list[i].Id)
+                if (_chatRows[i].Chat.Id != sorted[i].Id)
                 {
                     sameIds = false;
                     break;
@@ -272,11 +298,11 @@ public partial class ChatsPage : ContentPage
 
             if (sameIds)
             {
-                for (var i = 0; i < list.Count; i++)
+                for (var i = 0; i < sorted.Count; i++)
                 {
-                    _chatRows[i].ApplyChat(list[i]);
+                    _chatRows[i].ApplyChat(sorted[i]);
                     _chatRows[i].IsPeerOnline =
-                        _p2p.LocalScan.IsPeerSeenRecentlyOnLan(list[i].PeerNetworkIdShort);
+                        _p2p.LocalScan.IsPeerSeenRecentlyOnLan(sorted[i].PeerNetworkIdShort);
                 }
 
                 return;
@@ -284,7 +310,7 @@ public partial class ChatsPage : ContentPage
         }
 
         _chatRows.Clear();
-        foreach (var c in list)
+        foreach (var c in sorted)
             _chatRows.Add(new ChatListRowVm(c, _p2p.LocalScan.IsPeerSeenRecentlyOnLan(c.PeerNetworkIdShort)));
     }
 

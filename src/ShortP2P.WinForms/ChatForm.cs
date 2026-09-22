@@ -200,8 +200,8 @@ public sealed class ChatForm : Form
         _messengerServers = messengerServers;
         Text = chat.PeerNickname;
         StartPosition = FormStartPosition.CenterParent;
-        Width = 560;
-        Height = 572;
+        Width = 700;
+        Height = 715;
         MaximizeBox = false;
         _emergencyUntrust.FlatAppearance.BorderSize = 0;
         _buttonTooltips.SetToolTip(_emergencyUntrust,
