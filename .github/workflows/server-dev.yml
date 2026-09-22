@@ -1,0 +1,41 @@
+# ShortP2P.MessengerServer.Api — development channel.
+# Produces win-x64 Inno Setup installer + linux-amd64 .deb via scripts/server.
+name: "Server: dev"
+
+on:
+  push:
+    branches:
+      - develop
+      - 'dev/**'
+    paths:
+      - 'src/Server/**'
+      - 'src/ShortP2P.TrustSystem/**'
+      - 'scripts/server/**'
+      - '.github/workflows/server-dev.yml'
+      - '.github/workflows/server-pack.yml'
+      - 'global.json'
+      - 'Directory.Build.props'
+      - 'Directory.Build.targets'
+      - 'nuget.config'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Override package version (default VERSION + -dev.<run_number>)
+        required: false
+        type: string
+
+concurrency:
+  group: server-dev-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    uses: ./.github/workflows/server-pack.yml
+    with:
+      channel: dev
+      version_suffix: dev.${{ github.run_number }}
+      version_override: ${{ inputs.version || '' }}
+      artifact_retention_days: 14

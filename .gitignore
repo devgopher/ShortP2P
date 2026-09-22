@@ -36,3 +36,6 @@ ehthumbs.db
 /.vs
 *.litedb
 /artifacts/winforms-check
+
+# Server packaging publish output
+/scripts/server/out/

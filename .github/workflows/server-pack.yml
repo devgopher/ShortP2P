@@ -1,0 +1,181 @@
+# Reusable packer for ShortP2P.MessengerServer.Api.
+# Called by "Server: dev" / "Server: preprod" / "Server: release".
+# Windows installer is Inno Setup (scripts/server/windows), not NSIS.
+name: Server pack
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: Build channel (dev, preprod, release)
+        required: true
+        type: string
+      version_suffix:
+        description: Appended to scripts/server/VERSION (e.g. dev.12). Ignored when a v* tag or version_override is set.
+        required: false
+        type: string
+        default: ''
+      version_override:
+        description: Exact package version. Wins over VERSION file, suffix, and tags.
+        required: false
+        type: string
+        default: ''
+      artifact_retention_days:
+        required: false
+        type: number
+        default: 14
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve package version
+        id: resolve
+        env:
+          VERSION_OVERRIDE: ${{ inputs.version_override }}
+          VERSION_SUFFIX: ${{ inputs.version_suffix }}
+        run: |
+          set -euo pipefail
+          base="$(tr -d '[:space:]' < scripts/server/VERSION)"
+          if [ -z "${base}" ]; then
+            echo "scripts/server/VERSION is empty." >&2
+            exit 1
+          fi
+
+          ver=""
+          if [ -n "${VERSION_OVERRIDE}" ]; then
+            ver="${VERSION_OVERRIDE}"
+          elif [[ "${GITHUB_REF}" == refs/tags/server-v* ]]; then
+            ver="${GITHUB_REF#refs/tags/server-v}"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            ver="${GITHUB_REF#refs/tags/v}"
+          elif [ -n "${VERSION_SUFFIX}" ]; then
+            ver="${base}-${VERSION_SUFFIX}"
+          else
+            ver="${base}"
+          fi
+
+          if [[ ! "${ver}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+~-].*)?$ ]]; then
+            echo "Refusing invalid package version: '${ver}'" >&2
+            exit 1
+          fi
+
+          echo "version=${ver}" >> "${GITHUB_OUTPUT}"
+          echo "Channel:  ${{ inputs.channel }}"
+          echo "Base:     ${base}"
+          echo "Resolved: ${ver}"
+
+  win64:
+    name: win64 (Inno Setup)
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stamp VERSION
+        env:
+          SERVER_VERSION: ${{ needs.version.outputs.version }}
+        shell: pwsh
+        run: |
+          [System.IO.File]::WriteAllText(
+            (Join-Path (Get-Location) 'scripts\server\VERSION'),
+            $env:SERVER_VERSION)
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install Inno Setup 6
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build win-x64 installer
+        shell: pwsh
+        run: |
+          pwsh -File scripts\server\windows\build-installer.ps1 -Configuration Release
+          $exe = Get-ChildItem -LiteralPath 'scripts\server\out\installer' -Filter '*.exe' -ErrorAction SilentlyContinue
+          if (-not $exe) {
+            throw 'Inno Setup installer was not produced (scripts/server/out/installer/*.exe).'
+          }
+          $exe | ForEach-Object { Write-Host "Built $($_.FullName) ($([int]($_.Length / 1MB)) MB)" }
+
+      - name: Upload win64 installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: shortp2p-messengerserver-${{ inputs.channel }}-win-x64
+          path: scripts/server/out/installer/*.exe
+          if-no-files-found: error
+          retention-days: ${{ inputs.artifact_retention_days }}
+
+      - name: Job summary
+        if: always()
+        shell: pwsh
+        run: |
+          $ver = '${{ needs.version.outputs.version }}'
+          $channel = '${{ inputs.channel }}'
+          @"
+          ## Server $($channel) / win64
+          - Version: ``$($ver)``
+          - Script: ``scripts/server/windows/build-installer.ps1``
+          - Artifact: ``shortp2p-messengerserver-$($channel)-win-x64``
+          - Expected file: ``shortp2p-messengerserver-$($ver)-win-x64.exe``
+          "@ | Add-Content $env:GITHUB_STEP_SUMMARY
+
+  linux:
+    name: linux (.deb)
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stamp VERSION
+        env:
+          SERVER_VERSION: ${{ needs.version.outputs.version }}
+        run: printf '%s\n' "${SERVER_VERSION}" > scripts/server/VERSION
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build linux-amd64 .deb
+        run: |
+          set -euo pipefail
+          chmod +x scripts/server/publish.sh scripts/server/debian/build-deb.sh
+          if ! command -v dpkg-deb >/dev/null 2>&1; then
+            echo "dpkg-deb is required on ubuntu-latest." >&2
+            exit 1
+          fi
+          ./scripts/server/debian/build-deb.sh
+          ls -lh scripts/server/out/deb/*.deb
+
+      - name: Upload linux .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: shortp2p-messengerserver-${{ inputs.channel }}-linux-amd64
+          path: scripts/server/out/deb/*.deb
+          if-no-files-found: error
+          retention-days: ${{ inputs.artifact_retention_days }}
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Server ${{ inputs.channel }} / linux"
+            echo "- Version: \`${{ needs.version.outputs.version }}\`"
+            echo "- Script: \`scripts/server/debian/build-deb.sh\`"
+            echo "- Artifact: \`shortp2p-messengerserver-${{ inputs.channel }}-linux-amd64\`"
+            echo "- Expected file: \`shortp2p-messengerserver_${{ needs.version.outputs.version }}-1_amd64.deb\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -1,0 +1,5 @@
+shortp2p-messengerserver (0.1.0-1) unstable; urgency=medium
+
+  * Initial packaging of the standalone messenger server.
+
+ -- ShortP2P packagers <noreply@shortp2p.local>  Tue, 22 Sep 2026 00:00:00 +0000

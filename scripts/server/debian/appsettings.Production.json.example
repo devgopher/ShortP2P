@@ -1,0 +1,63 @@
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*",
+  "InMemoryCacheOptions": {
+    "MaxMemoryMegabytes": 512
+  },
+  "MessengerCache": {
+    "CacheEnabled": true,
+    "RepositoryEnabled": true,
+    "TimeToLive": "00:01:00",
+    "PollInterval": "00:00:10"
+  },
+  "MessengerInbox": {
+    "MaxPollTimeoutSeconds": 30,
+    "MessageRetention": "30.00:00:00"
+  },
+  // RAM-кеш не переживает перезапуск. Inbox/blobs на диске — только при Persistence:Enabled=true (Postgres).
+  "Persistence": {
+    "Enabled": false,
+    "ConnectionString": "Host=127.0.0.1;Port=5432;Database=shortp2p_messenger;Username=shortp2p;Password=CHANGE_ME",
+    "ApplyMigrationsOnStartup": true
+  },
+  "Auth": {
+    "Issuer": "ShortP2P.MessengerServer",
+    "Audience": "ShortP2P.Clients",
+    "SigningKey": "REPLACE_THIS_SIGNING_KEY_MIN_32_CHARS",
+    "TokenLifetime": "08:00:00",
+    "LiteDb": {
+      "ConnectionString": "Filename=/var/lib/shortp2p/data/messenger-auth.litedb;Connection=shared"
+    }
+  },
+  "HostPowers": {
+    "LiteDb": {
+      "ConnectionString": "Filename=/var/lib/shortp2p/data/messenger-host-powers.litedb;Connection=shared"
+    }
+  },
+  // SelfHost — адрес этой ноды, который видят клиенты. Замените 127.0.0.1 на публичный/LAN-адрес.
+  "Trust": {
+    "SelfHost": "127.0.0.1",
+    "SelfPort": 51111,
+    "LiteDb": {
+      "ConnectionString": "Filename=/var/lib/shortp2p/data/messenger-trust.litedb;Connection=shared"
+    }
+  },
+  "Kestrel": {
+    "Endpoints": {
+      "Https": {
+        "Url": "https://0.0.0.0:51111"
+        // Файловый TLS: стандартные ключи Kestrel (хост их пока явно не настраивает).
+        // Положите свой PFX/PEM в /etc/shortp2p/certs и раскомментируйте после доработки хоста.
+        // "Certificate": {
+        //   "Path": "/etc/shortp2p/certs/server.pfx",
+        //   "Password": "CHANGE_ME"
+        // }
+      }
+    }
+  }
+}
