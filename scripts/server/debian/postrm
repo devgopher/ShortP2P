@@ -1,0 +1,34 @@
+#!/bin/sh
+set -e
+
+CONF_DIR=/etc/shortp2p
+DATA_DIR=/var/lib/shortp2p
+
+case "$1" in
+    remove)
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+        fi
+        ;;
+    purge)
+        rm -f "$CONF_DIR/appsettings.Production.json"
+        rm -rf "$CONF_DIR/certs"
+        rm -rf "$DATA_DIR"
+        if [ -d "$CONF_DIR" ]; then
+            rmdir "$CONF_DIR" 2>/dev/null || true
+        fi
+        if getent passwd shortp2p >/dev/null; then
+            deluser --system shortp2p || true
+        fi
+        if getent group shortp2p >/dev/null; then
+            delgroup --system shortp2p || true
+        fi
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

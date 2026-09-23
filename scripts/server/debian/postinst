@@ -1,0 +1,52 @@
+#!/bin/sh
+set -e
+
+PACKAGE_SHARE=/usr/share/shortp2p-messengerserver
+OPT_DIR=/opt/shortp2p-messengerserver
+CONF_DIR=/etc/shortp2p
+DATA_DIR=/var/lib/shortp2p
+CONF_FILE=$CONF_DIR/appsettings.Production.json
+EXAMPLE=$PACKAGE_SHARE/appsettings.Production.json.example
+
+ensure_user() {
+    if ! getent group shortp2p >/dev/null; then
+        addgroup --system shortp2p
+    fi
+    if ! getent passwd shortp2p >/dev/null; then
+        adduser --system --ingroup shortp2p --home "$DATA_DIR" \
+            --no-create-home --gecos "ShortP2P Messenger Server" shortp2p
+    fi
+}
+
+ensure_dirs() {
+    mkdir -p "$DATA_DIR/data" "$CONF_DIR/certs"
+    if [ ! -f "$CONF_FILE" ] && [ -f "$EXAMPLE" ]; then
+        cp "$EXAMPLE" "$CONF_FILE"
+    fi
+    if [ -d "$OPT_DIR" ]; then
+        ln -sfn "$CONF_FILE" "$OPT_DIR/appsettings.Production.json"
+    fi
+
+    chown -R shortp2p:shortp2p "$DATA_DIR"
+    chown root:shortp2p "$CONF_DIR" "$CONF_DIR/certs" || true
+    chmod 755 "$CONF_DIR" "$CONF_DIR/certs" "$DATA_DIR" "$DATA_DIR/data"
+    if [ -f "$CONF_FILE" ]; then
+        chown root:shortp2p "$CONF_FILE"
+        chmod 640 "$CONF_FILE"
+    fi
+}
+
+ensure_user
+ensure_dirs
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    systemctl enable shortp2p-messengerserver.service || true
+    if [ "$1" = configure ]; then
+        systemctl restart shortp2p-messengerserver.service || true
+    fi
+fi
+
+#DEBHELPER#
+
+exit 0

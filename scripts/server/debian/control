@@ -1,0 +1,11 @@
+Package: shortp2p-messengerserver
+Version: 0.1.0-1
+Section: net
+Priority: optional
+Architecture: amd64
+Depends: libc6, libgcc-s1, libstdc++6, zlib1g
+Recommends: postgresql
+Maintainer: ShortP2P packagers <noreply@shortp2p.local>
+Description: ShortP2P messenger server (standalone Kestrel node)
+ Dedicated HTTPS messenger-server node. Postgres is optional
+ and is not required to install or start the service.

@@ -1,0 +1,41 @@
+# ShortP2P.MessengerServer.Api — pre-production channel.
+# Produces win-x64 Inno Setup installer + linux-amd64 .deb via scripts/server.
+name: "Server: preprod"
+
+on:
+  push:
+    branches:
+      - preprod
+      - staging
+    paths:
+      - 'src/Server/**'
+      - 'src/ShortP2P.TrustSystem/**'
+      - 'scripts/server/**'
+      - '.github/workflows/server-preprod.yml'
+      - '.github/workflows/server-pack.yml'
+      - 'global.json'
+      - 'Directory.Build.props'
+      - 'Directory.Build.targets'
+      - 'nuget.config'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Override package version (default VERSION + -preprod.<run_number>)
+        required: false
+        type: string
+
+concurrency:
+  group: server-preprod-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    uses: ./.github/workflows/server-pack.yml
+    with:
+      channel: preprod
+      version_suffix: preprod.${{ github.run_number }}
+      version_override: ${{ inputs.version || '' }}
+      artifact_retention_days: 30

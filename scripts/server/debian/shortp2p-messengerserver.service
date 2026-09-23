@@ -1,0 +1,21 @@
+[Unit]
+Description=ShortP2P Messenger Server
+Documentation=file:///opt/shortp2p-messengerserver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shortp2p
+Group=shortp2p
+WorkingDirectory=/opt/shortp2p-messengerserver
+ExecStart=/opt/shortp2p-messengerserver/ShortP2P.MessengerServer.Api
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

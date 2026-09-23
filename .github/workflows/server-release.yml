@@ -1,0 +1,35 @@
+# ShortP2P.MessengerServer.Api — release channel.
+# Produces win-x64 Inno Setup installer + linux-amd64 .deb via scripts/server.
+# Tag v1.2.3 / server-v1.2.3 becomes the package version; otherwise scripts/server/VERSION.
+name: "Server: release"
+
+on:
+  push:
+    # No path filters: a release tag must always pack, even if the tagged
+    # commit's diff does not touch src/Server.
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+      - 'server-v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Override package version (default tag or scripts/server/VERSION)
+        required: false
+        type: string
+
+concurrency:
+  group: server-release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    uses: ./.github/workflows/server-pack.yml
+    with:
+      channel: release
+      version_override: ${{ inputs.version || '' }}
+      artifact_retention_days: 90
