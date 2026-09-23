@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
+using Microsoft.Maui.Layouts;
 using ShortP2P.Client.Data;
 using ShortP2P.Client.Qr;
 using ShortP2P.Client.Services.MessengerServers;
@@ -35,78 +36,73 @@ public sealed class MessengerServersPage : ContentPage
         _list.ItemsSource = _rows;
         _list.ItemTemplate = new DataTemplate(() =>
         {
-            var url = new Label { FontSize = 16 };
+            var url = new Label { FontSize = 16, LineBreakMode = LineBreakMode.WordWrap };
             url.SetBinding(Label.TextProperty, nameof(MessengerServerRowVm.BaseUrl));
             url.Triggers.Add(LowRatingColorTrigger());
 
-            var meta = new Label { FontSize = 12, TextColor = Colors.Gray };
+            var meta = new Label { FontSize = 12, TextColor = Colors.Gray, LineBreakMode = LineBreakMode.WordWrap };
             meta.SetBinding(Label.TextProperty, nameof(MessengerServerRowVm.MetaLine));
             meta.Triggers.Add(LowRatingColorTrigger());
 
-            var active = new Switch();
+            var active = new Switch { VerticalOptions = LayoutOptions.Center };
             active.SetBinding(Switch.IsToggledProperty, new Binding(nameof(MessengerServerRowVm.Active),
                 BindingMode.OneWay));
             active.Toggled += OnActiveToggled;
 
-            var share = new Button
-            {
-                Text = "Поделиться",
-                Padding = new Thickness(10, 4)
-            };
+            var share = CreateRowActionButton("Поделиться");
             share.Clicked += OnShareClicked;
 
-            var recheck = new Button
-            {
-                Text = "Проверить",
-                Padding = new Thickness(10, 4)
-            };
+            var recheck = CreateRowActionButton("Проверить");
             recheck.Clicked += OnRecheckClicked;
 
-            var ask = new Button
-            {
-                Text = "Запросить серверы",
-                Padding = new Thickness(10, 4)
-            };
+            var ask = CreateRowActionButton("Запросить серверы");
             ask.SetBinding(VisualElement.IsVisibleProperty, nameof(MessengerServerRowVm.CanAskServers));
             ask.Clicked += OnAskServersClicked;
 
-            var delete = new Button
-            {
-                Text = "Удалить",
-                BackgroundColor = Colors.DarkRed,
-                TextColor = Colors.White,
-                Padding = new Thickness(10, 4)
-            };
+            var delete = CreateRowActionButton("Удалить");
+            delete.BackgroundColor = Colors.DarkRed;
+            delete.TextColor = Colors.White;
             delete.Clicked += OnDeleteClicked;
 
             var texts = new VerticalStackLayout
             {
                 Spacing = 2,
+                VerticalOptions = LayoutOptions.Center,
                 Children = { url, meta }
             };
 
-            return new Grid
+            var header = new Grid
             {
-                Padding = new Thickness(0, 8),
                 ColumnDefinitions =
                 {
                     new ColumnDefinition(GridLength.Star),
-                    new ColumnDefinition(GridLength.Auto),
-                    new ColumnDefinition(GridLength.Auto),
-                    new ColumnDefinition(GridLength.Auto),
-                    new ColumnDefinition(GridLength.Auto),
                     new ColumnDefinition(GridLength.Auto)
                 },
                 ColumnSpacing = 8,
                 Children =
                 {
                     texts,
-                    share.AtColumn(1),
-                    recheck.AtColumn(2),
-                    ask.AtColumn(3),
-                    active.AtColumn(4),
-                    delete.AtColumn(5)
+                    active.AtColumn(1)
                 }
+            };
+
+            var actions = new FlexLayout
+            {
+                Direction = FlexDirection.Row,
+                Wrap = FlexWrap.Wrap,
+                AlignItems = FlexAlignItems.Center,
+                JustifyContent = FlexJustify.Start
+            };
+            actions.Children.Add(share);
+            actions.Children.Add(recheck);
+            actions.Children.Add(ask);
+            actions.Children.Add(delete);
+
+            return new VerticalStackLayout
+            {
+                Padding = new Thickness(0, 8),
+                Spacing = 4,
+                Children = { header, actions }
             };
         });
 
@@ -154,6 +150,15 @@ public sealed class MessengerServersPage : ContentPage
         }, 0, 4);
         Content = root;
     }
+
+    private static Button CreateRowActionButton(string text) =>
+        new()
+        {
+            Text = text,
+            Padding = new Thickness(10, 4),
+            Margin = new Thickness(0, 0, 8, 8),
+            HorizontalOptions = LayoutOptions.Start
+        };
 
     private static DataTrigger LowRatingColorTrigger() =>
         new(typeof(Label))
