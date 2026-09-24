@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>$(NetCoreTargetFramework)</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>ShortP2P.MessengerServer.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="$(MicrosoftExtensionsHostingVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="$(MicrosoftExtensionsHostingVersion)" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ShortP2P.MessengerServer.Auth\ShortP2P.MessengerServer.Auth.csproj" />
+    <ProjectReference Include="..\ShortP2P.MessengerServer.Domain\ShortP2P.MessengerServer.Domain.csproj" />
+    <ProjectReference Include="..\ShortP2P.MessengerServer.Infrastructure\ShortP2P.MessengerServer.Infrastructure.csproj" />
+    <ProjectReference Include="..\ShortP2P.MessengerServer.UseCases\ShortP2P.MessengerServer.UseCases.csproj" />
+    <ProjectReference Include="..\..\ShortP2P.TrustSystem\ShortP2P.TrustSystem.csproj" />
+  </ItemGroup>
+
+</Project>
