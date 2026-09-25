@@ -2,7 +2,7 @@
   <PropertyGroup>
     <RootNamespace>ShortP2P.Crypto</RootNamespace>
     <AssemblyName>ShortP2P.Crypto</AssemblyName>
-    <Description>.NET Framework 4.8 build of ShortP2P.Crypto (shared sources).</Description>
+    <Description>.NET Framework 4.7.2 build of ShortP2P.Crypto (shared sources).</Description>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>

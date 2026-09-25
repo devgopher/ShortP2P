@@ -2,7 +2,7 @@
   <PropertyGroup>
     <RootNamespace>ShortP2P.Auth</RootNamespace>
     <AssemblyName>ShortP2P.Auth</AssemblyName>
-    <Description>.NET Framework 4.8 build of ShortP2P.Auth (shared sources).</Description>
+    <Description>.NET Framework 4.7.2 build of ShortP2P.Auth (shared sources).</Description>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>

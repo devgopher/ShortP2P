@@ -2,7 +2,7 @@
   <PropertyGroup>
     <RootNamespace>ShortP2P.MessengerServer.Http</RootNamespace>
     <AssemblyName>ShortP2P.MessengerServer.Http</AssemblyName>
-    <Description>.NET Framework 4.8 HTTPS client SDK (shared sources, no IHttpClientFactory extensions).</Description>
+    <Description>.NET Framework 4.7.2 HTTPS client SDK (shared sources, no IHttpClientFactory extensions).</Description>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
