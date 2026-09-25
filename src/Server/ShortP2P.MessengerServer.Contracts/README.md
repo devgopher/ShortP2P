@@ -38,13 +38,19 @@
 | `POST` | `/api/v1/bot_server_interaction/register` | Регистрация бота → выдача `BotKey` |
 | `POST` | `/api/v1/bot_server_interaction/login` | Авторизация бота по `BotKey` → JWT |
 | `POST` | `/api/v1/bot_server_interaction/remove` | Удаление бота по `networkId` + `BotKey` |
+| `POST` | `/api/v1/bot_data_flow/wait_for_income_messages` | Long-poll входящих сообщений боту (`botNetworkId` + `BotKey`) |
+| `POST` | `/api/v1/bot_data_flow/send_messages` | Отправка сообщений бота клиентам (`[{ networkId, encryptedMessageBase64 }]`) |
 
 `deviceId` — 64 lowercase hex (SHA-256 от install GUID). Даты — UTC. `encryptedDataBase64` — opaque.
 
 ## Боты (`/api/v1/bot_server_interaction`)
 
+**Транспорт:** взаимодействие бота с сервером — **только по HTTPS**. HTTP не допускается (`BotKey` и ciphertext нельзя передавать в открытом виде).
+
 `BotKey` — base64, ровно 64 символа; **строго секретный**, известен только серверу и боту.
-Не логировать и не передавать клиентам или третьим лицам.
+Назначение — **только авторизация бота на этом конкретном сервере**. Ключ не должен уходить
+никуда вне рамок взаимодействия бот↔этот сервер: не логировать, не отдавать клиентам,
+другим серверам, другим ботам или третьим лицам.
 
 **Обязанность бота:** хранить связки «сервер → `BotKey`» в безопасном хранилище.
 Для каждого сервера ключ **уникален**; один и тот же бот на разных серверах имеет разные `BotKey`.
@@ -78,6 +84,33 @@
 | Сервер → бот | `BotRemoveResponse` | `networkId`, `botKey` |
 
 После удаления бот должен удалить связку «сервер → `BotKey`» из своего хранилища.
+
+## Поток данных бота (`/api/v1/bot_data_flow`)
+
+Только **HTTPS** (как и вся bot↔server связь).
+
+### WaitForIncomeMessages (long-poll)
+
+Бот ждёт сообщения от клиентов. Авторизация в теле запроса (`BotKey`), без JWT.
+При отсутствии сообщений сервер держит соединение до `timeoutSeconds` (или своего max) и возвращает пустой список.
+
+| Сторона | DTO | Поля |
+|---------|-----|------|
+| Бот → сервер | `BotWaitForIncomeMessagesRequest` | `requestId`, `botNetworkId`, `botKey`, опционально `timeoutSeconds` |
+| Сервер → бот | `BotWaitForIncomeMessagesResponse` | `requestId`, `messages`: `[{ networkId, encryptedMessageBase64 }]` |
+
+`networkId` в каждом элементе — network id **клиента-отправителя**. `encryptedMessageBase64` — opaque ciphertext; сервер не расшифровывает.
+
+### SendMessages
+
+Бот отправляет зашифрованные сообщения клиентам. Авторизация так же в теле (`BotKey`), без JWT.
+
+| Сторона | DTO | Поля |
+|---------|-----|------|
+| Бот → сервер | `BotSendMessagesRequest` | `requestId`, `botNetworkId`, `botKey`, `messages`: `[{ networkId, encryptedMessageBase64 }]` |
+| Сервер → бот | `BotSendMessagesResponse` | `requestId` |
+
+`networkId` в каждом элементе — network id **клиента-получателя**.
 
 ## Сборка
 

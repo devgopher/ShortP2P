@@ -7,6 +7,7 @@ using ShortP2P.MessengerServer.Contracts.Dtos;
 namespace ShortP2P.MessengerServer.Api.Controllers;
 
 [ApiController]
+[RequireHttps]
 [Route($"{ApiRoutes.Prefix}/bot_server_interaction")]
 public sealed class BotServerInteractionController : ControllerBase
 {
