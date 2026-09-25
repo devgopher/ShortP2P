@@ -14,10 +14,4 @@ public sealed class BotRegisterRequest
 
     /// <summary>Bot description (max <see cref="BotLimits.MaxBotDescriptionLength"/> chars).</summary>
     public required string BotDescription { get; init; }
-
-    /// <summary>
-    /// Bot key: base64, exactly <see cref="BotLimits.BotKeyLength"/> characters.
-    /// <para><b>Secret:</b> known only to the server and the bot; must not be logged, relayed to clients, or shared otherwise.</para>
-    /// </summary>
-    public required string BotKey { get; init; }
 }

@@ -8,4 +8,11 @@ public sealed class BotLoginRequest
 
     /// <summary>Bot logical name (max <see cref="BotLimits.MaxBotNameLength"/> chars).</summary>
     public required string BotName { get; init; }
+
+    /// <summary>
+    /// Bot key: base64, exactly <see cref="BotLimits.BotKeyLength"/> characters.
+    /// Issued by the server on registration; known only to the server and the bot.
+    /// <para><b>Secret:</b> must not be logged, relayed to clients, or shared otherwise.</para>
+    /// </summary>
+    public required string BotKey { get; init; }
 }

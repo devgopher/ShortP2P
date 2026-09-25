@@ -16,7 +16,8 @@ public sealed class BotRegisterResponse
     public required string BotDescription { get; init; }
 
     /// <summary>
-    /// Bot key: base64, exactly <see cref="BotLimits.BotKeyLength"/> characters.
+    /// Server-generated bot key: base64, exactly <see cref="BotLimits.BotKeyLength"/> characters.
+    /// Returned once on registration; required later for <see cref="BotLoginRequest"/>.
     /// <para><b>Secret:</b> known only to the server and the bot; must not be logged, relayed to clients, or shared otherwise.</para>
     /// </summary>
     public required string BotKey { get; init; }

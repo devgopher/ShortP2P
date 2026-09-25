@@ -35,10 +35,49 @@
 | `GET` | `/api/v1/trust/ask-rating` | Сообщить о сервере (создаётся с рейтингом 0.8) и получить список рейтингов |
 | `GET` | `/api/v1/trust/ask-servers` | Список серверов с рейтингом ≥ **0.3** |
 | `POST` | `/api/v1/trust/claim` | Жалоба на другой сервер (`UNAVAILABLE` / `MALFUNCTIONED` / `WRONGCERT`) |
+| `POST` | `/api/v1/bot_server_interaction/register` | Регистрация бота → выдача `BotKey` |
+| `POST` | `/api/v1/bot_server_interaction/login` | Авторизация бота по `BotKey` → JWT |
+| `POST` | `/api/v1/bot_server_interaction/remove` | Удаление бота по `networkId` + `BotKey` |
 
 `deviceId` — 64 lowercase hex (SHA-256 от install GUID). Даты — UTC. `encryptedDataBase64` — opaque.
 
-`BotKey` — base64, exactly 64 characters; **strictly secret**, known only to the server and the bot. Do not log it or expose it to clients or third parties.
+## Боты (`/api/v1/bot_server_interaction`)
+
+`BotKey` — base64, ровно 64 символа; **строго секретный**, известен только серверу и боту.
+Не логировать и не передавать клиентам или третьим лицам.
+
+**Обязанность бота:** хранить связки «сервер → `BotKey`» в безопасном хранилище.
+Для каждого сервера ключ **уникален**; один и тот же бот на разных серверах имеет разные `BotKey`.
+Потеря ключа = потеря доступа к этому серверу (нужна повторная регистрация, если сервер это допускает).
+
+### Регистрация
+
+Сервер генерирует `BotKey` и отдаёт его боту **один раз** в ответе.
+
+| Сторона | DTO | Поля |
+|---------|-----|------|
+| Бот → сервер | `BotRegisterRequest` | `networkId`, `botName` (≤256), `botReadableName` (≤100), `botDescription` (≤500) |
+| Сервер → бот | `BotRegisterResponse` | те же поля + сгенерированный `botKey` |
+
+После успешной регистрации бот **обязан** сохранить полученный `botKey` в привязке к этому серверу **в безопасном хранилище**.
+
+### Авторизация
+
+Бот предъявляет ранее выданный `BotKey` вместе с идентификаторами.
+
+| Сторона | DTO | Поля |
+|---------|-----|------|
+| Бот → сервер | `BotLoginRequest` | `networkId`, `botName`, `botKey` |
+| Сервер → бот | `BotLoginResponse` | `token` (JWT), `expiresAtUtc` |
+
+### Удаление
+
+| Сторона | DTO | Поля |
+|---------|-----|------|
+| Бот → сервер | `BotRemoveRequest` | `networkId`, `botKey` |
+| Сервер → бот | `BotRemoveResponse` | `networkId`, `botKey` |
+
+После удаления бот должен удалить связку «сервер → `BotKey`» из своего хранилища.
 
 ## Сборка
 
