@@ -2,7 +2,7 @@
   <PropertyGroup>
     <RootNamespace>ShortP2P.Client</RootNamespace>
     <AssemblyName>ShortP2P.Client</AssemblyName>
-    <Description>.NET Framework 4.8 client: messenger servers, LAN UDP scan, QR from image (no BLE).</Description>
+    <Description>.NET Framework 4.7.2 client: messenger servers, LAN UDP scan, QR from image (no BLE).</Description>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>

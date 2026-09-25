@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 
 namespace ShortP2P;
 
-/// <summary>BCL-neutral argument checks (net48 does not have ArgumentNullException.ThrowIfNull).</summary>
+/// <summary>BCL-neutral argument checks (net472 does not have ArgumentNullException.ThrowIfNull).</summary>
 internal static class Require
 {
     public static void NotNull(
