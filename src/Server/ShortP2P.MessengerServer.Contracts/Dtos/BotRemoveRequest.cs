@@ -1,0 +1,14 @@
+namespace ShortP2P.MessengerServer.Contracts.Dtos;
+
+/// <summary>Bot removal payload.</summary>
+public sealed class BotRemoveRequest
+{
+    /// <summary>Short network id (base64url, ~16 chars).</summary>
+    public required string NetworkId { get; init; }
+
+    /// <summary>
+    /// Bot key: base64, exactly <see cref="BotLimits.BotKeyLength"/> characters.
+    /// <para><b>Secret:</b> known only to the server and the bot; must not be logged, relayed to clients, or shared otherwise.</para>
+    /// </summary>
+    public required string BotKey { get; init; }
+}

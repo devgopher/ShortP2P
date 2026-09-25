@@ -38,6 +38,8 @@
 
 `deviceId` — 64 lowercase hex (SHA-256 от install GUID). Даты — UTC. `encryptedDataBase64` — opaque.
 
+`BotKey` — base64, exactly 64 characters; **strictly secret**, known only to the server and the bot. Do not log it or expose it to clients or third parties.
+
 ## Сборка
 
 ```bash
