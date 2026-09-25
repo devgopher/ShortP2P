@@ -14,4 +14,5 @@ services.AddAuth(configuration)
 | `AuthOptions.Section` | секция `Auth` в appsettings |
 | `CryptoPasswordHasher` | `IPasswordHasher` |
 | `JwtAuthTokenService` | `IAuthTokenService` |
+| `BotKeyGenerator` | `IBotKeyGenerator` (секретный ключ бота для конкретного сервера) |
 | `AuthBuilder` | продолжение DI для persistence |

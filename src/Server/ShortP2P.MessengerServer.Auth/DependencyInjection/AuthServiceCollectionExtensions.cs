@@ -29,6 +29,7 @@ public static class AuthServiceCollectionExtensions
 
         services.AddSingleton<IPasswordHasher, CryptoPasswordHasher>();
         services.AddSingleton<IAuthTokenService, JwtAuthTokenService>();
+        services.AddSingleton<IBotKeyGenerator, BotKeyGenerator>();
 
         services
             .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

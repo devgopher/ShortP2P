@@ -1,25 +1,22 @@
-using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ShortP2P.MessengerServer.Contracts;
 using ShortP2P.MessengerServer.Contracts.Dtos;
+using ShortP2P.MessengerServer.UseCases.Abstractions;
 
 namespace ShortP2P.MessengerServer.Api.Controllers;
 
 [ApiController]
 [RequireHttps]
 [Route($"{ApiRoutes.Prefix}/bot_server_interaction")]
-public sealed class BotServerInteractionController : ControllerBase
+public sealed class BotServerInteractionController(IBotKeyGenerator botKeyGenerator) : ControllerBase
 {
-    /// <summary>Bytes needed so that base64 encoding yields exactly <see cref="BotLimits.BotKeyLength"/> characters.</summary>
-    private const int BotKeyByteLength = 48;
-
     [HttpPost("register")]
     [AllowAnonymous]
     public IActionResult Register([FromBody] BotRegisterRequest request)
     {
-        // Mock: generate BotKey; persistence / validation TBD.
-        var botKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(BotKeyByteLength));
+        // Mock: persistence / validation TBD.
+        var botKey = botKeyGenerator.Generate();
 
         return StatusCode(StatusCodes.Status201Created, new BotRegisterResponse
         {

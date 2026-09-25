@@ -10,7 +10,7 @@ public static class BotLimits
     public const int MaxBotDescriptionLength = 500;
 
     /// <summary>
-    /// Exact length of bot key (base64).
+    /// Exact length of bot key (base64). Must match <c>BotKeyGenerator.KeyBase64Length</c>.
     /// <para><b>Secret:</b> shared only between the server and the bot; never expose to clients or third parties.</para>
     /// </summary>
     public const int BotKeyLength = 64;
