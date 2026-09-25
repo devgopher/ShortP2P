@@ -5,7 +5,7 @@ using Org.BouncyCastle.Crypto.Parameters;
 
 namespace System.Security.Cryptography;
 
-/// <summary>AES-GCM polyfill for net48 (same envelope as .NET AesGcm).</summary>
+/// <summary>AES-GCM polyfill for net472 (same envelope as .NET AesGcm).</summary>
 internal sealed class AesGcm : IDisposable
 {
     private readonly byte[] _key;

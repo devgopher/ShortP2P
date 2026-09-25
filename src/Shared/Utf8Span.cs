@@ -2,7 +2,7 @@ using System.Text;
 
 namespace ShortP2P;
 
-/// <summary>UTF-8 decode that works on net48 (no GetString(ReadOnlySpan&lt;byte&gt;)).</summary>
+/// <summary>UTF-8 decode that works on net472 (no GetString(ReadOnlySpan&lt;byte&gt;)).</summary>
 internal static class Utf8Span
 {
     public static string GetString(ReadOnlySpan<byte> span)

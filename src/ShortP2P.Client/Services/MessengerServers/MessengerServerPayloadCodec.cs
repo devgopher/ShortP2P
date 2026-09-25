@@ -128,7 +128,7 @@ public static class MessengerServerPayloadCodec
     }
 
     /// <summary>
-    /// net48 <see cref="RSA.Create()"/> returns <c>RSACryptoServiceProvider</c>, which rejects
+    /// net472 <see cref="RSA.Create()"/> returns <c>RSACryptoServiceProvider</c>, which rejects
     /// <see cref="RSAEncryptionPadding.OaepSHA256"/>. Use CNG so server envelopes match net10.
     /// </summary>
     private static RSA CreateRsa()

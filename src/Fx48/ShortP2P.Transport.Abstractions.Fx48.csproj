@@ -2,7 +2,7 @@
   <PropertyGroup>
     <RootNamespace>ShortP2P.Transport.Abstractions</RootNamespace>
     <AssemblyName>ShortP2P.Transport.Abstractions</AssemblyName>
-    <Description>.NET Framework 4.8 transport abstractions (ITransport + address types; BLE interfaces only).</Description>
+    <Description>.NET Framework 4.7.2 transport abstractions (ITransport + address types; BLE interfaces only).</Description>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
