@@ -6,9 +6,9 @@ namespace ShortP2P.TrustSystem;
 /// </summary>
 public sealed class TrustEngine(ITrustStore store, ITrustClock clock, TrustOptions options)
 {
-    private readonly ITrustStore _store = store ?? throw new global::System.ArgumentNullException(nameof(store));
-    private readonly ITrustClock _clock = clock ?? throw new global::System.ArgumentNullException(nameof(clock));
-    private readonly TrustOptions _options = options ?? throw new global::System.ArgumentNullException(nameof(options));
+    private readonly ITrustStore _store = store ?? throw new ArgumentNullException(nameof(store));
+    private readonly ITrustClock _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+    private readonly TrustOptions _options = options ?? throw new ArgumentNullException(nameof(options));
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public async Task<IReadOnlyList<RatedServer>> AskRatingAsync(

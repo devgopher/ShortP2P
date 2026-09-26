@@ -14,7 +14,7 @@ public sealed class BotKeyGenerator : IBotKeyGenerator
         if (length < 1)
             throw new ArgumentOutOfRangeException(nameof(length), "Must be positive.");
 
-        var keyByteLength = length * 3 / 4; // 48
+        var keyByteLength = length * 3 / 4;
         var key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(keyByteLength));
 
         return key.Length != length

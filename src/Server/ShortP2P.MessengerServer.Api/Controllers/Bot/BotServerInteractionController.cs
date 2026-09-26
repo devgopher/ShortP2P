@@ -4,7 +4,7 @@ using ShortP2P.MessengerServer.Contracts;
 using ShortP2P.MessengerServer.Contracts.Dtos;
 using ShortP2P.MessengerServer.UseCases.Abstractions;
 
-namespace ShortP2P.MessengerServer.Api.Controllers;
+namespace ShortP2P.MessengerServer.Api.Controllers.Bot;
 
 [ApiController]
 [RequireHttps]

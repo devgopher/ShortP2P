@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using ShortP2P.MessengerServer.Contracts;
 using ShortP2P.MessengerServer.Contracts.Dtos;
 
-namespace ShortP2P.MessengerServer.Api.Controllers;
+namespace ShortP2P.MessengerServer.Api.Controllers.Bot;
 
 [ApiController]
 [RequireHttps]
